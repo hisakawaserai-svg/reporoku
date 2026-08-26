@@ -1,0 +1,105 @@
+import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+
+type Row = { icon: keyof typeof Ionicons.glyphMap; label: string; value?: string };
+type Section = { title: string; rows: Row[] };
+
+const SECTIONS: Section[] = [
+  {
+    title: "再生",
+    rows: [{ icon: "play-outline", label: "再生開始位置(lead)", value: "1.2秒" }],
+  },
+  {
+    title: "録音",
+    rows: [
+      { icon: "mic-outline", label: "音声の品質 / サンプルレート", value: "標準" },
+      { icon: "bluetooth-outline", label: "外部マイクを使う", value: "オフ" },
+    ],
+  },
+  {
+    title: "ストレージ管理",
+    rows: [
+      { icon: "server-outline", label: "総使用容量", value: "—" },
+      { icon: "list-outline", label: "ノートごとの容量一覧" },
+      { icon: "trash-outline", label: "音声データのみ削除" },
+    ],
+  },
+  {
+    title: "バックアップ",
+    rows: [{ icon: "share-outline", label: "zipで書き出す" }],
+  },
+  {
+    title: "アプリ情報",
+    rows: [
+      { icon: "language-outline", label: "言語", value: "日本語" },
+      { icon: "document-text-outline", label: "利用規約" },
+      { icon: "shield-checkmark-outline", label: "プライバシーポリシー" },
+      { icon: "code-slash-outline", label: "オープンソースライセンス" },
+      { icon: "mail-outline", label: "お問い合わせ" },
+    ],
+  },
+];
+
+export default function SettingsScreen() {
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>設定</Text>
+        {SECTIONS.map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionHeader}>{section.title}</Text>
+            <View style={styles.card}>
+              {section.rows.map((row, i) => (
+                <TouchableOpacity
+                  key={row.label}
+                  style={[
+                    styles.row,
+                    i < section.rows.length - 1 && styles.rowDivider,
+                  ]}
+                >
+                  <Ionicons name={row.icon} size={20} color="#06c" style={styles.rowIcon} />
+                  <Text style={styles.rowLabel}>{row.label}</Text>
+                  {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
+                  <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#f2f2f7" },
+  content: { paddingBottom: 40 },
+  title: { fontSize: 28, fontWeight: "700", marginHorizontal: 16, marginTop: 12, marginBottom: 8 },
+  section: { marginTop: 20 },
+  sectionHeader: {
+    fontSize: 13,
+    color: "#8e8e93",
+    marginHorizontal: 16,
+    marginBottom: 6,
+    textTransform: "uppercase",
+  },
+  card: {
+    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  rowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#c6c6c8",
+  },
+  rowIcon: { marginRight: 10 },
+  rowLabel: { flex: 1, fontSize: 16 },
+  rowValue: { fontSize: 15, color: "#8e8e93", marginRight: 6 },
+});
