@@ -38,7 +38,8 @@
           "speechRecognitionPermission": "録音した内容を文字起こしするために使用します"
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-sqlite"
     ]
   }
 }
