@@ -791,18 +791,24 @@ export default function NoteDetailScreen() {
       ].filter(Boolean) as MenuItem[])
     : [];
 
-  // プレビュー用の吹き出しは持たず、対象ブロック自体をハイライトすることで
-  // 「今どのブロックへの操作か」を示す(そのぶんメニューの専有面積を小さくできる)
+  // Modalの暗いオーバーレイは画面全体の上に重なるため、対象ブロックの実際の背景色を
+  // 変えるだけでは暗幕越しに見えてしまいハイライトに見えない。そこで、実測した位置・
+  // サイズぴったりに「明るい複製」をオーバーレイの上に重ねて表示し、ブロック自体が
+  // 浮き上がって見えるようにする(プレビュー用に余分な余白は足さない)
   const MENU_ITEM_HEIGHT = 44;
-  const MENU_GAP = 6;
+  const MENU_GAP = 10;
+  const MENU_WIDTH = 230;
   let menuListTop = 0;
+  let menuLeft = 0;
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
+    const windowWidth = Dimensions.get("window").width;
     const menuHeight = menuItems.length * MENU_ITEM_HEIGHT;
     const showBelow = menuAnchor.y < windowHeight * 0.55;
     menuListTop = showBelow
       ? menuAnchor.y + menuAnchor.height + MENU_GAP
       : menuAnchor.y - MENU_GAP - menuHeight;
+    menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
   }
 
   return (
@@ -1056,20 +1062,38 @@ export default function NoteDetailScreen() {
       <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
         <Pressable style={styles.menuOverlay} onPress={closeBlockMenu}>
           {menuAnchor && menuBlock ? (
-            <View
-              style={[styles.menuList, { top: menuListTop, left: menuAnchor.x, width: menuAnchor.width }]}
-            >
-              {menuItems.map((item, index) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
-                  onPress={item.onPress}
-                >
-                  <Text style={styles.menuItemText}>{item.label}</Text>
-                  <Ionicons name={item.icon} size={18} color={item.color} />
-                </TouchableOpacity>
-              ))}
-            </View>
+            <>
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.menuHighlight,
+                  {
+                    top: menuAnchor.y,
+                    left: menuAnchor.x,
+                    width: menuAnchor.width,
+                    height: menuAnchor.height,
+                  },
+                ]}
+              >
+                <Text style={styles.timelineText} numberOfLines={4}>
+                  {menuBlock.kind === "photo"
+                    ? menuBlock.text || "SLIDE"
+                    : menuBlock.text || "タップしてメモを追加"}
+                </Text>
+              </View>
+              <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
+                {menuItems.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Ionicons name={item.icon} size={18} color={item.color} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
           ) : null}
         </Pressable>
       </Modal>
@@ -1256,9 +1280,21 @@ const styles = StyleSheet.create({
 
   debugOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
 
-  // 長押しメニュー(iOSネイティブ風): 対象ブロック自体をハイライトすることでプレビュー代わりとし、
-  // その近くに項目リストだけを吹き出し表示する(プレビュー用の別枠は持たない)
+  // 長押しメニュー(iOSネイティブ風): 暗幕の上に、実測した位置・サイズぴったりの
+  // 明るい複製を重ねてハイライトとし、その近くに項目リストを吹き出し表示する
   menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
+  menuHighlight: {
+    position: "absolute",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   menuList: {
     position: "absolute",
     backgroundColor: "#fff",
