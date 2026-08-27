@@ -163,7 +163,7 @@ export default function NoteDetailScreen() {
   const timelineScrollRef = useRef<ScrollView>(null);
   const blockLayoutYRef = useRef<Map<string, number>>(new Map());
   // 長押しメニューの位置決めのため、各ブロックの本文Viewの参照を保持する
-  const blockBodyRefs = useRef<Map<string, View>>(new Map());
+  const blockRowRefs = useRef<Map<string, View>>(new Map());
   // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
   // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
   const menuHighlightScale = useRef(new Animated.Value(1)).current;
@@ -315,7 +315,7 @@ export default function NoteDetailScreen() {
   // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する
   const openBlockMenu = (block: Block) => {
     if (editingBlockId || splittingBlockId) return;
-    const node = blockBodyRefs.current.get(block.id);
+    const node = blockRowRefs.current.get(block.id);
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
       setMenuAnchor({ blockId: block.id, x, y, width, height });
@@ -725,6 +725,7 @@ export default function NoteDetailScreen() {
   // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
   const menuBlockId = menuAnchor?.blockId ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
+  const menuBlockMeta = menuBlock ? kindMeta(menuBlock) : null;
   const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
   const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
   const menuNextBlock =
@@ -922,6 +923,10 @@ export default function NoteDetailScreen() {
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
                     onLongPress={() => openBlockMenu(block)}
+                    ref={(node) => {
+                      if (node) blockRowRefs.current.set(block.id, node);
+                      else blockRowRefs.current.delete(block.id);
+                    }}
                     onLayout={(e) => {
                       blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
                       if (
@@ -946,13 +951,7 @@ export default function NoteDetailScreen() {
                       </View>
                       {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
                     </View>
-                    <View
-                      style={styles.timelineBody}
-                      ref={(node) => {
-                        if (node) blockBodyRefs.current.set(block.id, node);
-                        else blockBodyRefs.current.delete(block.id);
-                      }}
-                    >
+                    <View style={styles.timelineBody}>
                       <View style={styles.timelineMetaRow}>
                         <Text style={[styles.timelineTime, { color: meta.color }]}>
                           {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
@@ -1087,11 +1086,48 @@ export default function NoteDetailScreen() {
                   },
                 ]}
               >
-                <Text style={styles.timelineText} numberOfLines={4}>
-                  {menuBlock.kind === "photo"
-                    ? menuBlock.text || "SLIDE"
-                    : menuBlock.text || "タップしてメモを追加"}
-                </Text>
+                <View style={styles.timelineDotCol}>
+                  <View style={styles.timelineDotWrap}>
+                    {menuBlockMeta?.icon ? (
+                      <Ionicons name={menuBlockMeta.icon} size={14} color={menuBlockMeta.color} />
+                    ) : (
+                      <View style={[styles.timelineDot, { backgroundColor: menuBlockMeta?.color }]} />
+                    )}
+                  </View>
+                </View>
+                <View style={styles.timelineBody}>
+                  <View style={styles.timelineMetaRow}>
+                    <Text style={[styles.timelineTime, { color: menuBlockMeta?.color }]}>
+                      {session
+                        ? formatHHMM(session.startedAt + menuBlock.startMs)
+                        : fmt(menuBlock.startMs)}
+                      {menuBlockMeta?.label ? ` ・ ${menuBlockMeta.label}` : ""}
+                    </Text>
+                    {menuBlock.isEdited ? (
+                      <View style={styles.editedBadge}>
+                        <Ionicons name="pencil" size={10} color="#8e8e93" />
+                        <Text style={styles.editedBadgeText}>編集済み</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {menuBlock.kind === "photo" ? (
+                    menuBlock.photoUri ? (
+                      <Image source={{ uri: menuBlock.photoUri }} style={styles.timelinePhoto} />
+                    ) : (
+                      <View style={styles.timelinePhotoPlaceholder}>
+                        <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
+                      </View>
+                    )
+                  ) : null}
+                  <Text style={styles.timelineText} numberOfLines={4}>
+                    {menuBlock.text || "タップしてメモを追加"}
+                  </Text>
+                  {menuBlock.isQuestion && menuBlock.questionTerm ? (
+                    <Text style={styles.questionTermText}>
+                      わからなかった単語: {menuBlock.questionTerm}
+                    </Text>
+                  ) : null}
+                </View>
               </Animated.View>
               <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
                 {menuItems.map((item, index) => (
@@ -1297,10 +1333,12 @@ const styles = StyleSheet.create({
   menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
   menuHighlight: {
     position: "absolute",
+    flexDirection: "row",
+    alignItems: "stretch",
     backgroundColor: "#fff",
     borderRadius: 12,
-    paddingHorizontal: 10,
-    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
