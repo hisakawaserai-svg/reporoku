@@ -552,6 +552,31 @@ export default function NoteDetailScreen() {
     [sessionId, startMsAfter, loadBlocks]
   );
 
+  // 写真未設定(プレースホルダー表示)のphotoブロックに、タップで写真を撮って添付する
+  const attachPhotoToBlock = useCallback(
+    async (block: Block) => {
+      try {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) return;
+        const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        let photoUri = result.assets[0].uri;
+        try {
+          photoUri = await persistPhotoFile(photoUri, sessionId);
+        } catch (copyErr) {
+          console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+        }
+
+        await blocksRepo.setPhotoUri(block.id, photoUri);
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] 写真の添付に失敗しました", e);
+      }
+    },
+    [sessionId, loadBlocks]
+  );
+
   const confirmDeleteBlock = useCallback(
     (block: Block) => {
       setMenuAnchor(null);
@@ -853,16 +878,24 @@ export default function NoteDetailScreen() {
   const MENU_ITEM_HEIGHT = 44;
   const MENU_GAP = 10;
   const MENU_WIDTH = 230;
+  const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
   let menuListTop = 0;
   let menuLeft = 0;
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
     const menuHeight = menuItems.length * MENU_ITEM_HEIGHT;
-    const showBelow = menuAnchor.y < windowHeight * 0.55;
+    // 項目数によってメニューの高さが変わるため、上下どちらに実際に収まる余白が
+    // あるかで表示方向を決め、それでも収まりきらない場合は画面内に収まるよう位置を補正する
+    const spaceBelow = windowHeight - (menuAnchor.y + menuAnchor.height) - MENU_GAP;
+    const spaceAbove = menuAnchor.y - MENU_GAP;
+    const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
     menuListTop = showBelow
       ? menuAnchor.y + menuAnchor.height + MENU_GAP
       : menuAnchor.y - MENU_GAP - menuHeight;
+    const minTop = MENU_SCREEN_MARGIN;
+    const maxTop = windowHeight - menuHeight - MENU_SCREEN_MARGIN;
+    menuListTop = Math.max(minTop, Math.min(menuListTop, maxTop));
     menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
   }
 
@@ -1021,9 +1054,14 @@ export default function NoteDetailScreen() {
                             <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
                           </TouchableOpacity>
                         ) : (
-                          <View style={styles.timelinePhotoPlaceholder}>
-                            <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
-                          </View>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            style={styles.timelinePhotoPlaceholder}
+                            onPress={() => attachPhotoToBlock(block)}
+                            onLongPress={() => openBlockMenu(block)}
+                          >
+                            <Text style={styles.timelinePhotoLabel}>タップして写真を撮る</Text>
+                          </TouchableOpacity>
                         )
                       ) : null}
                       {splittingBlockId === block.id ? (

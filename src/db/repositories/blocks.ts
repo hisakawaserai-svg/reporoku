@@ -134,6 +134,12 @@ export async function remove(id: string): Promise<void> {
   await db.runAsync('DELETE FROM blocks WHERE id = ?;', [id]);
 }
 
+// 写真が未設定のphotoブロック(プレースホルダー表示)に、後から写真を添付する
+export async function setPhotoUri(id: string, photoUri: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE blocks SET photo_uri = ? WHERE id = ?;', [toStorableUri(photoUri), id]);
+}
+
 export interface MergeFlags {
   isStarred: boolean;
   isTodo: boolean;
