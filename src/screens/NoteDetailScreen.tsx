@@ -42,7 +42,7 @@ const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; t
   { key: "todo", label: "✓", bg: "#e0f7e6", tint: "#1f9254" },
   { key: "question", label: "?", bg: "#f2e8fc", tint: "#7c4dff" },
   { key: "photo", icon: "camera-outline", bg: "#eef1f4", tint: "#57575c" },
-  { key: "note", icon: "create-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
+  { key: "note", icon: "document-text-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
 
 const LEAD_SEC = 1.2;
@@ -792,7 +792,7 @@ export default function NoteDetailScreen() {
         {
           key: "memo",
           label: "メモを追加",
-          icon: "create-outline" as IconName,
+          icon: "document-text-outline" as IconName,
           color: "#8e8e93",
           onPress: () => startMemoPrompt(menuBlock),
         },
