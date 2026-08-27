@@ -21,6 +21,7 @@ import type { RouteProp } from "@react-navigation/native";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import * as ImagePicker from "expo-image-picker";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as blocksRepo from "../db/repositories/blocks";
@@ -29,6 +30,7 @@ import * as sessionsRepo from "../db/repositories/sessions";
 import type { AudioFile, Block, Session } from "../db/types";
 import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
+import { persistPhotoFile } from "../utils/files";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo";
 
@@ -138,6 +140,12 @@ export default function NoteDetailScreen() {
   // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
   const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
   const [splitIndex, setSplitIndex] = useState(0);
+  // 「質問にする」で単語を入力してもらうためのプロンプト(対象ブロックID)
+  const [questionPromptBlockId, setQuestionPromptBlockId] = useState<string | null>(null);
+  const [questionPromptDraft, setQuestionPromptDraft] = useState("");
+  // 「メモを追加」で本文を入力してもらうためのプロンプト(挿入位置の基準となるブロックID)
+  const [memoPromptAfterBlockId, setMemoPromptAfterBlockId] = useState<string | null>(null);
+  const [memoPromptDraft, setMemoPromptDraft] = useState("");
 
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
@@ -368,6 +376,144 @@ export default function NoteDetailScreen() {
       }
     },
     [blocks, loadBlocks]
+  );
+
+  // 指定ブロックの直後・次のブロックとの間の秒数(次が無ければ+1ms)を新規ブロックの挿入位置とする
+  const startMsAfter = useCallback(
+    (block: Block): number => {
+      const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
+      const next = sorted.find((b) => b.startMs > block.startMs);
+      return next ? Math.round((block.startMs + next.startMs) / 2) : block.startMs + 1;
+    },
+    [blocks]
+  );
+
+  const toggleBlockStar = useCallback(
+    async (block: Block) => {
+      setMenuBlockId(null);
+      try {
+        await blocksRepo.toggleStar(block.id);
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] ★の切り替えに失敗しました", e);
+      }
+    },
+    [loadBlocks]
+  );
+
+  const toggleBlockTodo = useCallback(
+    async (block: Block) => {
+      setMenuBlockId(null);
+      try {
+        await blocksRepo.toggleTodo(block.id);
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] ToDoの切り替えに失敗しました", e);
+      }
+    },
+    [loadBlocks]
+  );
+
+  const startQuestionPrompt = (block: Block) => {
+    setMenuBlockId(null);
+    setQuestionPromptBlockId(block.id);
+    setQuestionPromptDraft("");
+  };
+
+  const cancelQuestionPrompt = () => {
+    setQuestionPromptBlockId(null);
+    setQuestionPromptDraft("");
+  };
+
+  const confirmQuestionPrompt = useCallback(async () => {
+    const id = questionPromptBlockId;
+    const term = questionPromptDraft.trim();
+    setQuestionPromptBlockId(null);
+    setQuestionPromptDraft("");
+    if (!id) return;
+    try {
+      await blocksRepo.setQuestion(id, true, term || null);
+      loadBlocks();
+    } catch (e) {
+      console.warn("[DB] 質問マークの設定に失敗しました", e);
+    }
+  }, [questionPromptBlockId, questionPromptDraft, loadBlocks]);
+
+  const clearBlockQuestion = useCallback(
+    async (block: Block) => {
+      setMenuBlockId(null);
+      try {
+        await blocksRepo.setQuestion(block.id, false, null);
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] 質問マークの解除に失敗しました", e);
+      }
+    },
+    [loadBlocks]
+  );
+
+  const startMemoPrompt = (block: Block) => {
+    setMenuBlockId(null);
+    setMemoPromptAfterBlockId(block.id);
+    setMemoPromptDraft("");
+  };
+
+  const cancelMemoPrompt = () => {
+    setMemoPromptAfterBlockId(null);
+    setMemoPromptDraft("");
+  };
+
+  const confirmMemoPrompt = useCallback(async () => {
+    const afterId = memoPromptAfterBlockId;
+    const text = memoPromptDraft.trim();
+    setMemoPromptAfterBlockId(null);
+    setMemoPromptDraft("");
+    if (!afterId || !text) return;
+    const afterBlock = blocks.find((b) => b.id === afterId);
+    if (!afterBlock) return;
+    try {
+      await blocksRepo.create({
+        id: genId(),
+        sessionId,
+        kind: "note",
+        startMs: startMsAfter(afterBlock),
+        text,
+      });
+      loadBlocks();
+    } catch (e) {
+      console.warn("[DB] メモの追加に失敗しました", e);
+    }
+  }, [memoPromptAfterBlockId, memoPromptDraft, blocks, sessionId, startMsAfter, loadBlocks]);
+
+  const addPhotoAfter = useCallback(
+    async (block: Block) => {
+      setMenuBlockId(null);
+      try {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) return;
+        const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+
+        let photoUri = result.assets[0].uri;
+        try {
+          photoUri = await persistPhotoFile(photoUri, sessionId);
+        } catch (copyErr) {
+          console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+        }
+
+        await blocksRepo.create({
+          id: genId(),
+          sessionId,
+          kind: "photo",
+          startMs: startMsAfter(block),
+          photoUri,
+        });
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] 写真ブロックの追加に失敗しました", e);
+      }
+    },
+    [sessionId, startMsAfter, loadBlocks]
   );
 
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
@@ -659,6 +805,7 @@ export default function NoteDetailScreen() {
                       block.id === jumpToBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
                       block.id === splittingBlockId && styles.timelineRowEditing,
+                      block.id === menuBlockId && styles.timelineRowEditing,
                     ]}
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
@@ -808,6 +955,42 @@ export default function NoteDetailScreen() {
       <Modal visible={menuBlockId !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
         <Pressable style={styles.debugOverlay} onPress={closeBlockMenu}>
           <Pressable style={styles.actionSheetPanel} onPress={(e) => e.stopPropagation()}>
+            {menuBlock ? (
+              <TouchableOpacity style={styles.actionSheetItem} onPress={() => toggleBlockStar(menuBlock)}>
+                <Text style={styles.actionSheetItemText}>
+                  {menuBlock.isStarred ? "★を外す" : "★を付ける"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock ? (
+              <TouchableOpacity style={styles.actionSheetItem} onPress={() => toggleBlockTodo(menuBlock)}>
+                <Text style={styles.actionSheetItemText}>
+                  {menuBlock.isTodo ? "ToDoを解除" : "ToDoにする"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock ? (
+              <TouchableOpacity
+                style={styles.actionSheetItem}
+                onPress={() =>
+                  menuBlock.isQuestion ? clearBlockQuestion(menuBlock) : startQuestionPrompt(menuBlock)
+                }
+              >
+                <Text style={styles.actionSheetItemText}>
+                  {menuBlock.isQuestion ? "質問マークを解除" : "質問にする"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock ? (
+              <TouchableOpacity style={styles.actionSheetItem} onPress={() => startMemoPrompt(menuBlock)}>
+                <Text style={styles.actionSheetItemText}>メモを追加</Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock ? (
+              <TouchableOpacity style={styles.actionSheetItem} onPress={() => addPhotoAfter(menuBlock)}>
+                <Text style={styles.actionSheetItemText}>写真を追加</Text>
+              </TouchableOpacity>
+            ) : null}
             {menuBlock && canMergePrev ? (
               <TouchableOpacity
                 style={styles.actionSheetItem}
@@ -834,6 +1017,79 @@ export default function NoteDetailScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={questionPromptBlockId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelQuestionPrompt}
+      >
+        <KeyboardAvoidingView
+          style={styles.promptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.debugOverlay} onPress={cancelQuestionPrompt}>
+            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.promptTitle}>わからなかった単語</Text>
+              <TextInput
+                style={styles.promptInput}
+                value={questionPromptDraft}
+                onChangeText={setQuestionPromptDraft}
+                placeholder="例: アブレーション"
+                autoFocus
+              />
+              <View style={styles.promptButtonRow}>
+                <TouchableOpacity style={styles.editActionButton} onPress={cancelQuestionPrompt}>
+                  <Text style={styles.editActionButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                  onPress={confirmQuestionPrompt}
+                >
+                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={memoPromptAfterBlockId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelMemoPrompt}
+      >
+        <KeyboardAvoidingView
+          style={styles.promptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.debugOverlay} onPress={cancelMemoPrompt}>
+            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.promptTitle}>メモ</Text>
+              <TextInput
+                style={[styles.promptInput, styles.promptInputMultiline]}
+                value={memoPromptDraft}
+                onChangeText={setMemoPromptDraft}
+                placeholder="メモを入力"
+                multiline
+                autoFocus
+              />
+              <View style={styles.promptButtonRow}>
+                <TouchableOpacity style={styles.editActionButton} onPress={cancelMemoPrompt}>
+                  <Text style={styles.editActionButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                  onPress={confirmMemoPrompt}
+                >
+                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -958,6 +1214,29 @@ const styles = StyleSheet.create({
   },
   actionSheetItemText: { fontSize: 16, color: "#06c", textAlign: "center" },
   actionSheetCancelText: { color: "#8e8e93", fontWeight: "600" },
+
+  promptKeyboardAvoider: { flex: 1 },
+  promptPanel: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 24,
+    alignSelf: "center",
+    width: "88%",
+    gap: 12,
+  },
+  promptTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
+  promptInput: {
+    borderWidth: 1,
+    borderColor: "#e2e2e7",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: "#1c1c1e",
+  },
+  promptInputMultiline: { minHeight: 80, textAlignVertical: "top" },
+  promptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
   timelinePhotoPlaceholder: {
     width: "100%",
