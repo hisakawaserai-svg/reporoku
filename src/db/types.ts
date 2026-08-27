@@ -36,6 +36,7 @@ export interface Block {
 
 export interface BlockWithSession extends Block {
   sessionTitle: string;
+  sessionStartedAt: number;
 }
 
 export interface SearchResult extends BlockWithSession {

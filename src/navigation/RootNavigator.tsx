@@ -18,7 +18,7 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   MainTabs: undefined;
-  NoteDetail: { noteId: string };
+  NoteDetail: { noteId: string; jumpToBlockId?: string };
   Report: { noteId: string };
   RecordComplete: { noteId: string };
 };

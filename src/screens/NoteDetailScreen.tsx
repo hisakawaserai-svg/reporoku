@@ -60,6 +60,7 @@ export default function NoteDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
   const sessionId = route.params.noteId;
+  const jumpToBlockId = route.params.jumpToBlockId;
   const [filter, setFilter] = useState<FilterKey>("all");
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [session, setSession] = useState<Session | null>(null);
@@ -72,6 +73,17 @@ export default function NoteDetailScreen() {
   const status = useAudioPlayerStatus(player);
   const pendingActionRef = useRef<{ seconds: number; autoplay: boolean } | null>(null);
   const wasPlayingBeforeDragRef = useRef(false);
+  const timelineScrollRef = useRef<ScrollView>(null);
+  const blockLayoutYRef = useRef<Map<string, number>>(new Map());
+  const jumpedBlockIdRef = useRef<string | null>(null);
+
+  // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
+  useEffect(() => {
+    if (jumpToBlockId) {
+      setFilter("all");
+      jumpedBlockIdRef.current = null;
+    }
+  }, [jumpToBlockId]);
 
   const loadBlocks = useCallback(async () => {
     try {
@@ -316,7 +328,7 @@ export default function NoteDetailScreen() {
         ))}
       </View>
 
-      <ScrollView style={styles.timeline}>
+      <ScrollView ref={timelineScrollRef} style={styles.timeline}>
         {filtered.length === 0 ? (
           <Text style={styles.emptyText}>表示できるブロックがありません</Text>
         ) : (
@@ -326,9 +338,23 @@ export default function NoteDetailScreen() {
               style={[
                 styles.timelineRow,
                 block.id === activeBlockId && styles.timelineRowActive,
+                block.id === jumpToBlockId && styles.timelineRowJumped,
               ]}
               activeOpacity={0.6}
               onPress={() => handleBlockPress(block)}
+              onLayout={(e) => {
+                blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
+                if (
+                  jumpToBlockId === block.id &&
+                  jumpedBlockIdRef.current !== block.id
+                ) {
+                  jumpedBlockIdRef.current = block.id;
+                  timelineScrollRef.current?.scrollTo({
+                    y: Math.max(0, e.nativeEvent.layout.y - 12),
+                    animated: true,
+                  });
+                }
+              }}
             >
               <Text style={styles.timelineTime}>[{fmt(block.startMs)}]</Text>
               <View style={styles.timelineBody}>
@@ -403,6 +429,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e5ea",
   },
   timelineRowActive: { backgroundColor: "#eaf2ff" },
+  timelineRowJumped: { backgroundColor: "#fff4d6" },
   timelineTime: { fontSize: 12, color: "#8e8e93", marginRight: 8, marginTop: 2 },
   timelineBody: { flex: 1 },
   timelineMarksRow: { flexDirection: "row", gap: 4, marginBottom: 2 },

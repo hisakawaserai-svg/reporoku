@@ -19,6 +19,7 @@ interface BlockRow {
 
 interface BlockWithSessionRow extends BlockRow {
   session_title: string;
+  session_started_at: number;
 }
 
 interface SearchResultRow extends BlockWithSessionRow {
@@ -47,6 +48,7 @@ function mapWithSessionRow(row: BlockWithSessionRow): BlockWithSession {
   return {
     ...mapRow(row),
     sessionTitle: row.session_title,
+    sessionStartedAt: row.session_started_at,
   };
 }
 
@@ -161,7 +163,7 @@ export interface TodoGroups {
 export async function listAllTodos(): Promise<TodoGroups> {
   const db = await getDb();
   const rows = await db.getAllAsync<BlockWithSessionRow>(
-    `SELECT blocks.*, sessions.title AS session_title
+    `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
      FROM blocks
      JOIN sessions ON sessions.id = blocks.session_id
      WHERE blocks.is_todo = 1
@@ -181,7 +183,7 @@ export async function listAllTodos(): Promise<TodoGroups> {
 export async function listAllQuestions(): Promise<BlockWithSession[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<BlockWithSessionRow>(
-    `SELECT blocks.*, sessions.title AS session_title
+    `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
      FROM blocks
      JOIN sessions ON sessions.id = blocks.session_id
      WHERE blocks.is_question = 1
@@ -199,7 +201,7 @@ export async function search(query: string): Promise<SearchResult[]> {
   const ftsQuery = `"${trimmed.replace(/"/g, '""')}"`;
 
   const rows = await db.getAllAsync<SearchResultRow>(
-    `SELECT blocks.*, sessions.title AS session_title,
+    `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at,
             snippet(blocks_fts, 0, '[', ']', '...', 12) AS snippet
      FROM blocks_fts
      JOIN blocks ON blocks.rowid = blocks_fts.rowid
