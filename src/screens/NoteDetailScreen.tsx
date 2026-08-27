@@ -2,8 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import {
   GestureResponderEvent,
   Image,
+  KeyboardAvoidingView,
   LayoutChangeEvent,
   PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -125,6 +127,9 @@ export default function NoteDetailScreen() {
   // 再生位置(leadで手前にずれた実際のシーク位置)から逆算すると、タップした行の
   // 1つ前がハイライトされてしまうため、位置からの逆算はドラッグ中のみに限定する
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+  // タイムライン上でテキストをタップして編集中のブロック(発言・メモ・写真キャプション共通)
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
@@ -245,6 +250,36 @@ export default function NoteDetailScreen() {
     }
   }, [titleDraft, session, sessionId, loadSession]);
 
+  // 編集中のブロックがあれば内容を確定させ、DBのtextを更新してis_editedを立てる
+  const commitBlockEdit = useCallback(async () => {
+    const id = editingBlockId;
+    setEditingBlockId(null);
+    if (!id) return;
+    const block = blocks.find((b) => b.id === id);
+    const trimmed = editDraft.trim();
+    if (!block || trimmed === (block.text ?? "").trim()) return;
+    try {
+      await blocksRepo.update(id, trimmed);
+      loadBlocks();
+    } catch (e) {
+      console.warn("[DB] ブロックの更新に失敗しました", e);
+    }
+  }, [editingBlockId, editDraft, blocks, loadBlocks]);
+
+  // 別のブロックの編集を始める前に、今編集中の内容があれば先に確定させておく
+  const startEditingBlock = useCallback(
+    async (block: Block) => {
+      if (editingBlockId && editingBlockId !== block.id) {
+        await commitBlockEdit();
+      }
+      setEditingBlockId(block.id);
+      setEditDraft(block.text ?? "");
+    },
+    [editingBlockId, commitBlockEdit]
+  );
+
+  const cancelBlockEdit = () => setEditingBlockId(null);
+
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
   const seekToPosition = useCallback(
     (targetMs: number, applyLead: boolean, autoplay: boolean) => {
@@ -268,6 +303,12 @@ export default function NoteDetailScreen() {
   );
 
   const handleBlockPress = (block: Block) => {
+    // 編集中のブロック自身の行タップは、テキスト入力や完了/キャンセルボタンへの
+    // タッチと競合しないよう、再生シークを行わない
+    if (block.id === editingBlockId) return;
+    if (editingBlockId) {
+      commitBlockEdit();
+    }
     setHighlightedBlockId(block.id);
     seekToPosition(block.startMs, true, true);
   };
@@ -459,6 +500,10 @@ export default function NoteDetailScreen() {
         ) : null}
       </View>
 
+      <KeyboardAvoidingView
+        style={styles.editKeyboardAvoider}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
       <View style={styles.chipRow}>
         {FILTERS.map((f) => {
           const isSelected = filter === f.key;
@@ -508,6 +553,7 @@ export default function NoteDetailScreen() {
                       styles.timelineRow,
                       block.id === activeBlockId && styles.timelineRowActive,
                       block.id === jumpToBlockId && styles.timelineRowJumped,
+                      block.id === editingBlockId && styles.timelineRowEditing,
                     ]}
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
@@ -536,10 +582,18 @@ export default function NoteDetailScreen() {
                       {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
                     </View>
                     <View style={styles.timelineBody}>
-                      <Text style={[styles.timelineTime, { color: meta.color }]}>
-                        {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
-                        {meta.label ? ` ・ ${meta.label}` : ""}
-                      </Text>
+                      <View style={styles.timelineMetaRow}>
+                        <Text style={[styles.timelineTime, { color: meta.color }]}>
+                          {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
+                          {meta.label ? ` ・ ${meta.label}` : ""}
+                        </Text>
+                        {block.isEdited ? (
+                          <View style={styles.editedBadge}>
+                            <Ionicons name="pencil" size={10} color="#8e8e93" />
+                            <Text style={styles.editedBadgeText}>編集済み</Text>
+                          </View>
+                        ) : null}
+                      </View>
                       {block.kind === "photo" ? (
                         block.photoUri ? (
                           <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
@@ -548,8 +602,44 @@ export default function NoteDetailScreen() {
                             <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
                           </View>
                         )
+                      ) : null}
+                      {editingBlockId === block.id ? (
+                        <View>
+                          <TextInput
+                            style={styles.timelineTextInput}
+                            value={editDraft}
+                            onChangeText={setEditDraft}
+                            autoFocus
+                            multiline
+                          />
+                          <View style={styles.editActionsRow}>
+                            <TouchableOpacity
+                              style={styles.editActionButton}
+                              onPress={cancelBlockEdit}
+                            >
+                              <Text style={styles.editActionButtonText}>キャンセル</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                              onPress={commitBlockEdit}
+                            >
+                              <Text style={styles.editActionButtonPrimaryText}>完了</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
                       ) : (
-                        <Text style={styles.timelineText}>{block.text}</Text>
+                        <TouchableOpacity
+                          activeOpacity={0.6}
+                          onPress={() =>
+                            block.id === activeBlockId
+                              ? startEditingBlock(block)
+                              : handleBlockPress(block)
+                          }
+                        >
+                          <Text style={block.text ? styles.timelineText : styles.timelineTextPlaceholder}>
+                            {block.text || "タップしてメモを追加"}
+                          </Text>
+                        </TouchableOpacity>
                       )}
                       {block.isQuestion && block.questionTerm ? (
                         <Text style={styles.questionTermText}>わからなかった単語: {block.questionTerm}</Text>
@@ -582,6 +672,7 @@ export default function NoteDetailScreen() {
           <Text style={styles.playerTime}>{fmt(totalDurationMs)}</Text>
         </View>
       ) : null}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -616,6 +707,8 @@ const styles = StyleSheet.create({
   },
   titleMeta: { fontSize: 13, color: "#8e8e93", marginTop: 4 },
 
+  editKeyboardAvoider: { flex: 1 },
+
   chipRow: {
     flexDirection: "row",
     paddingHorizontal: 16,
@@ -646,13 +739,45 @@ const styles = StyleSheet.create({
   },
   timelineRowActive: { backgroundColor: "#eaf2ff" },
   timelineRowJumped: { backgroundColor: "#fff4d6" },
+  timelineRowEditing: { backgroundColor: "#fffaf0" },
   timelineDotCol: { width: 16, alignItems: "center" },
   timelineDotWrap: { paddingTop: 6, paddingBottom: 2 },
   timelineConnector: { flex: 1, width: 2, backgroundColor: "#d1d1d6", marginBottom: -8 },
   timelineDot: { width: 6, height: 6, borderRadius: 3 },
   timelineBody: { flex: 1 },
-  timelineTime: { fontSize: 12, fontWeight: "600", marginBottom: 3 },
+  timelineMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
+  timelineTime: { fontSize: 12, fontWeight: "600" },
+  editedBadge: { flexDirection: "row", alignItems: "center", gap: 2 },
+  editedBadgeText: { fontSize: 10, color: "#8e8e93" },
   timelineText: { fontSize: 15, color: "#1c1c1e", lineHeight: 21 },
+  timelineTextPlaceholder: { fontSize: 15, color: "#b0b0b6", lineHeight: 21, fontStyle: "italic" },
+  timelineTextInput: {
+    fontSize: 15,
+    color: "#1c1c1e",
+    lineHeight: 21,
+    minHeight: 60,
+    textAlignVertical: "top",
+    borderWidth: 1,
+    borderColor: "#06c",
+    borderRadius: 8,
+    padding: 8,
+    backgroundColor: "#fff",
+  },
+  editActionsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginTop: 6,
+  },
+  editActionButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: "#f2f2f7",
+  },
+  editActionButtonPrimary: { backgroundColor: "#06c" },
+  editActionButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
+  editActionButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
   timelinePhotoPlaceholder: {
     width: "100%",
