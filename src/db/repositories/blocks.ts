@@ -1,5 +1,6 @@
 import { getDb } from '../index';
 import type { Block, BlockKind, BlockWithSession, SearchResult } from '../types';
+import { toAbsoluteUri, toStorableUri } from '../../utils/files';
 
 interface BlockRow {
   id: string;
@@ -33,7 +34,7 @@ function mapRow(row: BlockRow): Block {
     kind: row.kind as BlockKind,
     startMs: row.start_ms,
     text: row.text,
-    photoUri: row.photo_uri,
+    photoUri: row.photo_uri ? toAbsoluteUri(row.photo_uri) : null,
     isStarred: row.is_starred === 1,
     isTodo: row.is_todo === 1,
     todoDone: row.todo_done === 1,
@@ -75,6 +76,7 @@ export async function create(input: CreateBlockInput): Promise<Block> {
   const isQuestion = input.isQuestion ?? false;
   const questionTerm = input.questionTerm ?? null;
 
+  // documentDirectory相対のパスとして保存する(理由は toStorableUri のコメントを参照)
   await db.runAsync(
     `INSERT INTO blocks (
        id, session_id, kind, start_ms, text, photo_uri,
@@ -87,7 +89,7 @@ export async function create(input: CreateBlockInput): Promise<Block> {
       input.kind,
       input.startMs,
       text,
-      photoUri,
+      photoUri ? toStorableUri(photoUri) : null,
       isStarred ? 1 : 0,
       isTodo ? 1 : 0,
       isQuestion ? 1 : 0,

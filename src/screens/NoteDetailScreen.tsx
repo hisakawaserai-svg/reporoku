@@ -68,6 +68,10 @@ export default function NoteDetailScreen() {
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
+  // タップ(またはtaps後の自動進行)で「今ハイライトすべきブロック」を直接保持する。
+  // 再生位置(leadで手前にずれた実際のシーク位置)から逆算すると、タップした行の
+  // 1つ前がハイライトされてしまうため、位置からの逆算はドラッグ中のみに限定する
+  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
@@ -199,10 +203,16 @@ export default function NoteDetailScreen() {
   );
 
   const handleBlockPress = (block: Block) => {
+    setHighlightedBlockId(block.id);
     seekToPosition(block.startMs, true, true);
   };
 
-  const totalDurationMs = session?.durationMs ?? 0;
+  // シークバーの全長は「実際に録音された音声の合計長」を使う(session.durationMsは
+  // 壁時計基準のセッション長で、再起動の空白時間を含むため offsetMs と単位が合わない)
+  const totalDurationMs =
+    audioFiles.length > 0
+      ? Math.max(...audioFiles.map((f) => f.offsetMs + f.durationMs))
+      : session?.durationMs ?? 0;
   const currentFile = audioFiles.find((f) => f.id === currentFileId) ?? null;
   const currentGlobalMs = currentFile ? currentFile.offsetMs + status.currentTime * 1000 : 0;
   const displayRatio =
@@ -229,12 +239,43 @@ export default function NoteDetailScreen() {
   }, [dragRatio]);
 
   const sortedBlocks = [...blocks].sort((a, b) => a.startMs - b.startMs);
-  let activeBlockId: string | null = null;
-  for (const block of sortedBlocks) {
-    if (block.startMs <= displayMs) {
-      activeBlockId = block.id;
-    } else {
-      break;
+
+  // 自動再生時: 実際の再生位置(lead分の巻き戻りを含まない currentGlobalMs)が
+  // 次のブロックの時刻に到達したら、ハイライトを1つずつ先へ進める。
+  // タップ直後(まだleadの手前区間を再生中)は currentGlobalMs がそのブロックの
+  // startMs にまだ届いていないため、ここでは前のブロックへ巻き戻さない
+  useEffect(() => {
+    if (dragRatio !== null) return; // ドラッグ中はリアルタイムのdisplayMsから直接求める(下記)
+    setHighlightedBlockId((prev) => {
+      const startIndex = sortedBlocks.findIndex((b) => b.id === prev);
+      let candidate = prev;
+      if (startIndex === -1) {
+        for (const b of sortedBlocks) {
+          if (b.startMs <= currentGlobalMs) candidate = b.id;
+          else break;
+        }
+      } else {
+        for (let i = startIndex + 1; i < sortedBlocks.length; i++) {
+          if (sortedBlocks[i].startMs <= currentGlobalMs) candidate = sortedBlocks[i].id;
+          else break;
+        }
+      }
+      return candidate;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentGlobalMs, dragRatio]);
+
+  let activeBlockId: string | null = highlightedBlockId;
+  if (dragRatio !== null) {
+    // ドラッグ中は再生位置(lead無し)から直接求める。タップ時のみの問題のため、
+    // ドラッグ中の追従(スクラブ)は従来通りリアルタイムに計算してよい
+    activeBlockId = null;
+    for (const block of sortedBlocks) {
+      if (block.startMs <= displayMs) {
+        activeBlockId = block.id;
+      } else {
+        break;
+      }
     }
   }
 

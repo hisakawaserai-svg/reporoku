@@ -11,6 +11,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  AppState,
+  AppStateStatus,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
@@ -67,7 +69,7 @@ export default function RecordScreen() {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
-  const pausedAccumMsRef = useRef(0);       // 一時停止までに経過していた時間の合計(再開後もタイマーを継続させる)
+  const contentMsRef = useRef(0);           // 実際に録音された音声の累積時間(セッション全体のタイムライン基準はこれ。再起動・一時停止による空白時間は含まない)
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [interim, setInterim] = useState("");
   const [audioUris, setAudioUris] = useState<string[]>([]);
@@ -81,6 +83,9 @@ export default function RecordScreen() {
   const segStart = useRef<number | null>(null);
   const [leadSec, setLeadSec] = useState(1.2);
 
+  const isRecognizingRef = useRef(false);            // 現在ネイティブ側の音声認識セッションが動いているか(audiostart〜end間)
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
   // DB連携用の状態
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartedAtRef = useRef(0);   // セッション全体の開始時刻(音声認識の再起動では変わらない)
@@ -92,8 +97,11 @@ export default function RecordScreen() {
   const [memoModalVisible, setMemoModalVisible] = useState(false);
   const [memoInput, setMemoInput] = useState("");
 
+  // セッション全体(録音済み音声の累積時間)での経過ms。再起動をまたいでも連続した値になる
+  const sessionElapsedMs = () => contentMsRef.current + Math.max(0, Date.now() - startedAt.current);
+
   const push = (text: string, kind: Block["kind"] = "text", ms?: number, id?: string) =>
-    setBlocks((p) => [...p, { id, ms: ms ?? Date.now() - startedAt.current, text, kind }]);
+    setBlocks((p) => [...p, { id, ms: ms ?? sessionElapsedMs(), text, kind }]);
 
   const persistTranscriptBlock = (id: string, text: string, startMs: number) => {
     const sessionId = sessionIdRef.current;
@@ -158,7 +166,7 @@ export default function RecordScreen() {
     setMemoModalVisible(false);
     setMemoInput("");
     if (!sessionId || !text) return;
-    const startMs = Date.now() - startedAt.current;
+    const startMs = sessionElapsedMs();
     blocksRepo
       .create({ id: genId(), sessionId, kind: "note", startMs, text })
       .catch((e) => console.warn("[DB] メモの保存に失敗しました", e));
@@ -175,7 +183,7 @@ export default function RecordScreen() {
       }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
       if (result.canceled || !result.assets?.[0]?.uri) return;
-      const startMs = Date.now() - startedAt.current;
+      const startMs = sessionElapsedMs();
 
       // cache URIのままだとOSに削除される恐れがあるため、documentDirectory配下へコピーする
       let photoUri = result.assets[0].uri;
@@ -223,7 +231,7 @@ export default function RecordScreen() {
 
   useSpeechRecognitionEvent("result", (e) => {
     const text = (e.results[0]?.transcript ?? "").trim();
-    const now = Date.now() - startedAt.current;
+    const now = sessionElapsedMs();
 
     lastResultAt.current = Date.now();
     failStreak.current = 0;
@@ -237,8 +245,11 @@ export default function RecordScreen() {
         persistTranscriptBlock(id, text, start);
         prevEnd.current = now;      // 今の終わりを、次の発言の開始点にする
         segStart.current = null;    // 空文字finalでリセットすると、同じ発話が続いている場合に開始時刻がズレるため、ここでのみリセット
+        setInterim("");             // 確定した発話をタイムラインに反映したので、進行中表示をクリアする
       }
-      setInterim("");
+      // 空文字でのfinal(他アプリへの切替などによる音声セッション割り込みでセグメントが
+      // 強制終了した際に発生しうる)ではクリアしない。ここでクリアすると、実際にはまだ
+      // 発話内容自体は失われていないのに、ライブフォーカスの表示だけが一瞬空白になってしまうため
       return;
     }
 
@@ -248,9 +259,9 @@ export default function RecordScreen() {
   });
 
   useSpeechRecognitionEvent("audiostart", () => {
-    startedAt.current = Date.now(); // 音声ファイルの0秒とここを一致させる
-    segStart.current = null;
-    prevEnd.current = 0;
+    startedAt.current = Date.now(); // このセグメント(音声ファイル)の0秒を表す実時刻
+    segStart.current = null; // 新しい認識セッションでは未確定の発話区間をリセットする(prevEndはセッション全体の時系列を保つため、ここではリセットしない)
+    isRecognizingRef.current = true;
   });
 
   useSpeechRecognitionEvent("audioend", (e) => {
@@ -258,9 +269,13 @@ export default function RecordScreen() {
     const sessionId = sessionIdRef.current;
     if (e.uri && sessionId) {
       const segmentStartedAt = startedAt.current;
-      const offsetMs = Math.max(0, segmentStartedAt - sessionStartedAtRef.current);
       const durationMs = Math.max(0, Date.now() - segmentStartedAt);
+      // 「これまでに実際に録音された音声の累積時間」を開始位置にする(再起動の空白時間は含めない)
+      const offsetMs = contentMsRef.current;
+      contentMsRef.current += durationMs;
       const seq = audioSeqRef.current++;
+      // TODO: offset_msの連続性を実機で検証するための一時ログ。確認が終わったら削除する
+      console.log(`[audioend] seq=${seq} offsetMs=${offsetMs} durationMs=${durationMs} nextOffsetMs=${offsetMs + durationMs}`);
       audioFilesRepo
         .create({ id: genId(), sessionId, fileUri: e.uri, seq, offsetMs, durationMs })
         .catch((err) => console.warn("[DB] 音声ファイルの保存に失敗しました", err));
@@ -274,8 +289,10 @@ export default function RecordScreen() {
     push(`[ERROR] ${e.error} — ${e.message}`, "sys");
   });
 
-  // ここが肝：終了したら、止めたいわけでなければ即座に再開
+  // ここが肝:終了したら、止めたいわけでなければ即座に再開
   useSpeechRecognitionEvent("end", () => {
+    isRecognizingRef.current = false;
+
     if (isPausingRef.current) {
       // 一時停止による停止。セッションは終了させず、次の「再開」を待つ
       isPausingRef.current = false;
@@ -289,6 +306,12 @@ export default function RecordScreen() {
       finalizeSessionDuration();
       goToRecordComplete();
       clearScreenState();
+      return;
+    }
+    if (appStateRef.current !== "active") {
+      // バックグラウンド中(他アプリへの切替による音声セッション割り込みなど)のendは、
+      // すぐに再起動しても失敗するだけなので、ここではリトライせず
+      // フォアグラウンド復帰時にまとめて再開する(AppStateの変化を監視するuseEffect側で処理)
       return;
     }
     failStreak.current += 1;
@@ -353,6 +376,7 @@ export default function RecordScreen() {
     sessionIdRef.current = sessionId;
     lastBlockIdRef.current = null;
     audioSeqRef.current = 0;
+    contentMsRef.current = 0;
     sessionsRepo
       .create({ id: sessionId, title: "", startedAt: sessionStartedAtRef.current })
       .catch((e) => console.warn("[DB] セッションの作成に失敗しました", e));
@@ -368,7 +392,7 @@ export default function RecordScreen() {
   const pause = () => {
     isPausingRef.current = true;
     shouldRun.current = false; // 自動再開を止める
-    pausedAccumMsRef.current += Date.now() - startedAt.current;
+    // 累積時間の加算は audioend ハンドラで実測 durationMs をもとに行われるため、ここでは何もしない
     ExpoSpeechRecognitionModule.stop();
     setPaused(true);
   };
@@ -376,7 +400,7 @@ export default function RecordScreen() {
   const resume = () => {
     shouldRun.current = true;
     setPaused(false);
-    begin(); // audiostartでstartedAt.currentが更新され、経過時間はpausedAccumMsRefに加算して継続する
+    begin(); // audiostartでstartedAt.currentが更新され、経過時間はcontentMsRefからの続きとして計測される
   };
 
   // 一時停止中は音声認識が既に止まっているため、endイベントを待たずにここで終了処理を行う
@@ -397,6 +421,29 @@ export default function RecordScreen() {
     const s = Math.floor(ms / 1000);
     return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   };
+
+  // 他アプリへの切替や画面ロックなどでフォアグラウンド/バックグラウンドが切り替わったときの処理。
+  // 画面ロックは通常ネイティブ側の音声セッションを止めないため、ここでは能動的にstopしない
+  // (endイベント側で isRecognizingRef を見て、実際に止まっていた場合だけ再開する)。
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const wasActive = appStateRef.current === "active";
+      appStateRef.current = nextState;
+      if (
+        nextState === "active" &&
+        !wasActive &&
+        shouldRun.current &&
+        !isPausingRef.current &&
+        !isRecognizingRef.current
+      ) {
+        // フォアグラウンド復帰時点で認識が止まっていた(=バックグラウンド中の割り込みで
+        // 実際に停止していた)場合のみ、失敗カウントをリセットして明示的に再開する
+        failStreak.current = 0;
+        begin();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // debug
   const rawLog = useRef<string[]>([]);
@@ -420,16 +467,12 @@ export default function RecordScreen() {
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
     if (!running || paused) return;
-    const id = setInterval(
-      () => setElapsedMs(pausedAccumMsRef.current + (Date.now() - startedAt.current)),
-      200
-    );
+    const id = setInterval(() => setElapsedMs(sessionElapsedMs()), 200);
     return () => clearInterval(id);
   }, [running, paused]);
   useEffect(() => {
     if (!running) {
       setElapsedMs(0);
-      pausedAccumMsRef.current = 0;
     }
   }, [running]);
 

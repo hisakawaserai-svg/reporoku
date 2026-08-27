@@ -16,6 +16,21 @@ export function getAudioDirectoryUri(): string {
   return ensureDirectory(audioDirectory).uri;
 }
 
+// documentDirectory の絶対パス(iOSではコンテナのUUIDを含む)は、アプリの再インストール・
+// 再ビルドのたびに変わりうる。DBに絶対パスのまま保存すると、次にビルドし直しただけで
+// 過去の音声・写真が読み込めなくなるため、保存時は documentDirectory 相対のパスに変換する。
+export function toStorableUri(absoluteUri: string): string {
+  const base = Paths.document.uri;
+  return absoluteUri.startsWith(base) ? absoluteUri.slice(base.length) : absoluteUri;
+}
+
+// 保存された相対パスを、現在のdocumentDirectoryを基準にした絶対パスへ復元する。
+// "file://" 等で始まる絶対パス(相対パス化より前の古いデータ)はそのまま返す。
+export function toAbsoluteUri(storedUri: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(storedUri)) return storedUri;
+  return Paths.document.uri + storedUri;
+}
+
 // expo-image-picker の撮影結果(cache URI)を永続ディレクトリへコピーし、コピー後のURIを返す。
 // ファイル名の衝突を避けるため、セッションIDとタイムスタンプを含める。
 export async function persistPhotoFile(sourceUri: string, sessionId: string): Promise<string> {
