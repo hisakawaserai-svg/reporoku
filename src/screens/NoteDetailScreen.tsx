@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  Dimensions,
   GestureResponderEvent,
   Image,
   KeyboardAvoidingView,
@@ -135,8 +136,15 @@ export default function NoteDetailScreen() {
   // タイムライン上でテキストをタップして編集中のブロック(発言・メモ・写真キャプション共通)
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  // 長押しで開く「結合/分割」アクションシートの対象ブロック
-  const [menuBlockId, setMenuBlockId] = useState<string | null>(null);
+  // 長押しで開く「結合/分割/マーク」メニューの対象ブロックと、その画面上の位置
+  // (ブロックの近くにメニューを吹き出し表示するため、テキスト部分の実測座標を保持する)
+  const [menuAnchor, setMenuAnchor] = useState<{
+    blockId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
   // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
   const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
   const [splitIndex, setSplitIndex] = useState(0);
@@ -153,6 +161,8 @@ export default function NoteDetailScreen() {
   const wasPlayingBeforeDragRef = useRef(false);
   const timelineScrollRef = useRef<ScrollView>(null);
   const blockLayoutYRef = useRef<Map<string, number>>(new Map());
+  // 長押しメニューの位置決めのため、各ブロックの本文Viewの参照を保持する
+  const blockBodyRefs = useRef<Map<string, View>>(new Map());
   const jumpedBlockIdRef = useRef<string | null>(null);
 
   // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
@@ -297,16 +307,21 @@ export default function NoteDetailScreen() {
 
   const cancelBlockEdit = () => setEditingBlockId(null);
 
-  // 長押しで「結合/分割」のアクションシートを開く。編集中・分割選択中は開かない
+  // 長押しで「結合/分割/マーク」メニューを開く。編集中・分割選択中は開かない。
+  // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する
   const openBlockMenu = (block: Block) => {
     if (editingBlockId || splittingBlockId) return;
-    setMenuBlockId(block.id);
+    const node = blockBodyRefs.current.get(block.id);
+    if (!node) return;
+    node.measureInWindow((x, y, width, height) => {
+      setMenuAnchor({ blockId: block.id, x, y, width, height });
+    });
   };
 
-  const closeBlockMenu = () => setMenuBlockId(null);
+  const closeBlockMenu = () => setMenuAnchor(null);
 
   const startSplitting = (block: Block) => {
-    setMenuBlockId(null);
+    setMenuAnchor(null);
     setSplittingBlockId(block.id);
     setSplitIndex(Math.floor((block.text ?? "").length / 2));
   };
@@ -352,7 +367,7 @@ export default function NoteDetailScreen() {
   // 前後どちらかの隣接ブロックとテキストを結合する。★/ToDo/質問フラグはORで両方引き継ぐ
   const mergeWithNeighbor = useCallback(
     async (block: Block, direction: "prev" | "next") => {
-      setMenuBlockId(null);
+      setMenuAnchor(null);
       const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
       const index = sorted.findIndex((b) => b.id === block.id);
       const neighbor = direction === "prev" ? sorted[index - 1] : sorted[index + 1];
@@ -390,7 +405,7 @@ export default function NoteDetailScreen() {
 
   const toggleBlockStar = useCallback(
     async (block: Block) => {
-      setMenuBlockId(null);
+      setMenuAnchor(null);
       try {
         await blocksRepo.toggleStar(block.id);
         loadBlocks();
@@ -403,7 +418,7 @@ export default function NoteDetailScreen() {
 
   const toggleBlockTodo = useCallback(
     async (block: Block) => {
-      setMenuBlockId(null);
+      setMenuAnchor(null);
       try {
         await blocksRepo.toggleTodo(block.id);
         loadBlocks();
@@ -415,7 +430,7 @@ export default function NoteDetailScreen() {
   );
 
   const startQuestionPrompt = (block: Block) => {
-    setMenuBlockId(null);
+    setMenuAnchor(null);
     setQuestionPromptBlockId(block.id);
     setQuestionPromptDraft("");
   };
@@ -441,7 +456,7 @@ export default function NoteDetailScreen() {
 
   const clearBlockQuestion = useCallback(
     async (block: Block) => {
-      setMenuBlockId(null);
+      setMenuAnchor(null);
       try {
         await blocksRepo.setQuestion(block.id, false, null);
         loadBlocks();
@@ -453,7 +468,7 @@ export default function NoteDetailScreen() {
   );
 
   const startMemoPrompt = (block: Block) => {
-    setMenuBlockId(null);
+    setMenuAnchor(null);
     setMemoPromptAfterBlockId(block.id);
     setMemoPromptDraft("");
   };
@@ -487,7 +502,7 @@ export default function NoteDetailScreen() {
 
   const addPhotoAfter = useCallback(
     async (block: Block) => {
-      setMenuBlockId(null);
+      setMenuAnchor(null);
       try {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) return;
@@ -696,7 +711,8 @@ export default function NoteDetailScreen() {
   const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
   const timelineGroups = groupByGap(filtered);
 
-  // 長押しアクションシートの対象ブロックと、結合/分割それぞれが可能かどうか
+  // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
+  const menuBlockId = menuAnchor?.blockId ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
   const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
   const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
@@ -709,6 +725,89 @@ export default function NoteDetailScreen() {
   const canMergeNext =
     !!menuBlock && menuBlock.kind !== "photo" && !!menuNextBlock && menuNextBlock.kind !== "photo";
   const canSplit = !!menuBlock && menuBlock.kind !== "photo" && (menuBlock.text ?? "").trim().length >= 2;
+
+  // iOSのネイティブな長押しコンテキストメニューに寄せた見た目にするため、
+  // 項目リストを先に組み立ててから位置(上下どちらに出すか)を計算する
+  type MenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
+  const menuItems: MenuItem[] = menuBlock
+    ? ([
+        canSplit && {
+          key: "split",
+          label: "分割",
+          icon: "swap-horizontal" as IconName,
+          color: "#8e8e93",
+          onPress: () => startSplitting(menuBlock),
+        },
+        canMergePrev && {
+          key: "mergePrev",
+          label: "前のブロックと結合",
+          icon: "arrow-up" as IconName,
+          color: "#8e8e93",
+          onPress: () => mergeWithNeighbor(menuBlock, "prev"),
+        },
+        canMergeNext && {
+          key: "mergeNext",
+          label: "次のブロックと結合",
+          icon: "arrow-down" as IconName,
+          color: "#8e8e93",
+          onPress: () => mergeWithNeighbor(menuBlock, "next"),
+        },
+        {
+          key: "star",
+          label: menuBlock.isStarred ? "★を外す" : "星をつける",
+          icon: "star" as IconName,
+          color: "#d98c00",
+          onPress: () => toggleBlockStar(menuBlock),
+        },
+        {
+          key: "todo",
+          label: menuBlock.isTodo ? "ToDoを解除" : "Todoにする",
+          icon: "checkmark" as IconName,
+          color: "#1f9254",
+          onPress: () => toggleBlockTodo(menuBlock),
+        },
+        {
+          key: "question",
+          label: menuBlock.isQuestion ? "質問マークを解除" : "質問にする",
+          icon: "help-circle" as IconName,
+          color: "#7c4dff",
+          onPress: () =>
+            menuBlock.isQuestion ? clearBlockQuestion(menuBlock) : startQuestionPrompt(menuBlock),
+        },
+        {
+          key: "memo",
+          label: "メモを追加",
+          icon: "create-outline" as IconName,
+          color: "#8e8e93",
+          onPress: () => startMemoPrompt(menuBlock),
+        },
+        {
+          key: "photo",
+          label: "写真を追加",
+          icon: "camera-outline" as IconName,
+          color: "#8e8e93",
+          onPress: () => addPhotoAfter(menuBlock),
+        },
+      ].filter(Boolean) as MenuItem[])
+    : [];
+
+  const MENU_ITEM_HEIGHT = 46;
+  const MENU_PREVIEW_HEIGHT = 70;
+  const MENU_GAP = 8;
+  let menuPreviewTop = 0;
+  let menuListTop = 0;
+  if (menuAnchor) {
+    const windowHeight = Dimensions.get("window").height;
+    const menuHeight = menuItems.length * MENU_ITEM_HEIGHT;
+    const showBelow = menuAnchor.y < windowHeight * 0.55;
+    if (showBelow) {
+      menuPreviewTop = menuAnchor.y + menuAnchor.height + MENU_GAP;
+      menuListTop = menuPreviewTop + MENU_PREVIEW_HEIGHT + MENU_GAP;
+    } else {
+      menuListTop = menuAnchor.y - MENU_GAP - menuHeight;
+      menuPreviewTop = menuListTop - MENU_GAP - MENU_PREVIEW_HEIGHT;
+    }
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -834,7 +933,13 @@ export default function NoteDetailScreen() {
                       </View>
                       {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
                     </View>
-                    <View style={styles.timelineBody}>
+                    <View
+                      style={styles.timelineBody}
+                      ref={(node) => {
+                        if (node) blockBodyRefs.current.set(block.id, node);
+                        else blockBodyRefs.current.delete(block.id);
+                      }}
+                    >
                       <View style={styles.timelineMetaRow}>
                         <Text style={[styles.timelineTime, { color: meta.color }]}>
                           {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
@@ -952,70 +1057,39 @@ export default function NoteDetailScreen() {
       ) : null}
       </KeyboardAvoidingView>
 
-      <Modal visible={menuBlockId !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
-        <Pressable style={styles.debugOverlay} onPress={closeBlockMenu}>
-          <Pressable style={styles.actionSheetPanel} onPress={(e) => e.stopPropagation()}>
-            {menuBlock ? (
-              <TouchableOpacity style={styles.actionSheetItem} onPress={() => toggleBlockStar(menuBlock)}>
-                <Text style={styles.actionSheetItemText}>
-                  {menuBlock.isStarred ? "★を外す" : "★を付ける"}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock ? (
-              <TouchableOpacity style={styles.actionSheetItem} onPress={() => toggleBlockTodo(menuBlock)}>
-                <Text style={styles.actionSheetItemText}>
-                  {menuBlock.isTodo ? "ToDoを解除" : "ToDoにする"}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock ? (
-              <TouchableOpacity
-                style={styles.actionSheetItem}
-                onPress={() =>
-                  menuBlock.isQuestion ? clearBlockQuestion(menuBlock) : startQuestionPrompt(menuBlock)
-                }
+      <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
+        <Pressable style={styles.menuOverlay} onPress={closeBlockMenu}>
+          {menuAnchor && menuBlock ? (
+            <>
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.menuPreview,
+                  { top: menuPreviewTop, left: menuAnchor.x, width: menuAnchor.width },
+                ]}
               >
-                <Text style={styles.actionSheetItemText}>
-                  {menuBlock.isQuestion ? "質問マークを解除" : "質問にする"}
+                <Text style={styles.menuPreviewText} numberOfLines={3}>
+                  {menuBlock.kind === "photo"
+                    ? menuBlock.text || "SLIDE"
+                    : menuBlock.text || "タップしてメモを追加"}
                 </Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock ? (
-              <TouchableOpacity style={styles.actionSheetItem} onPress={() => startMemoPrompt(menuBlock)}>
-                <Text style={styles.actionSheetItemText}>メモを追加</Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock ? (
-              <TouchableOpacity style={styles.actionSheetItem} onPress={() => addPhotoAfter(menuBlock)}>
-                <Text style={styles.actionSheetItemText}>写真を追加</Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock && canMergePrev ? (
-              <TouchableOpacity
-                style={styles.actionSheetItem}
-                onPress={() => mergeWithNeighbor(menuBlock, "prev")}
+              </View>
+              <View
+                style={[styles.menuList, { top: menuListTop, left: menuAnchor.x, width: menuAnchor.width }]}
               >
-                <Text style={styles.actionSheetItemText}>前のブロックと結合</Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock && canMergeNext ? (
-              <TouchableOpacity
-                style={styles.actionSheetItem}
-                onPress={() => mergeWithNeighbor(menuBlock, "next")}
-              >
-                <Text style={styles.actionSheetItemText}>次のブロックと結合</Text>
-              </TouchableOpacity>
-            ) : null}
-            {menuBlock && canSplit ? (
-              <TouchableOpacity style={styles.actionSheetItem} onPress={() => startSplitting(menuBlock)}>
-                <Text style={styles.actionSheetItemText}>分割する</Text>
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity style={styles.actionSheetItem} onPress={closeBlockMenu}>
-              <Text style={[styles.actionSheetItemText, styles.actionSheetCancelText]}>キャンセル</Text>
-            </TouchableOpacity>
-          </Pressable>
+                {menuItems.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Ionicons name={item.icon} size={18} color={item.color} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : null}
         </Pressable>
       </Modal>
 
@@ -1199,21 +1273,42 @@ const styles = StyleSheet.create({
   splitHintText: { fontSize: 12, color: "#8e8e93", marginBottom: 4 },
 
   debugOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
-  actionSheetPanel: {
+
+  // 長押しメニュー(iOSネイティブ風): ブロックのすぐ近くに、内容のプレビューと項目リストを吹き出し表示する
+  menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
+  menuPreview: {
+    position: "absolute",
     backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingTop: 8,
-    paddingBottom: 24,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  actionSheetItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5ea",
+  menuPreviewText: { fontSize: 15, color: "#1c1c1e", lineHeight: 20 },
+  menuList: {
+    position: "absolute",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  actionSheetItemText: { fontSize: 16, color: "#06c", textAlign: "center" },
-  actionSheetCancelText: { color: "#8e8e93", fontWeight: "600" },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
+  menuItemText: { fontSize: 16, color: "#1c1c1e" },
 
   promptKeyboardAvoider: { flex: 1 },
   promptPanel: {
