@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Image,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -143,6 +145,8 @@ export default function NotesScreen() {
   const [questions, setQuestions] = useState<BlockWithSession[]>([]);
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [monthPickerVisible, setMonthPickerVisible] = useState(false);
+  const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
 
   const loadNotes = useCallback(async () => {
@@ -257,6 +261,19 @@ export default function NotesScreen() {
 
   const displayMonthKey = calendarMonthKey ?? monthKeyOf(Date.now());
   const monthGrid = useMemo(() => buildMonthGrid(displayMonthKey), [displayMonthKey]);
+
+  // ピッカーを開くたびに、いま表示中の月の年から始める
+  useEffect(() => {
+    if (monthPickerVisible) {
+      setMonthPickerYear(Number(displayMonthKey.split("-")[0]));
+    }
+  }, [monthPickerVisible, displayMonthKey]);
+
+  const monthKeysWithData = useMemo(
+    () => new Set(monthGroups.map((g) => g.monthKey)),
+    [monthGroups]
+  );
+  const currentRealMonthKey = monthKeyOf(Date.now());
   const selectedDayGroup = selectedDateKey ? dayGroupsByKey.get(selectedDateKey) ?? null : null;
 
   // 選択日のセッションを開始時刻の「時」単位でまとめる(1時間ごとの区切り)
@@ -475,7 +492,14 @@ export default function NotesScreen() {
                   >
                     <Ionicons name="chevron-back" size={20} color="#3c3c43" />
                   </TouchableOpacity>
-                  <Text style={styles.calHeaderTitle}>{formatMonthKey(displayMonthKey)}</Text>
+                  <TouchableOpacity
+                    style={styles.calHeaderTitleButton}
+                    activeOpacity={0.6}
+                    onPress={() => setMonthPickerVisible(true)}
+                  >
+                    <Text style={styles.calHeaderTitle}>{formatMonthKey(displayMonthKey)}</Text>
+                    <Ionicons name="chevron-down" size={14} color="#06c" />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.calNavButton}
                     onPress={() => setCalendarMonthKey(shiftMonthKey(displayMonthKey, 1))}
@@ -597,6 +621,72 @@ export default function NotesScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={monthPickerVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setMonthPickerVisible(false)}
+      >
+        <Pressable style={styles.monthPickerOverlay} onPress={() => setMonthPickerVisible(false)}>
+          <Pressable style={styles.monthPickerSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.monthPickerTitle}>月を選択</Text>
+
+            <View style={styles.monthPickerYearNav}>
+              <TouchableOpacity
+                style={styles.monthPickerYearArrow}
+                onPress={() => setMonthPickerYear((y) => y - 1)}
+              >
+                <Ionicons name="chevron-back" size={20} color="#3c3c43" />
+              </TouchableOpacity>
+              <Text style={styles.monthPickerYearNavLabel}>{monthPickerYear}年</Text>
+              <TouchableOpacity
+                style={styles.monthPickerYearArrow}
+                onPress={() => setMonthPickerYear((y) => y + 1)}
+              >
+                <Ionicons name="chevron-forward" size={20} color="#3c3c43" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.monthPickerGrid}>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((monthNum) => {
+                const key = `${monthPickerYear}-${String(monthNum).padStart(2, "0")}`;
+                const isCurrent = key === displayMonthKey;
+                const hasData = monthKeysWithData.has(key);
+                const isFuture = key > currentRealMonthKey;
+                return (
+                  <TouchableOpacity
+                    key={monthNum}
+                    style={[styles.monthPickerCell, isCurrent && styles.monthPickerCellSelected]}
+                    disabled={isFuture}
+                    onPress={() => {
+                      setCalendarMonthKey(key);
+                      setMonthPickerVisible(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.monthPickerCellText,
+                        hasData && styles.monthPickerCellTextHasData,
+                        isCurrent && styles.monthPickerCellTextSelected,
+                      ]}
+                    >
+                      {monthNum}月
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={styles.monthPickerCloseButton}
+              onPress={() => setMonthPickerVisible(false)}
+            >
+              <Text style={styles.monthPickerCloseText}>閉じる</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -717,7 +807,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
   },
   calNavButton: { padding: 4 },
-  calHeaderTitle: { fontSize: 16, fontWeight: "700", color: "#1c1c1e", minWidth: 110, textAlign: "center" },
+  calHeaderTitleButton: { flexDirection: "row", alignItems: "center", gap: 4 },
+  calHeaderTitle: { fontSize: 16, fontWeight: "700", color: "#1c1c1e", minWidth: 90, textAlign: "center" },
   calWeekdayRow: { flexDirection: "row", marginHorizontal: 16, marginTop: 12 },
   calGrid: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: 16 },
   calCell: {
@@ -733,10 +824,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  calCellCircleSelected: { backgroundColor: "#1c1c1e" },
+  calCellCircleSelected: { backgroundColor: "rgba(0,102,204,0.15)" },
   calCellText: { fontSize: 15, color: "#1c1c1e" },
   calCellTextDim: { color: "#c7c7cc" },
-  calCellTextSelected: { color: "#fff", fontWeight: "700" },
+  calCellTextSelected: { color: "#06c", fontWeight: "700" },
   calCellDot: { width: 4, height: 4, borderRadius: 2, marginTop: 3, backgroundColor: "transparent" },
   calCellDotVisible: { backgroundColor: "#06c" },
   calSelectedSection: { marginTop: 4 },
@@ -761,6 +852,64 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   timeCardWrap: { flex: 1 },
+
+  // カレンダーヘッダーの月選択ピッカー
+  monthPickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  monthPickerSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 28,
+  },
+  monthPickerTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    textAlign: "center",
+    color: "#1c1c1e",
+    marginBottom: 8,
+  },
+  monthPickerYearNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 24,
+    marginBottom: 12,
+  },
+  monthPickerYearArrow: { padding: 4 },
+  monthPickerYearNavLabel: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1c1c1e",
+    minWidth: 80,
+    textAlign: "center",
+  },
+  monthPickerGrid: { flexDirection: "row", flexWrap: "wrap" },
+  monthPickerCell: {
+    width: "25%",
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  monthPickerCellSelected: { backgroundColor: "rgba(0,102,204,0.15)" },
+  monthPickerCellText: { fontSize: 15, color: "#c7c7cc" },
+  monthPickerCellTextHasData: { color: "#1c1c1e", fontWeight: "700" },
+  monthPickerCellTextSelected: { color: "#06c", fontWeight: "700" },
+  monthPickerCloseButton: {
+    alignSelf: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 4,
+    backgroundColor: "#06c",
+  },
+  monthPickerCloseText: { color: "#fff", fontSize: 15, fontWeight: "600" },
 
   // ToDo表示
   todoRow: {
