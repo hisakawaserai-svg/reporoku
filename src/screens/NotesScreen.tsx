@@ -50,6 +50,85 @@ type HourGroup = { hour: number; items: SessionSummary[] };
 
 type TodoGroups = { pending: BlockWithSession[]; done: BlockWithSession[] };
 
+type SessionGroup = {
+  sessionId: string;
+  sessionTitle: string;
+  sessionStartedAt: number;
+  items: BlockWithSession[];
+};
+
+// 同じノートに属する行をまとめて、ノートごとの小見出しでグループ化する
+// (出現順=一覧の並び順を保つ)
+function groupBySession(blocks: BlockWithSession[]): SessionGroup[] {
+  const groups: SessionGroup[] = [];
+  const indexBySession = new Map<string, number>();
+  for (const block of blocks) {
+    let idx = indexBySession.get(block.sessionId);
+    if (idx === undefined) {
+      idx = groups.length;
+      indexBySession.set(block.sessionId, idx);
+      groups.push({
+        sessionId: block.sessionId,
+        sessionTitle: block.sessionTitle,
+        sessionStartedAt: block.sessionStartedAt,
+        items: [],
+      });
+    }
+    groups[idx].items.push(block);
+  }
+  return groups;
+}
+
+// 50音索引の行(あ行〜わ行)。用語集の簡易グルーピングに使う
+const KANA_ROWS = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"] as const;
+type KanaRow = (typeof KANA_ROWS)[number];
+
+const KANA_ROW_CHARS: Record<KanaRow, string[]> = {
+  あ: ["あ", "い", "う", "え", "お", "ぁ", "ぃ", "ぅ", "ぇ", "ぉ"],
+  か: ["か", "き", "く", "け", "こ", "が", "ぎ", "ぐ", "げ", "ご"],
+  さ: ["さ", "し", "す", "せ", "そ", "ざ", "じ", "ず", "ぜ", "ぞ"],
+  た: ["た", "ち", "つ", "て", "と", "だ", "ぢ", "づ", "で", "ど", "っ"],
+  な: ["な", "に", "ぬ", "ね", "の"],
+  は: ["は", "ひ", "ふ", "へ", "ほ", "ば", "び", "ぶ", "べ", "ぼ", "ぱ", "ぴ", "ぷ", "ぺ", "ぽ"],
+  ま: ["ま", "み", "む", "め", "も"],
+  や: ["や", "ゆ", "よ", "ゃ", "ゅ", "ょ"],
+  ら: ["ら", "り", "る", "れ", "ろ"],
+  わ: ["わ", "を", "ん", "ゐ", "ゑ"],
+};
+
+// カタカナはひらがなの対応する行に丸める
+function toHiraganaChar(ch: string): string {
+  const code = ch.charCodeAt(0);
+  if (code >= 0x30a1 && code <= 0x30f6) return String.fromCharCode(code - 0x60);
+  return ch;
+}
+
+// question_term の先頭文字から、機械的に50音の行へ振り分ける。
+// 仮名以外(漢字・英数字など)は読み仮名を推定せず、コードポイント順で
+// 適当な行に配置する簡易実装とする
+function kanaRowOf(term: string): KanaRow {
+  if (!term) return "わ";
+  const ch = toHiraganaChar(term[0]);
+  for (const row of KANA_ROWS) {
+    if (KANA_ROW_CHARS[row].includes(ch)) return row;
+  }
+  const idx = (term.codePointAt(0) ?? 0) % KANA_ROWS.length;
+  return KANA_ROWS[idx];
+}
+
+type GlossaryGroup = { row: KanaRow; items: BlockWithSession[] };
+
+function groupByKanaRow(blocks: BlockWithSession[]): GlossaryGroup[] {
+  const byRow = new Map<KanaRow, BlockWithSession[]>();
+  for (const block of blocks) {
+    const term = block.questionTerm || block.text || "";
+    const row = kanaRowOf(term);
+    if (!byRow.has(row)) byRow.set(row, []);
+    byRow.get(row)!.push(block);
+  }
+  return KANA_ROWS.filter((row) => byRow.has(row)).map((row) => ({ row, items: byRow.get(row)! }));
+}
+
 function formatMonthKey(monthKey: string): string {
   const [year, month] = monthKey.split("-");
   return `${year}年${Number(month)}月`;
@@ -148,6 +227,8 @@ export default function NotesScreen() {
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
+  const glossaryScrollRef = useRef<ScrollView>(null);
+  const glossaryRowYRef = useRef<Map<string, number>>(new Map());
 
   const loadNotes = useCallback(async () => {
     try {
@@ -361,29 +442,36 @@ export default function NotesScreen() {
   };
 
   const renderTodoRow = (block: BlockWithSession) => (
-    <View key={block.id} style={styles.todoRow}>
+    <TouchableOpacity
+      key={block.id}
+      style={styles.todoCard}
+      activeOpacity={0.7}
+      onPress={() => goToBlock(block)}
+    >
       <TouchableOpacity
-        style={styles.todoCheckbox}
+        hitSlop={8}
         onPress={() => blocksRepo.toggleTodoDone(block.id).then(loadTodos)}
       >
         <Ionicons
-          name={block.todoDone ? "checkbox" : "square-outline"}
-          size={22}
-          color={block.todoDone ? "#34c759" : "#8e8e93"}
+          name={block.todoDone ? "checkmark-circle" : "ellipse-outline"}
+          size={24}
+          color={block.todoDone ? "#34c759" : "#c7c7cc"}
         />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.todoBody} activeOpacity={0.7} onPress={() => goToBlock(block)}>
-        <Text
-          style={[styles.todoText, block.todoDone && styles.todoTextDone]}
-          numberOfLines={2}
-        >
-          {block.text}
-        </Text>
-        <Text style={styles.todoMeta}>
-          {block.sessionTitle || "無題のノート"} ・ {formatDateShort(block.sessionStartedAt)}
-        </Text>
-      </TouchableOpacity>
-    </View>
+      <Text
+        style={[styles.todoText, block.todoDone && styles.todoTextDone]}
+        numberOfLines={2}
+      >
+        {block.text}
+      </Text>
+      <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+    </TouchableOpacity>
+  );
+
+  const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
+    <Text style={styles.noteGroupHeader}>
+      {group.sessionTitle || "無題のノート"} ・ {formatDateSlash(group.sessionStartedAt)}
+    </Text>
   );
 
   const renderQuestionRow = (block: BlockWithSession) => (
@@ -399,6 +487,12 @@ export default function NotesScreen() {
       </Text>
     </TouchableOpacity>
   );
+
+  const scrollGlossaryToRow = (row: string) => {
+    const y = glossaryRowYRef.current.get(row);
+    if (y === undefined) return;
+    glossaryScrollRef.current?.scrollTo({ y: Math.max(0, y - 4), animated: true });
+  };
 
   const renderSearchRow = (result: SearchResult) => (
     <TouchableOpacity
@@ -451,6 +545,7 @@ export default function NotesScreen() {
         ))}
       </View>
 
+      {(isSearching || mode !== "glossary") && (
       <ScrollView style={styles.content}>
         {isSearching ? (
           <View>
@@ -589,38 +684,66 @@ export default function NotesScreen() {
                   </View>
                 ) : (
                   <>
-                    <Text style={styles.sectionHeader}>未対応</Text>
+                    <Text style={styles.sectionHeader}>未対応 ・ {todos.pending.length}件</Text>
                     {todos.pending.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      todos.pending.map(renderTodoRow)
+                      groupBySession(todos.pending).map((group) => (
+                        <View key={group.sessionId}>
+                          {renderNoteGroupHeader(group)}
+                          {group.items.map(renderTodoRow)}
+                        </View>
+                      ))
                     )}
-                    <Text style={styles.sectionHeader}>完了</Text>
+                    <Text style={styles.sectionHeader}>完了 ・ {todos.done.length}件</Text>
                     {todos.done.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      todos.done.map(renderTodoRow)
+                      groupBySession(todos.done).map((group) => (
+                        <View key={group.sessionId}>
+                          {renderNoteGroupHeader(group)}
+                          {group.items.map(renderTodoRow)}
+                        </View>
+                      ))
                     )}
                   </>
-                )}
-              </View>
-            )}
-
-            {mode === "glossary" && (
-              <View>
-                {questions.length === 0 ? (
-                  <View style={styles.placeholder}>
-                    <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
-                    <Text style={styles.placeholderText}>用語集はまだありません</Text>
-                  </View>
-                ) : (
-                  questions.map(renderQuestionRow)
                 )}
               </View>
             )}
           </>
         )}
       </ScrollView>
+      )}
+
+      {!isSearching && mode === "glossary" && (
+        <View style={styles.glossaryContainer}>
+          <ScrollView ref={glossaryScrollRef} style={styles.content}>
+            {questions.length === 0 ? (
+              <View style={styles.placeholder}>
+                <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
+                <Text style={styles.placeholderText}>用語集はまだありません</Text>
+              </View>
+            ) : (
+              groupByKanaRow(questions).map((group) => (
+                <View
+                  key={group.row}
+                  onLayout={(e) => glossaryRowYRef.current.set(group.row, e.nativeEvent.layout.y)}
+                >
+                  <Text style={styles.sectionHeader}>{group.row}行</Text>
+                  {group.items.map(renderQuestionRow)}
+                </View>
+              ))
+            )}
+          </ScrollView>
+          <View style={styles.glossaryIndexBar}>
+            {KANA_ROWS.map((row) => (
+              <TouchableOpacity key={row} hitSlop={4} onPress={() => scrollGlossaryToRow(row)}>
+                <Text style={styles.glossaryIndexText}>{row}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       <Modal
         visible={monthPickerVisible}
@@ -911,23 +1034,34 @@ const styles = StyleSheet.create({
   },
   monthPickerCloseText: { color: "#fff", fontSize: 15, fontWeight: "600" },
 
-  // ToDo表示
-  todoRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
+  // ToDo表示(ノートごとの小見出し+カード形式の行)
+  noteGroupHeader: {
+    fontSize: 12,
+    color: "#8e8e93",
     marginHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5ea",
-    gap: 10,
+    marginBottom: 6,
   },
-  todoCheckbox: { paddingTop: 1 },
-  todoBody: { flex: 1 },
-  todoText: { fontSize: 15, color: "#1c1c1e" },
+  todoCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  todoText: { flex: 1, fontSize: 15, color: "#1c1c1e" },
   todoTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
-  todoMeta: { fontSize: 12, color: "#8e8e93", marginTop: 2 },
 
   // 用語集表示
+  glossaryContainer: { flex: 1, flexDirection: "row" },
   glossaryRow: {
     marginHorizontal: 16,
     paddingVertical: 10,
@@ -936,6 +1070,15 @@ const styles = StyleSheet.create({
   },
   glossaryTerm: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
   glossaryMeta: { fontSize: 12, color: "#8e8e93", marginTop: 2 },
+  glossaryIndexBar: {
+    width: 20,
+    marginTop: 12,
+    paddingRight: 4,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 10,
+  },
+  glossaryIndexText: { fontSize: 11, color: "#8e8e93", fontWeight: "600" },
 
   // 検索結果
   searchRow: {

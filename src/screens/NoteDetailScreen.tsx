@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -26,19 +27,38 @@ import { resolveAudioPosition } from "../utils/audioTimeline";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo";
 
-const FILTERS: { key: FilterKey; label: string }[] = [
+const FILTERS: { key: FilterKey; label: string; bg?: string; tint?: string }[] = [
   { key: "all", label: "すべて" },
-  { key: "star", label: "★" },
-  { key: "todo", label: "📝" },
-  { key: "question", label: "❓" },
-  { key: "photo", label: "📷" },
+  { key: "star", label: "★", bg: "#fdf0dc", tint: "#d98c00" },
+  { key: "todo", label: "✓", bg: "#e0f7e6", tint: "#1f9254" },
+  { key: "question", label: "?", bg: "#f2e8fc", tint: "#7c4dff" },
+  { key: "photo", label: "📷", bg: "#eef1f4", tint: "#57575c" },
 ];
 
 const LEAD_SEC = 1.2;
+// この間隔(ミリ秒)以上ブロックの開始時刻が離れていたら、タイムライン上に
+// 新しいセクション見出しを自動挿入する
+const SECTION_GAP_MS = 5000;
 
 function fmt(ms: number) {
   const s = Math.floor(Math.max(0, ms) / 1000);
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function formatHHMM(unixMs: number): string {
+  const d = new Date(unixMs);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatMinutes(durationMs: number): string {
+  return `${Math.round(durationMs / 60000)}分`;
+}
+
+function defaultTitle(session: Session): string {
+  const d = new Date(session.startedAt);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
+    d.getDate()
+  ).padStart(2, "0")} の記録`;
 }
 
 function matchesFilter(block: Block, filter: FilterKey): boolean {
@@ -56,6 +76,37 @@ function matchesFilter(block: Block, filter: FilterKey): boolean {
   }
 }
 
+type TimelineGroup = { key: string; blocks: Block[] };
+
+function groupByGap(blocks: Block[]): TimelineGroup[] {
+  const groups: TimelineGroup[] = [];
+  blocks.forEach((block, i) => {
+    const prev = blocks[i - 1];
+    if (!prev || block.startMs - prev.startMs >= SECTION_GAP_MS) {
+      groups.push({ key: block.id, blocks: [block] });
+    } else {
+      groups[groups.length - 1].blocks.push(block);
+    }
+  });
+  return groups;
+}
+
+function formatSectionRange(blocks: Block[], session: Session | null): string {
+  if (!session || blocks.length === 0) return "";
+  const start = formatHHMM(session.startedAt + blocks[0].startMs);
+  const end = formatHHMM(session.startedAt + blocks[blocks.length - 1].startMs);
+  return start === end ? start : `${start} 〜 ${end}`;
+}
+
+type IconName = keyof typeof Ionicons.glyphMap;
+
+function kindMeta(block: Block): { color: string; label: string | null; icon: IconName | null } {
+  if (block.isStarred) return { color: "#d98c00", label: "重要", icon: "star" };
+  if (block.isQuestion) return { color: "#7c4dff", label: "質問", icon: "help-circle" };
+  if (block.isTodo) return { color: "#1f9254", label: "ToDo", icon: "checkmark-circle" };
+  return { color: "#8e8e93", label: null, icon: null };
+}
+
 export default function NoteDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
@@ -68,6 +119,8 @@ export default function NoteDetailScreen() {
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   // タップ(またはtaps後の自動進行)で「今ハイライトすべきブロック」を直接保持する。
   // 再生位置(leadで手前にずれた実際のシーク位置)から逆算すると、タップした行の
   // 1つ前がハイライトされてしまうため、位置からの逆算はドラッグ中のみに限定する
@@ -167,18 +220,30 @@ export default function NoteDetailScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
+      // 独自のヘッダー(戻る/エクスポート/タイトル)を表示するため、標準ヘッダーは隠す。
       // シークバーの横ドラッグと、iOSのエッジスワイプ「戻る」ジェスチャーが
-      // 競合してしまうため、この画面ではスワイプでの戻る操作を無効化する
+      // 競合してしまうため、この画面ではスワイプでの戻る操作も無効化する
+      headerShown: false,
       gestureEnabled: false,
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => navigation.navigate("Report", { noteId: sessionId })}
-        >
-          <Text style={styles.headerButton}>レポート出力</Text>
-        </TouchableOpacity>
-      ),
     });
-  }, [navigation, sessionId]);
+  }, [navigation]);
+
+  const startEditingTitle = () => {
+    setTitleDraft(session?.title ?? "");
+    setIsEditingTitle(true);
+  };
+
+  const commitTitle = useCallback(async () => {
+    setIsEditingTitle(false);
+    const trimmed = titleDraft.trim();
+    if (!session || trimmed === session.title) return;
+    try {
+      await sessionsRepo.updateTitle(sessionId, trimmed);
+      loadSession();
+    } catch (e) {
+      console.warn("[DB] タイトルの更新に失敗しました", e);
+    }
+  }, [titleDraft, session, sessionId, loadSession]);
 
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
   const seekToPosition = useCallback(
@@ -352,70 +417,148 @@ export default function NoteDetailScreen() {
   };
 
   const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
+  const timelineGroups = groupByGap(filtered);
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.chipRow}>
-        {FILTERS.map((f) => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.chip, filter === f.key && styles.chipSelected]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.chipText, filter === f.key && styles.chipTextSelected]}>
-              {f.label}
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.topBarButton} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={26} color="#06c" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.topBarButton}
+          onPress={() => navigation.navigate("Report", { noteId: sessionId })}
+        >
+          <Ionicons name="download-outline" size={22} color="#06c" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.titleSection}>
+        {isEditingTitle ? (
+          <TextInput
+            style={styles.titleInput}
+            value={titleDraft}
+            onChangeText={setTitleDraft}
+            autoFocus
+            onBlur={commitTitle}
+            onSubmitEditing={commitTitle}
+            returnKeyType="done"
+          />
+        ) : (
+          <TouchableOpacity style={styles.titleRow} activeOpacity={0.6} onPress={startEditingTitle}>
+            <Text style={styles.titleText} numberOfLines={1}>
+              {session ? session.title || defaultTitle(session) : ""}
             </Text>
+            <Ionicons name="create-outline" size={16} color="#c7c7cc" />
           </TouchableOpacity>
-        ))}
+        )}
+        {session ? (
+          <Text style={styles.titleMeta}>
+            {formatHHMM(session.startedAt)} 開始 ・ {formatMinutes(totalDurationMs || session.durationMs)}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.chipRow}>
+        {FILTERS.map((f) => {
+          const isSelected = filter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              style={[
+                styles.chip,
+                f.bg && !isSelected && { backgroundColor: f.bg },
+                f.tint && isSelected && { backgroundColor: f.tint },
+                !f.tint && isSelected && styles.chipSelected,
+              ]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  f.tint && !isSelected && { color: f.tint },
+                  isSelected && styles.chipTextSelected,
+                ]}
+              >
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <ScrollView ref={timelineScrollRef} style={styles.timeline}>
         {filtered.length === 0 ? (
           <Text style={styles.emptyText}>表示できるブロックがありません</Text>
         ) : (
-          filtered.map((block) => (
-            <TouchableOpacity
-              key={block.id}
-              style={[
-                styles.timelineRow,
-                block.id === activeBlockId && styles.timelineRowActive,
-                block.id === jumpToBlockId && styles.timelineRowJumped,
-              ]}
-              activeOpacity={0.6}
-              onPress={() => handleBlockPress(block)}
-              onLayout={(e) => {
-                blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
-                if (
-                  jumpToBlockId === block.id &&
-                  jumpedBlockIdRef.current !== block.id
-                ) {
-                  jumpedBlockIdRef.current = block.id;
-                  timelineScrollRef.current?.scrollTo({
-                    y: Math.max(0, e.nativeEvent.layout.y - 12),
-                    animated: true,
-                  });
-                }
-              }}
-            >
-              <Text style={styles.timelineTime}>[{fmt(block.startMs)}]</Text>
-              <View style={styles.timelineBody}>
-                <View style={styles.timelineMarksRow}>
-                  {block.isStarred ? <Text style={[styles.timelineMark, { color: "#e0a800" }]}>★</Text> : null}
-                  {block.isTodo ? <Text style={[styles.timelineMark, { color: "#06c" }]}>📝</Text> : null}
-                  {block.isQuestion ? <Text style={[styles.timelineMark, { color: "#7c4dff" }]}>❓</Text> : null}
-                  {block.kind === "photo" ? <Text style={[styles.timelineMark, { color: "#555" }]}>📷</Text> : null}
-                  {block.kind === "note" ? <Text style={[styles.timelineMark, { color: "#555" }]}>✏️</Text> : null}
-                </View>
-                {block.kind === "photo" && block.photoUri ? (
-                  <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
-                ) : (
-                  <Text style={styles.timelineText}>{block.text}</Text>
-                )}
-                {block.isQuestion && block.questionTerm ? (
-                  <Text style={styles.questionTermText}>わからなかった単語: {block.questionTerm}</Text>
-                ) : null}
-              </View>
-            </TouchableOpacity>
+          timelineGroups.map((group) => (
+            <View key={group.key}>
+              <Text style={styles.sectionHeader}>{formatSectionRange(group.blocks, session)}</Text>
+              {group.blocks.map((block, blockIndex) => {
+                const meta = kindMeta(block);
+                // ブロック同士を縦線でつなぐ。この線は同じセクション(グループ)内でのみ
+                // つながり、セクションの先頭/末尾では途切れる。将来、発言間の秒数に応じて
+                // セクション(グループ)をさらに細かく分ける予定のため、線の有無は
+                // 常にこのグループ境界(groupByGapの結果)に追従させる
+                const hasLineBelow = blockIndex < group.blocks.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={block.id}
+                    style={[
+                      styles.timelineRow,
+                      block.id === activeBlockId && styles.timelineRowActive,
+                      block.id === jumpToBlockId && styles.timelineRowJumped,
+                    ]}
+                    activeOpacity={0.6}
+                    onPress={() => handleBlockPress(block)}
+                    onLayout={(e) => {
+                      blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
+                      if (
+                        jumpToBlockId === block.id &&
+                        jumpedBlockIdRef.current !== block.id
+                      ) {
+                        jumpedBlockIdRef.current = block.id;
+                        timelineScrollRef.current?.scrollTo({
+                          y: Math.max(0, e.nativeEvent.layout.y - 12),
+                          animated: true,
+                        });
+                      }
+                    }}
+                  >
+                    <View style={styles.timelineDotCol}>
+                      <View style={styles.timelineDotWrap}>
+                        {meta.icon ? (
+                          <Ionicons name={meta.icon} size={14} color={meta.color} />
+                        ) : (
+                          <View style={[styles.timelineDot, { backgroundColor: meta.color }]} />
+                        )}
+                      </View>
+                      {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
+                    </View>
+                    <View style={styles.timelineBody}>
+                      <Text style={[styles.timelineTime, { color: meta.color }]}>
+                        {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
+                        {meta.label ? ` ・ ${meta.label}` : ""}
+                      </Text>
+                      {block.kind === "photo" ? (
+                        block.photoUri ? (
+                          <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
+                        ) : (
+                          <View style={styles.timelinePhotoPlaceholder}>
+                            <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
+                          </View>
+                        )
+                      ) : (
+                        <Text style={styles.timelineText}>{block.text}</Text>
+                      )}
+                      {block.isQuestion && block.questionTerm ? (
+                        <Text style={styles.questionTermText}>わからなかった単語: {block.questionTerm}</Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           ))
         )}
       </ScrollView>
@@ -423,7 +566,7 @@ export default function NoteDetailScreen() {
       {audioFiles.length > 0 ? (
         <View style={styles.playerBar}>
           <TouchableOpacity style={styles.playerButton} activeOpacity={0.7} onPress={togglePlayPause}>
-            <Ionicons name={status.playing ? "pause" : "play"} size={22} color="#1c1c1e" />
+            <Ionicons name={status.playing ? "pause" : "play"} size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.playerTime}>{fmt(displayMs)}</Text>
           <View
@@ -445,7 +588,34 @@ export default function NoteDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
-  headerButton: { color: "#06c", fontSize: 15, fontWeight: "600" },
+
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingTop: 4,
+  },
+  topBarButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  titleSection: { paddingHorizontal: 20, paddingTop: 2, paddingBottom: 12 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  titleText: { fontSize: 22, fontWeight: "700", color: "#1c1c1e", flexShrink: 1 },
+  titleInput: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#1c1c1e",
+    padding: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: "#06c",
+  },
+  titleMeta: { fontSize: 13, color: "#8e8e93", marginTop: 4 },
+
   chipRow: {
     flexDirection: "row",
     paddingHorizontal: 16,
@@ -453,30 +623,56 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
     backgroundColor: "#ebebf0",
   },
-  chipSelected: { backgroundColor: "#06c" },
-  chipText: { fontSize: 13, color: "#3c3c43" },
+  chipSelected: { backgroundColor: "#1c1c1e" },
+  chipText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
   chipTextSelected: { color: "#fff", fontWeight: "600" },
+
   timeline: { flex: 1, paddingHorizontal: 16 },
+  sectionHeader: {
+    fontSize: 13,
+    color: "#8e8e93",
+    marginTop: 14,
+    marginBottom: 6,
+  },
   timelineRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "stretch",
     paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5ea",
   },
   timelineRowActive: { backgroundColor: "#eaf2ff" },
   timelineRowJumped: { backgroundColor: "#fff4d6" },
-  timelineTime: { fontSize: 12, color: "#8e8e93", marginRight: 8, marginTop: 2 },
+  timelineDotCol: { width: 16, alignItems: "center" },
+  timelineDotWrap: { paddingTop: 6, paddingBottom: 2 },
+  timelineConnector: { flex: 1, width: 2, backgroundColor: "#d1d1d6", marginBottom: -8 },
+  timelineDot: { width: 6, height: 6, borderRadius: 3 },
   timelineBody: { flex: 1 },
-  timelineMarksRow: { flexDirection: "row", gap: 4, marginBottom: 2 },
-  timelineMark: { fontSize: 15 },
-  timelineText: { fontSize: 15 },
+  timelineTime: { fontSize: 12, fontWeight: "600", marginBottom: 3 },
+  timelineText: { fontSize: 15, color: "#1c1c1e", lineHeight: 21 },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
+  timelinePhotoPlaceholder: {
+    width: "100%",
+    height: 140,
+    borderRadius: 8,
+    marginTop: 4,
+    backgroundColor: "#e5e5ea",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timelinePhotoLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    color: "#8e8e93",
+    backgroundColor: "#fff",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
   questionTermText: { fontSize: 12, color: "#7c4dff", marginTop: 4 },
   emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40 },
 
@@ -491,10 +687,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#fafafc",
   },
   playerButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#ebebf0",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1c1c1e",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -513,14 +709,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     height: 4,
     borderRadius: 2,
-    backgroundColor: "#06c",
+    backgroundColor: "#1c1c1e",
   },
   playerThumb: {
     position: "absolute",
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: "#06c",
+    backgroundColor: "#1c1c1e",
     marginLeft: -7,
   },
 });

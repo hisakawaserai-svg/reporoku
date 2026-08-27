@@ -1,6 +1,8 @@
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useState } from "react";
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { seedDevTestData } from "../utils/devTestData";
 
 type Row = { icon: keyof typeof Ionicons.glyphMap; label: string; value?: string };
 type Section = { title: string; rows: Row[] };
@@ -42,6 +44,22 @@ const SECTIONS: Section[] = [
 ];
 
 export default function SettingsScreen() {
+  const [isSeeding, setIsSeeding] = useState(false);
+
+  const handleSeedTestData = async () => {
+    if (isSeeding) return;
+    setIsSeeding(true);
+    try {
+      await seedDevTestData();
+      Alert.alert("テストデータを追加しました");
+    } catch (e) {
+      console.warn("[Dev] テストデータの投入に失敗しました", e);
+      Alert.alert("テストデータの投入に失敗しました");
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -67,6 +85,24 @@ export default function SettingsScreen() {
             </View>
           </View>
         ))}
+
+        {__DEV__ ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionHeader}>開発者向け</Text>
+            <View style={styles.card}>
+              <TouchableOpacity
+                style={styles.row}
+                disabled={isSeeding}
+                onPress={handleSeedTestData}
+              >
+                <Ionicons name="flask-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>
+                  {isSeeding ? "投入中…" : "テストデータを投入する"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
