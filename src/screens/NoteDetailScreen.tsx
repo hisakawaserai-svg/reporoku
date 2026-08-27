@@ -791,22 +791,18 @@ export default function NoteDetailScreen() {
       ].filter(Boolean) as MenuItem[])
     : [];
 
-  const MENU_ITEM_HEIGHT = 46;
-  const MENU_PREVIEW_HEIGHT = 70;
-  const MENU_GAP = 8;
-  let menuPreviewTop = 0;
+  // プレビュー用の吹き出しは持たず、対象ブロック自体をハイライトすることで
+  // 「今どのブロックへの操作か」を示す(そのぶんメニューの専有面積を小さくできる)
+  const MENU_ITEM_HEIGHT = 44;
+  const MENU_GAP = 6;
   let menuListTop = 0;
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const menuHeight = menuItems.length * MENU_ITEM_HEIGHT;
     const showBelow = menuAnchor.y < windowHeight * 0.55;
-    if (showBelow) {
-      menuPreviewTop = menuAnchor.y + menuAnchor.height + MENU_GAP;
-      menuListTop = menuPreviewTop + MENU_PREVIEW_HEIGHT + MENU_GAP;
-    } else {
-      menuListTop = menuAnchor.y - MENU_GAP - menuHeight;
-      menuPreviewTop = menuListTop - MENU_GAP - MENU_PREVIEW_HEIGHT;
-    }
+    menuListTop = showBelow
+      ? menuAnchor.y + menuAnchor.height + MENU_GAP
+      : menuAnchor.y - MENU_GAP - menuHeight;
   }
 
   return (
@@ -904,7 +900,7 @@ export default function NoteDetailScreen() {
                       block.id === jumpToBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
                       block.id === splittingBlockId && styles.timelineRowEditing,
-                      block.id === menuBlockId && styles.timelineRowEditing,
+                      block.id === menuBlockId && styles.timelineRowMenuTarget,
                     ]}
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
@@ -1060,35 +1056,20 @@ export default function NoteDetailScreen() {
       <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
         <Pressable style={styles.menuOverlay} onPress={closeBlockMenu}>
           {menuAnchor && menuBlock ? (
-            <>
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.menuPreview,
-                  { top: menuPreviewTop, left: menuAnchor.x, width: menuAnchor.width },
-                ]}
-              >
-                <Text style={styles.menuPreviewText} numberOfLines={3}>
-                  {menuBlock.kind === "photo"
-                    ? menuBlock.text || "SLIDE"
-                    : menuBlock.text || "タップしてメモを追加"}
-                </Text>
-              </View>
-              <View
-                style={[styles.menuList, { top: menuListTop, left: menuAnchor.x, width: menuAnchor.width }]}
-              >
-                {menuItems.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
-                    onPress={item.onPress}
-                  >
-                    <Text style={styles.menuItemText}>{item.label}</Text>
-                    <Ionicons name={item.icon} size={18} color={item.color} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
+            <View
+              style={[styles.menuList, { top: menuListTop, left: menuAnchor.x, width: menuAnchor.width }]}
+            >
+              {menuItems.map((item, index) => (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                  onPress={item.onPress}
+                >
+                  <Text style={styles.menuItemText}>{item.label}</Text>
+                  <Ionicons name={item.icon} size={18} color={item.color} />
+                </TouchableOpacity>
+              ))}
+            </View>
           ) : null}
         </Pressable>
       </Modal>
@@ -1232,6 +1213,7 @@ const styles = StyleSheet.create({
   timelineRowActive: { backgroundColor: "#eaf2ff" },
   timelineRowJumped: { backgroundColor: "#fff4d6" },
   timelineRowEditing: { backgroundColor: "#fffaf0" },
+  timelineRowMenuTarget: { backgroundColor: "#e5e5ea" },
   timelineDotCol: { width: 16, alignItems: "center" },
   timelineDotWrap: { paddingTop: 6, paddingBottom: 2 },
   timelineConnector: { flex: 1, width: 2, backgroundColor: "#d1d1d6", marginBottom: -8 },
@@ -1274,21 +1256,9 @@ const styles = StyleSheet.create({
 
   debugOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
 
-  // 長押しメニュー(iOSネイティブ風): ブロックのすぐ近くに、内容のプレビューと項目リストを吹き出し表示する
+  // 長押しメニュー(iOSネイティブ風): 対象ブロック自体をハイライトすることでプレビュー代わりとし、
+  // その近くに項目リストだけを吹き出し表示する(プレビュー用の別枠は持たない)
   menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
-  menuPreview: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  menuPreviewText: { fontSize: 15, color: "#1c1c1e", lineHeight: 20 },
   menuList: {
     position: "absolute",
     backgroundColor: "#fff",
@@ -1305,10 +1275,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingVertical: 13,
+    paddingVertical: 11,
   },
   menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
-  menuItemText: { fontSize: 16, color: "#1c1c1e" },
+  menuItemText: { fontSize: 15, color: "#1c1c1e" },
 
   promptKeyboardAvoider: { flex: 1 },
   promptPanel: {
