@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   Dimensions,
   GestureResponderEvent,
@@ -32,7 +33,7 @@ import * as sessionsRepo from "../db/repositories/sessions";
 import type { AudioFile, Block, Session } from "../db/types";
 import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
-import { persistPhotoFile } from "../utils/files";
+import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
@@ -545,6 +546,31 @@ export default function NoteDetailScreen() {
     [sessionId, startMsAfter, loadBlocks]
   );
 
+  const confirmDeleteBlock = useCallback(
+    (block: Block) => {
+      setMenuAnchor(null);
+      Alert.alert("このブロックを削除しますか？", "元に戻せません。", [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "削除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await blocksRepo.remove(block.id);
+              if (block.kind === "photo" && block.photoUri) {
+                deleteStoredFile(block.photoUri);
+              }
+              loadBlocks();
+            } catch (e) {
+              console.warn("[DB] ブロックの削除に失敗しました", e);
+            }
+          },
+        },
+      ]);
+    },
+    [loadBlocks]
+  );
+
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
   const seekToPosition = useCallback(
     (targetMs: number, applyLead: boolean, autoplay: boolean) => {
@@ -802,6 +828,13 @@ export default function NoteDetailScreen() {
           icon: "camera-outline" as IconName,
           color: "#8e8e93",
           onPress: () => addPhotoAfter(menuBlock),
+        },
+        {
+          key: "delete",
+          label: "削除",
+          icon: "trash-outline" as IconName,
+          color: "#ff3b30",
+          onPress: () => confirmDeleteBlock(menuBlock),
         },
       ].filter(Boolean) as MenuItem[])
     : [];
@@ -1143,7 +1176,9 @@ export default function NoteDetailScreen() {
                     style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
                     onPress={item.onPress}
                   >
-                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Text style={[styles.menuItemText, item.key === "delete" && { color: item.color }]}>
+                      {item.label}
+                    </Text>
                     <Ionicons name={item.icon} size={18} color={item.color} />
                   </TouchableOpacity>
                 ))}

@@ -41,3 +41,16 @@ export async function persistPhotoFile(sourceUri: string, sessionId: string): Pr
   await source.copy(destination);
   return destination.uri;
 }
+
+// ブロック/セッション削除時に、対応する写真・音声ファイルが孤児化しないよう削除する。
+// 失敗してもDB側の削除自体は既に完了しているはずなので、ここでは握りつぶして警告のみ出す
+export async function deleteStoredFile(absoluteUri: string): Promise<void> {
+  try {
+    const file = new File(absoluteUri);
+    if (file.exists) {
+      await file.delete();
+    }
+  } catch (e) {
+    console.warn("[FS] ファイルの削除に失敗しました", e);
+  }
+}

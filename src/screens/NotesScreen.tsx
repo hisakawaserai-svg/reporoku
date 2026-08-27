@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Image,
   Modal,
   Pressable,
@@ -18,7 +19,9 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
+import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
+import { deleteStoredFile } from "../utils/files";
 
 type DisplayMode = "list" | "calendar" | "todo" | "glossary";
 
@@ -386,6 +389,38 @@ export default function NotesScreen() {
     navigation.navigate("NoteDetail", { noteId: block.sessionId, jumpToBlockId: block.id });
   };
 
+  // ノートを削除する。blocks/audio_filesはON DELETE CASCADEでDB側は消えるが、
+  // 実ファイル(写真・音声)はセッション削除前に一覧を取っておいて別途削除する
+  const confirmDeleteSession = (session: SessionSummary) => {
+    Alert.alert("このノートを削除しますか？", "録音・写真・メモなど全て削除され、元に戻せません。", [
+      { text: "キャンセル", style: "cancel" },
+      {
+        text: "削除",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const [blocks, audioFiles] = await Promise.all([
+              blocksRepo.listBySessionId(session.id),
+              audioFilesRepo.listBySessionId(session.id),
+            ]);
+            await sessionsRepo.deleteById(session.id);
+            await Promise.all([
+              ...blocks
+                .filter((b) => b.kind === "photo" && b.photoUri)
+                .map((b) => deleteStoredFile(b.photoUri as string)),
+              ...audioFiles.map((f) => deleteStoredFile(f.fileUri)),
+            ]);
+            loadNotes();
+            loadTodos();
+            loadQuestions();
+          } catch (e) {
+            console.warn("[DB] ノートの削除に失敗しました", e);
+          }
+        },
+      },
+    ]);
+  };
+
   const renderCard = (session: SessionSummary, compact = false) => {
     const thumbBadge =
       session.photoCount > 1
@@ -400,6 +435,7 @@ export default function NotesScreen() {
         style={[styles.card, compact && styles.cardNoMargin]}
         activeOpacity={0.7}
         onPress={() => goToNote(session.id)}
+        onLongPress={() => confirmDeleteSession(session)}
       >
         <View style={styles.cardBody}>
           <Text style={styles.cardTitle} numberOfLines={1}>
