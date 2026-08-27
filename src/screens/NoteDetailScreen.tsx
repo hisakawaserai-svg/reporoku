@@ -34,7 +34,7 @@ import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
 import { persistPhotoFile } from "../utils/files";
 
-type FilterKey = "all" | "star" | "todo" | "question" | "photo";
+type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
 const FILTERS: { key: FilterKey; label: string; bg?: string; tint?: string }[] = [
   { key: "all", label: "すべて" },
@@ -42,6 +42,7 @@ const FILTERS: { key: FilterKey; label: string; bg?: string; tint?: string }[] =
   { key: "todo", label: "✓", bg: "#e0f7e6", tint: "#1f9254" },
   { key: "question", label: "?", bg: "#f2e8fc", tint: "#7c4dff" },
   { key: "photo", label: "📷", bg: "#eef1f4", tint: "#57575c" },
+  { key: "note", label: "📝", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
 
 const LEAD_SEC = 1.2;
@@ -80,6 +81,8 @@ function matchesFilter(block: Block, filter: FilterKey): boolean {
       return block.isQuestion;
     case "photo":
       return block.kind === "photo";
+    case "note":
+      return block.kind === "note";
     default:
       return true;
   }
