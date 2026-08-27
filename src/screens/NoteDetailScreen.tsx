@@ -36,13 +36,13 @@ import { persistPhotoFile } from "../utils/files";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
-const FILTERS: { key: FilterKey; label: string; bg?: string; tint?: string }[] = [
+const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; tint?: string }[] = [
   { key: "all", label: "すべて" },
   { key: "star", label: "★", bg: "#fdf0dc", tint: "#d98c00" },
   { key: "todo", label: "✓", bg: "#e0f7e6", tint: "#1f9254" },
   { key: "question", label: "?", bg: "#f2e8fc", tint: "#7c4dff" },
-  { key: "photo", label: "📷", bg: "#eef1f4", tint: "#57575c" },
-  { key: "note", label: "📝", bg: "#f5ecdd", tint: "#8a6d3b" },
+  { key: "photo", icon: "camera-outline", bg: "#eef1f4", tint: "#57575c" },
+  { key: "note", icon: "create-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
 
 const LEAD_SEC = 1.2;
@@ -884,15 +884,19 @@ export default function NoteDetailScreen() {
               ]}
               onPress={() => setFilter(f.key)}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  f.tint && !isSelected && { color: f.tint },
-                  isSelected && styles.chipTextSelected,
-                ]}
-              >
-                {f.label}
-              </Text>
+              {f.icon ? (
+                <Ionicons name={f.icon} size={16} color={isSelected ? "#fff" : f.tint ?? "#3c3c43"} />
+              ) : (
+                <Text
+                  style={[
+                    styles.chipText,
+                    f.tint && !isSelected && { color: f.tint },
+                    isSelected && styles.chipTextSelected,
+                  ]}
+                >
+                  {f.label}
+                </Text>
+              )}
             </TouchableOpacity>
           );
         })}
