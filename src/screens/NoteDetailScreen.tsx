@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  Animated,
   Dimensions,
   GestureResponderEvent,
   Image,
@@ -163,6 +164,9 @@ export default function NoteDetailScreen() {
   const blockLayoutYRef = useRef<Map<string, number>>(new Map());
   // 長押しメニューの位置決めのため、各ブロックの本文Viewの参照を保持する
   const blockBodyRefs = useRef<Map<string, View>>(new Map());
+  // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
+  // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
+  const menuHighlightScale = useRef(new Animated.Value(1)).current;
   const jumpedBlockIdRef = useRef<string | null>(null);
 
   // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
@@ -315,6 +319,13 @@ export default function NoteDetailScreen() {
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
       setMenuAnchor({ blockId: block.id, x, y, width, height });
+      menuHighlightScale.setValue(1);
+      Animated.spring(menuHighlightScale, {
+        toValue: 1.08,
+        friction: 4,
+        tension: 160,
+        useNativeDriver: true,
+      }).start();
     });
   };
 
@@ -1063,7 +1074,7 @@ export default function NoteDetailScreen() {
         <Pressable style={styles.menuOverlay} onPress={closeBlockMenu}>
           {menuAnchor && menuBlock ? (
             <>
-              <View
+              <Animated.View
                 pointerEvents="none"
                 style={[
                   styles.menuHighlight,
@@ -1072,6 +1083,7 @@ export default function NoteDetailScreen() {
                     left: menuAnchor.x,
                     width: menuAnchor.width,
                     height: menuAnchor.height,
+                    transform: [{ scale: menuHighlightScale }],
                   },
                 ]}
               >
@@ -1080,7 +1092,7 @@ export default function NoteDetailScreen() {
                     ? menuBlock.text || "SLIDE"
                     : menuBlock.text || "タップしてメモを追加"}
                 </Text>
-              </View>
+              </Animated.View>
               <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
                 {menuItems.map((item, index) => (
                   <TouchableOpacity
@@ -1289,7 +1301,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     justifyContent: "center",
-    transform: [{ scale: 1.04 }],
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
