@@ -94,6 +94,16 @@ export async function updateTitle(id: string, title: string): Promise<void> {
   await db.runAsync('UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?;', [title, now, id]);
 }
 
+export async function updateDuration(id: string, durationMs: number): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.runAsync('UPDATE sessions SET duration_ms = ?, updated_at = ? WHERE id = ?;', [
+    durationMs,
+    now,
+    id,
+  ]);
+}
+
 export async function deleteById(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM sessions WHERE id = ?;', [id]);

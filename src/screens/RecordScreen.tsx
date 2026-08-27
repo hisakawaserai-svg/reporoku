@@ -8,6 +8,9 @@ import {
   TouchableOpacity,
   Modal,
   Pressable,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useIsFocused } from "@react-navigation/native";
@@ -19,6 +22,12 @@ import {
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
 import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
+import * as ImagePicker from "expo-image-picker";
+import * as sessionsRepo from "../db/repositories/sessions";
+import * as blocksRepo from "../db/repositories/blocks";
+import * as audioFilesRepo from "../db/repositories/audioFiles";
+import { genId } from "../utils/id";
+import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
 
 type Block = { ms: number; text: string; kind: "text" | "sys" };
 
@@ -59,8 +68,106 @@ export default function RecordScreen() {
   const segStart = useRef<number | null>(null);
   const [leadSec, setLeadSec] = useState(1.2);
 
+  // DB連携用の状態
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionStartedAtRef = useRef(0);   // セッション全体の開始時刻(音声認識の再起動では変わらない)
+  const lastBlockIdRef = useRef<string | null>(null); // 直近確定した文字起こしブロックのID
+  const audioSeqRef = useRef(0);           // 音声ファイルの連番(再起動のたびにインクリメント)
+
+  const [questionModalVisible, setQuestionModalVisible] = useState(false);
+  const [questionTermInput, setQuestionTermInput] = useState("");
+  const [memoModalVisible, setMemoModalVisible] = useState(false);
+  const [memoInput, setMemoInput] = useState("");
+
   const push = (text: string, kind: Block["kind"] = "text", ms?: number) =>
     setBlocks((p) => [...p, { ms: ms ?? Date.now() - startedAt.current, text, kind }]);
+
+  const persistTranscriptBlock = (text: string, startMs: number) => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const id = genId();
+    lastBlockIdRef.current = id;
+    blocksRepo
+      .create({ id, sessionId, kind: "transcript", startMs, text })
+      .catch((e) => console.warn("[DB] transcriptブロックの保存に失敗しました", e));
+  };
+
+  const finalizeSessionDuration = () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    const durationMs = Math.max(0, Date.now() - sessionStartedAtRef.current);
+    sessionsRepo
+      .updateDuration(sessionId, durationMs)
+      .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
+  };
+
+  const toggleStarOnLastBlock = () => {
+    const id = lastBlockIdRef.current;
+    if (!id) return;
+    blocksRepo.toggleStar(id).catch((e) => console.warn("[DB] スター切替に失敗しました", e));
+  };
+
+  const toggleTodoOnLastBlock = () => {
+    const id = lastBlockIdRef.current;
+    if (!id) return;
+    blocksRepo.toggleTodo(id).catch((e) => console.warn("[DB] ToDo切替に失敗しました", e));
+  };
+
+  const confirmQuestion = () => {
+    const id = lastBlockIdRef.current;
+    const term = questionTermInput.trim();
+    setQuestionModalVisible(false);
+    setQuestionTermInput("");
+    if (!id) return;
+    blocksRepo
+      .setQuestion(id, true, term || null)
+      .catch((e) => console.warn("[DB] 質問の保存に失敗しました", e));
+  };
+
+  const confirmMemo = () => {
+    const sessionId = sessionIdRef.current;
+    const text = memoInput.trim();
+    setMemoModalVisible(false);
+    setMemoInput("");
+    if (!sessionId || !text) return;
+    const startMs = Date.now() - startedAt.current;
+    blocksRepo
+      .create({ id: genId(), sessionId, kind: "note", startMs, text })
+      .catch((e) => console.warn("[DB] メモの保存に失敗しました", e));
+  };
+
+  const handlePhotoCapture = async () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        push("[カメラ権限が拒否されました]", "sys");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const startMs = Date.now() - startedAt.current;
+
+      // cache URIのままだとOSに削除される恐れがあるため、documentDirectory配下へコピーする
+      let photoUri = result.assets[0].uri;
+      try {
+        photoUri = await persistPhotoFile(photoUri, sessionId);
+      } catch (copyErr) {
+        console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+      }
+
+      await blocksRepo.create({
+        id: genId(),
+        sessionId,
+        kind: "photo",
+        startMs,
+        photoUri,
+      });
+    } catch (e) {
+      console.warn("[DB] 写真ブロックの保存に失敗しました", e);
+    }
+  };
 
   // 起動時に端末の能力を調べる
   useEffect(() => {
@@ -98,6 +205,7 @@ export default function RecordScreen() {
         // 開始時刻の候補：interim が来ていればそれ、なければ「前の発言の終わり」
         const start = segStart.current ?? prevEnd.current;
         push(text, "text", start);
+        persistTranscriptBlock(text, start);
         prevEnd.current = now;      // 今の終わりを、次の発言の開始点にする
         segStart.current = null;    // 空文字finalでリセットすると、同じ発話が続いている場合に開始時刻がズレるため、ここでのみリセット
       }
@@ -118,6 +226,16 @@ export default function RecordScreen() {
 
   useSpeechRecognitionEvent("audioend", (e) => {
     if (e.uri) setAudioUris((p) => [...p, e.uri!]);
+    const sessionId = sessionIdRef.current;
+    if (e.uri && sessionId) {
+      const segmentStartedAt = startedAt.current;
+      const offsetMs = Math.max(0, segmentStartedAt - sessionStartedAtRef.current);
+      const durationMs = Math.max(0, Date.now() - segmentStartedAt);
+      const seq = audioSeqRef.current++;
+      audioFilesRepo
+        .create({ id: genId(), sessionId, fileUri: e.uri, seq, offsetMs, durationMs })
+        .catch((err) => console.warn("[DB] 音声ファイルの保存に失敗しました", err));
+    }
   });
 
   useSpeechRecognitionEvent("error", (e) => {
@@ -134,6 +252,7 @@ export default function RecordScreen() {
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       push("[停止しました]", "sys");
       setRunning(false);
+      finalizeSessionDuration();
       return;
     }
     failStreak.current += 1;
@@ -142,6 +261,7 @@ export default function RecordScreen() {
       push("[連続失敗のため中断。上のERRORを確認してください]", "sys");
       shouldRun.current = false;
       setRunning(false);
+      finalizeSessionDuration();
       return;
     }
     setRestarts((n) => n + 1);
@@ -153,13 +273,21 @@ export default function RecordScreen() {
   const useExternalicMic = false; // 外部マイクを使う場合は true にする
 
   const begin = () => {
+    // cache配下(既定値)だとOSに自動削除される恐れがあるため、documentDirectory配下を明示する
+    let audioOutputDirectory: string | undefined;
+    try {
+      audioOutputDirectory = getAudioDirectoryUri();
+    } catch (e) {
+      console.warn("[FS] 音声保存ディレクトリの準備に失敗しました。既定のcacheに保存されます", e);
+    }
+
     ExpoSpeechRecognitionModule.start({
       lang: "ja-JP",
       interimResults: true,
       continuous: true,
       requiresOnDeviceRecognition: true,
       addsPunctuation: true,
-      recordingOptions: { persist: true },
+      recordingOptions: { persist: true, outputDirectory: audioOutputDirectory },
       iosCategory: {
         category: "playAndRecord",
         categoryOptions: useExternalicMic ? ["defaultToSpeaker", "allowBluetooth"] : ["defaultToSpeaker"],
@@ -176,6 +304,7 @@ export default function RecordScreen() {
       return;
     }
     startedAt.current = Date.now();
+    sessionStartedAtRef.current = startedAt.current;
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
@@ -183,6 +312,15 @@ export default function RecordScreen() {
     setAudioUris([]);
     setRestarts(0);
     setRunning(true);
+
+    const sessionId = genId();
+    sessionIdRef.current = sessionId;
+    lastBlockIdRef.current = null;
+    audioSeqRef.current = 0;
+    sessionsRepo
+      .create({ id: sessionId, title: "", startedAt: sessionStartedAtRef.current })
+      .catch((e) => console.warn("[DB] セッションの作成に失敗しました", e));
+
     begin();
   };
 
@@ -240,12 +378,30 @@ export default function RecordScreen() {
     return () => clearInterval(id);
   }, [running]);
 
-  // ★/📝/❓/📷/✏️ タップ時の見た目のフィードバックのみ(実際のマーク付け・撮影・メモ挿入は未実装)
+  // ★/📝/❓/📷/✏️ タップ時の見た目のフィードバック + 実際のDB操作
   const [activeMark, setActiveMark] = useState<MarkKey | null>(null);
   const handleMarkPress = (key: MarkKey) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setActiveMark(key);
     setTimeout(() => setActiveMark((cur) => (cur === key ? null : cur)), 350);
+
+    switch (key) {
+      case "star":
+        toggleStarOnLastBlock();
+        break;
+      case "todo":
+        toggleTodoOnLastBlock();
+        break;
+      case "question":
+        setQuestionModalVisible(true);
+        break;
+      case "photo":
+        handlePhotoCapture();
+        break;
+      case "memo":
+        setMemoModalVisible(true);
+        break;
+    }
   };
 
   // 文字起こしリストの自動スクロール
@@ -378,6 +534,91 @@ export default function RecordScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={questionModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setQuestionModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.promptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.debugOverlay} onPress={() => setQuestionModalVisible(false)}>
+            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.debugTitle}>わからなかった単語</Text>
+              <TextInput
+                style={styles.promptInput}
+                value={questionTermInput}
+                onChangeText={setQuestionTermInput}
+                placeholder="例: アブレーション"
+                autoFocus
+              />
+              <View style={styles.promptButtonRow}>
+                <TouchableOpacity
+                  style={styles.pillButton}
+                  onPress={() => {
+                    setQuestionModalVisible(false);
+                    setQuestionTermInput("");
+                  }}
+                >
+                  <Text style={styles.pillButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pillButton, styles.pillButtonPrimary]}
+                  onPress={confirmQuestion}
+                >
+                  <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={memoModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setMemoModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.promptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.debugOverlay} onPress={() => setMemoModalVisible(false)}>
+            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.debugTitle}>メモ</Text>
+              <TextInput
+                style={[styles.promptInput, styles.promptInputMultiline]}
+                value={memoInput}
+                onChangeText={setMemoInput}
+                placeholder="メモを入力"
+                multiline
+                autoFocus
+              />
+              <View style={styles.promptButtonRow}>
+                <TouchableOpacity
+                  style={styles.pillButton}
+                  onPress={() => {
+                    setMemoModalVisible(false);
+                    setMemoInput("");
+                  }}
+                >
+                  <Text style={styles.pillButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pillButton, styles.pillButtonPrimary]}
+                  onPress={confirmMemo}
+                >
+                  <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -541,6 +782,28 @@ const styles = StyleSheet.create({
   debugTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
   debugLogScroll: { maxHeight: 160 },
   debugLeadRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+
+  promptKeyboardAvoider: { flex: 1 },
+  promptPanel: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 24,
+    alignSelf: "center",
+    width: "88%",
+    gap: 12,
+  },
+  promptInput: {
+    borderWidth: 1,
+    borderColor: "#e2e2e7",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: "#1c1c1e",
+  },
+  promptInputMultiline: { minHeight: 80, textAlignVertical: "top" },
+  promptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
   debugLeadLabel: { fontSize: 13, color: "#3c3c43", minWidth: 76 },
 
   pillButton: {
