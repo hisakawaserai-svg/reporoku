@@ -129,6 +129,72 @@ export async function update(id: string, text: string): Promise<void> {
   await db.runAsync('UPDATE blocks SET text = ?, is_edited = 1 WHERE id = ?;', [text, id]);
 }
 
+export async function remove(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM blocks WHERE id = ?;', [id]);
+}
+
+export interface MergeFlags {
+  isStarred: boolean;
+  isTodo: boolean;
+  todoDone: boolean;
+  isQuestion: boolean;
+  questionTerm: string | null;
+}
+
+// keepId側にmergedTextとflagsを反映し、removeId側を削除する(結合)
+export async function mergeBlocks(
+  keepId: string,
+  removeId: string,
+  mergedText: string,
+  flags: MergeFlags
+): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE blocks
+       SET text = ?, is_starred = ?, is_todo = ?, todo_done = ?, is_question = ?, question_term = ?, is_edited = 1
+       WHERE id = ?;`,
+      [
+        mergedText,
+        flags.isStarred ? 1 : 0,
+        flags.isTodo ? 1 : 0,
+        flags.todoDone ? 1 : 0,
+        flags.isQuestion ? 1 : 0,
+        flags.questionTerm,
+        keepId,
+      ]
+    );
+    await db.runAsync('DELETE FROM blocks WHERE id = ?;', [removeId]);
+  });
+}
+
+export interface SplitNewBlock {
+  id: string;
+  sessionId: string;
+  kind: BlockKind;
+  startMs: number;
+  text: string;
+}
+
+// idのブロックをleftTextに書き換え、newBlockを新しい行として挿入する(分割)。
+// 新しい行に★/ToDo/質問フラグは引き継がない(前半にのみ残す)
+export async function splitBlock(id: string, leftText: string, newBlock: SplitNewBlock): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('UPDATE blocks SET text = ?, is_edited = 1 WHERE id = ?;', [leftText, id]);
+    await db.runAsync(
+      `INSERT INTO blocks (
+         id, session_id, kind, start_ms, text, photo_uri,
+         is_starred, is_todo, todo_done, is_question, question_term,
+         is_edited, created_at
+       ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, NULL, 1, ?);`,
+      [newBlock.id, newBlock.sessionId, newBlock.kind, newBlock.startMs, newBlock.text, now]
+    );
+  });
+}
+
 export async function toggleStar(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE blocks SET is_starred = 1 - is_starred WHERE id = ?;', [id]);

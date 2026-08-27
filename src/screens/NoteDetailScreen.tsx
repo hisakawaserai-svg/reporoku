@@ -4,8 +4,10 @@ import {
   Image,
   KeyboardAvoidingView,
   LayoutChangeEvent,
+  Modal,
   PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,6 +28,7 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import * as sessionsRepo from "../db/repositories/sessions";
 import type { AudioFile, Block, Session } from "../db/types";
 import { resolveAudioPosition } from "../utils/audioTimeline";
+import { genId } from "../utils/id";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo";
 
@@ -130,6 +133,11 @@ export default function NoteDetailScreen() {
   // タイムライン上でテキストをタップして編集中のブロック(発言・メモ・写真キャプション共通)
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  // 長押しで開く「結合/分割」アクションシートの対象ブロック
+  const [menuBlockId, setMenuBlockId] = useState<string | null>(null);
+  // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
+  const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
+  const [splitIndex, setSplitIndex] = useState(0);
 
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
@@ -269,16 +277,98 @@ export default function NoteDetailScreen() {
   // 別のブロックの編集を始める前に、今編集中の内容があれば先に確定させておく
   const startEditingBlock = useCallback(
     async (block: Block) => {
+      if (splittingBlockId) return; // 分割位置の選択中はテキスト編集を開始しない
       if (editingBlockId && editingBlockId !== block.id) {
         await commitBlockEdit();
       }
       setEditingBlockId(block.id);
       setEditDraft(block.text ?? "");
     },
-    [editingBlockId, commitBlockEdit]
+    [editingBlockId, splittingBlockId, commitBlockEdit]
   );
 
   const cancelBlockEdit = () => setEditingBlockId(null);
+
+  // 長押しで「結合/分割」のアクションシートを開く。編集中・分割選択中は開かない
+  const openBlockMenu = (block: Block) => {
+    if (editingBlockId || splittingBlockId) return;
+    setMenuBlockId(block.id);
+  };
+
+  const closeBlockMenu = () => setMenuBlockId(null);
+
+  const startSplitting = (block: Block) => {
+    setMenuBlockId(null);
+    setSplittingBlockId(block.id);
+    setSplitIndex(Math.floor((block.text ?? "").length / 2));
+  };
+
+  const cancelSplitting = () => setSplittingBlockId(null);
+
+  // 選んだカーソル位置(文字インデックス)でブロックのテキストを前半/後半に分割する。
+  // 後半の開始時刻は、次のブロックとの間の秒数を文字数の比率で按分して見積もる
+  // (次のブロックがなければ順序を保つためだけに1msずらす)
+  const confirmSplit = useCallback(async () => {
+    const id = splittingBlockId;
+    setSplittingBlockId(null);
+    if (!id) return;
+    const block = blocks.find((b) => b.id === id);
+    if (!block || !block.text) return;
+
+    const idx = Math.max(1, Math.min(splitIndex, block.text.length - 1));
+    const leftText = block.text.slice(0, idx).trim();
+    const rightText = block.text.slice(idx).trim();
+    if (!leftText || !rightText) return;
+
+    const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
+    const nextBlock = sorted.find((b) => b.startMs > block.startMs);
+    const ratio = idx / block.text.length;
+    const rightStartMs = nextBlock
+      ? Math.round(block.startMs + ratio * (nextBlock.startMs - block.startMs))
+      : block.startMs + 1;
+
+    try {
+      await blocksRepo.splitBlock(id, leftText, {
+        id: genId(),
+        sessionId,
+        kind: block.kind,
+        startMs: rightStartMs,
+        text: rightText,
+      });
+      loadBlocks();
+    } catch (e) {
+      console.warn("[DB] ブロックの分割に失敗しました", e);
+    }
+  }, [splittingBlockId, splitIndex, blocks, sessionId, loadBlocks]);
+
+  // 前後どちらかの隣接ブロックとテキストを結合する。★/ToDo/質問フラグはORで両方引き継ぐ
+  const mergeWithNeighbor = useCallback(
+    async (block: Block, direction: "prev" | "next") => {
+      setMenuBlockId(null);
+      const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
+      const index = sorted.findIndex((b) => b.id === block.id);
+      const neighbor = direction === "prev" ? sorted[index - 1] : sorted[index + 1];
+      if (!neighbor || neighbor.kind === "photo" || block.kind === "photo") return;
+
+      const [earlier, later] =
+        neighbor.startMs < block.startMs ? [neighbor, block] : [block, neighbor];
+      const mergedText = `${earlier.text ?? ""} ${later.text ?? ""}`.trim();
+
+      try {
+        await blocksRepo.mergeBlocks(earlier.id, later.id, mergedText, {
+          isStarred: earlier.isStarred || later.isStarred,
+          isTodo: earlier.isTodo || later.isTodo,
+          todoDone: earlier.todoDone || later.todoDone,
+          isQuestion: earlier.isQuestion || later.isQuestion,
+          questionTerm: earlier.questionTerm ?? later.questionTerm ?? null,
+        });
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] ブロックの結合に失敗しました", e);
+      }
+    },
+    [blocks, loadBlocks]
+  );
 
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
   const seekToPosition = useCallback(
@@ -303,9 +393,9 @@ export default function NoteDetailScreen() {
   );
 
   const handleBlockPress = (block: Block) => {
-    // 編集中のブロック自身の行タップは、テキスト入力や完了/キャンセルボタンへの
+    // 編集中/分割位置選択中のブロック自身の行タップは、テキスト入力やボタンへの
     // タッチと競合しないよう、再生シークを行わない
-    if (block.id === editingBlockId) return;
+    if (block.id === editingBlockId || block.id === splittingBlockId) return;
     if (editingBlockId) {
       commitBlockEdit();
     }
@@ -460,6 +550,20 @@ export default function NoteDetailScreen() {
   const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
   const timelineGroups = groupByGap(filtered);
 
+  // 長押しアクションシートの対象ブロックと、結合/分割それぞれが可能かどうか
+  const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
+  const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
+  const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
+  const menuNextBlock =
+    menuBlockIndex >= 0 && menuBlockIndex < sortedBlocks.length - 1
+      ? sortedBlocks[menuBlockIndex + 1]
+      : null;
+  const canMergePrev =
+    !!menuBlock && menuBlock.kind !== "photo" && !!menuPrevBlock && menuPrevBlock.kind !== "photo";
+  const canMergeNext =
+    !!menuBlock && menuBlock.kind !== "photo" && !!menuNextBlock && menuNextBlock.kind !== "photo";
+  const canSplit = !!menuBlock && menuBlock.kind !== "photo" && (menuBlock.text ?? "").trim().length >= 2;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
@@ -554,9 +658,11 @@ export default function NoteDetailScreen() {
                       block.id === activeBlockId && styles.timelineRowActive,
                       block.id === jumpToBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
+                      block.id === splittingBlockId && styles.timelineRowEditing,
                     ]}
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
+                    onLongPress={() => openBlockMenu(block)}
                     onLayout={(e) => {
                       blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
                       if (
@@ -603,7 +709,31 @@ export default function NoteDetailScreen() {
                           </View>
                         )
                       ) : null}
-                      {editingBlockId === block.id ? (
+                      {splittingBlockId === block.id ? (
+                        <View>
+                          <Text style={styles.splitHintText}>分割したい位置をタップしてください</Text>
+                          <TextInput
+                            style={styles.timelineTextInput}
+                            value={block.text ?? ""}
+                            onChangeText={() => {}}
+                            onSelectionChange={(e) => setSplitIndex(e.nativeEvent.selection.start)}
+                            showSoftInputOnFocus={false}
+                            autoFocus
+                            multiline
+                          />
+                          <View style={styles.editActionsRow}>
+                            <TouchableOpacity style={styles.editActionButton} onPress={cancelSplitting}>
+                              <Text style={styles.editActionButtonText}>キャンセル</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                              onPress={confirmSplit}
+                            >
+                              <Text style={styles.editActionButtonPrimaryText}>この位置で分割</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ) : editingBlockId === block.id ? (
                         <View>
                           <TextInput
                             style={styles.timelineTextInput}
@@ -635,6 +765,7 @@ export default function NoteDetailScreen() {
                               ? startEditingBlock(block)
                               : handleBlockPress(block)
                           }
+                          onLongPress={() => openBlockMenu(block)}
                         >
                           <Text style={block.text ? styles.timelineText : styles.timelineTextPlaceholder}>
                             {block.text || "タップしてメモを追加"}
@@ -673,6 +804,37 @@ export default function NoteDetailScreen() {
         </View>
       ) : null}
       </KeyboardAvoidingView>
+
+      <Modal visible={menuBlockId !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
+        <Pressable style={styles.debugOverlay} onPress={closeBlockMenu}>
+          <Pressable style={styles.actionSheetPanel} onPress={(e) => e.stopPropagation()}>
+            {menuBlock && canMergePrev ? (
+              <TouchableOpacity
+                style={styles.actionSheetItem}
+                onPress={() => mergeWithNeighbor(menuBlock, "prev")}
+              >
+                <Text style={styles.actionSheetItemText}>前のブロックと結合</Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock && canMergeNext ? (
+              <TouchableOpacity
+                style={styles.actionSheetItem}
+                onPress={() => mergeWithNeighbor(menuBlock, "next")}
+              >
+                <Text style={styles.actionSheetItemText}>次のブロックと結合</Text>
+              </TouchableOpacity>
+            ) : null}
+            {menuBlock && canSplit ? (
+              <TouchableOpacity style={styles.actionSheetItem} onPress={() => startSplitting(menuBlock)}>
+                <Text style={styles.actionSheetItemText}>分割する</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={styles.actionSheetItem} onPress={closeBlockMenu}>
+              <Text style={[styles.actionSheetItemText, styles.actionSheetCancelText]}>キャンセル</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -778,6 +940,24 @@ const styles = StyleSheet.create({
   editActionButtonPrimary: { backgroundColor: "#06c" },
   editActionButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
   editActionButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
+  splitHintText: { fontSize: 12, color: "#8e8e93", marginBottom: 4 },
+
+  debugOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
+  actionSheetPanel: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  actionSheetItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e5ea",
+  },
+  actionSheetItemText: { fontSize: 16, color: "#06c", textAlign: "center" },
+  actionSheetCancelText: { color: "#8e8e93", fontWeight: "600" },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
   timelinePhotoPlaceholder: {
     width: "100%",
