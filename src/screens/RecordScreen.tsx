@@ -13,7 +13,8 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -28,11 +29,19 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 
-type Block = { ms: number; text: string; kind: "text" | "sys" };
+type Block = {
+  id?: string;
+  ms: number;
+  text: string;
+  kind: "text" | "sys";
+  isStarred?: boolean;
+  isTodo?: boolean;
+};
 
-const LEVEL_BAR_COUNT = 5;
 const KEEP_AWAKE_TAG = "record-screen";
+const LIVE_FOCUS_BAR_COUNT = 5;
 
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
@@ -54,7 +63,11 @@ const MARK_TILES: {
 // App.tsx にあった録音・文字起こしの検証コードをそのまま移植したもの。
 // ロジックは変更していない。見た目(スタイル)のみ Claude Design 案(3a)に合わせて調整。
 export default function RecordScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
+  const pausedAccumMsRef = useRef(0);       // 一時停止までに経過していた時間の合計(再開後もタイマーを継続させる)
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [interim, setInterim] = useState("");
   const [audioUris, setAudioUris] = useState<string[]>([]);
@@ -79,13 +92,12 @@ export default function RecordScreen() {
   const [memoModalVisible, setMemoModalVisible] = useState(false);
   const [memoInput, setMemoInput] = useState("");
 
-  const push = (text: string, kind: Block["kind"] = "text", ms?: number) =>
-    setBlocks((p) => [...p, { ms: ms ?? Date.now() - startedAt.current, text, kind }]);
+  const push = (text: string, kind: Block["kind"] = "text", ms?: number, id?: string) =>
+    setBlocks((p) => [...p, { id, ms: ms ?? Date.now() - startedAt.current, text, kind }]);
 
-  const persistTranscriptBlock = (text: string, startMs: number) => {
+  const persistTranscriptBlock = (id: string, text: string, startMs: number) => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    const id = genId();
     lastBlockIdRef.current = id;
     blocksRepo
       .create({ id, sessionId, kind: "transcript", startMs, text })
@@ -101,15 +113,31 @@ export default function RecordScreen() {
       .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
   };
 
+  // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)
+  const goToRecordComplete = () => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    navigation.navigate("RecordComplete", { noteId: sessionId });
+  };
+
+  // 終了後、次の録音に備えて画面をまっさらな状態に戻す(保存結果は録音完了画面で確認できるため)
+  const clearScreenState = () => {
+    setBlocks([]);
+    setAudioUris([]);
+    setInterim("");
+  };
+
   const toggleStarOnLastBlock = () => {
     const id = lastBlockIdRef.current;
     if (!id) return;
+    setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isStarred: !b.isStarred } : b)));
     blocksRepo.toggleStar(id).catch((e) => console.warn("[DB] スター切替に失敗しました", e));
   };
 
   const toggleTodoOnLastBlock = () => {
     const id = lastBlockIdRef.current;
     if (!id) return;
+    setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isTodo: !b.isTodo } : b)));
     blocksRepo.toggleTodo(id).catch((e) => console.warn("[DB] ToDo切替に失敗しました", e));
   };
 
@@ -204,8 +232,9 @@ export default function RecordScreen() {
       if (text) {
         // 開始時刻の候補：interim が来ていればそれ、なければ「前の発言の終わり」
         const start = segStart.current ?? prevEnd.current;
-        push(text, "text", start);
-        persistTranscriptBlock(text, start);
+        const id = genId();
+        push(text, "text", start, id);
+        persistTranscriptBlock(id, text, start);
         prevEnd.current = now;      // 今の終わりを、次の発言の開始点にする
         segStart.current = null;    // 空文字finalでリセットすると、同じ発話が続いている場合に開始時刻がズレるため、ここでのみリセット
       }
@@ -247,12 +276,19 @@ export default function RecordScreen() {
 
   // ここが肝：終了したら、止めたいわけでなければ即座に再開
   useSpeechRecognitionEvent("end", () => {
+    if (isPausingRef.current) {
+      // 一時停止による停止。セッションは終了させず、次の「再開」を待つ
+      isPausingRef.current = false;
+      setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+      return;
+    }
     if (!shouldRun.current) {
       // 録音用のオーディオセッション(playAndRecord)を解放し、再生時にBluetoothが切れないようにする
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
-      push("[停止しました]", "sys");
       setRunning(false);
       finalizeSessionDuration();
+      goToRecordComplete();
+      clearScreenState();
       return;
     }
     failStreak.current += 1;
@@ -329,6 +365,34 @@ export default function RecordScreen() {
     ExpoSpeechRecognitionModule.stop();
   };
 
+  const pause = () => {
+    isPausingRef.current = true;
+    shouldRun.current = false; // 自動再開を止める
+    pausedAccumMsRef.current += Date.now() - startedAt.current;
+    ExpoSpeechRecognitionModule.stop();
+    setPaused(true);
+  };
+
+  const resume = () => {
+    shouldRun.current = true;
+    setPaused(false);
+    begin(); // audiostartでstartedAt.currentが更新され、経過時間はpausedAccumMsRefに加算して継続する
+  };
+
+  // 一時停止中は音声認識が既に止まっているため、endイベントを待たずにここで終了処理を行う
+  const endSession = () => {
+    if (paused) {
+      shouldRun.current = false;
+      setPaused(false);
+      setRunning(false);
+      finalizeSessionDuration();
+      goToRecordComplete();
+      clearScreenState();
+      return;
+    }
+    stop();
+  };
+
   const fmt = (ms: number) => {
     const s = Math.floor(ms / 1000);
     return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -352,30 +416,21 @@ export default function RecordScreen() {
     };
   }, [isFocused]);
 
-  // 経過時間の表示用ティッカー
+  // 経過時間の表示用ティッカー(一時停止中は加算を止め、再開後は続きから計測する)
   const [elapsedMs, setElapsedMs] = useState(0);
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setElapsedMs(Date.now() - startedAt.current), 200);
+    if (!running || paused) return;
+    const id = setInterval(
+      () => setElapsedMs(pausedAccumMsRef.current + (Date.now() - startedAt.current)),
+      200
+    );
     return () => clearInterval(id);
-  }, [running]);
-  useEffect(() => {
-    if (!running) setElapsedMs(0);
-  }, [running]);
-
-  // 録音レベルバーのダミーアニメーション(後で実データに差し替え予定)
-  const [levels, setLevels] = useState<number[]>(new Array(LEVEL_BAR_COUNT).fill(4));
+  }, [running, paused]);
   useEffect(() => {
     if (!running) {
-      setLevels(new Array(LEVEL_BAR_COUNT).fill(4));
-      return;
+      setElapsedMs(0);
+      pausedAccumMsRef.current = 0;
     }
-    const id = setInterval(() => {
-      setLevels(
-        Array.from({ length: LEVEL_BAR_COUNT }, () => 4 + Math.round(Math.random() * 18))
-      );
-    }, 220);
-    return () => clearInterval(id);
   }, [running]);
 
   // ★/📝/❓/📷/✏️ タップ時の見た目のフィードバック + 実際のDB操作
@@ -408,7 +463,7 @@ export default function RecordScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
         <TouchableOpacity
           style={styles.debugButton}
@@ -418,24 +473,12 @@ export default function RecordScreen() {
           <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#c7c7cc" />
         </TouchableOpacity>
 
-        <View style={styles.recordingBadge}>
-          <View style={[styles.recordingDot, !running && styles.recordingDotIdle]} />
-          <Text style={styles.recordingBadgeText}>{running ? "収録中" : "待機中"}</Text>
-        </View>
-
-        <Text style={styles.timerText}>{fmt(elapsedMs)}</Text>
-
-        <View style={styles.levelBarsRow}>
-          {levels.map((h, i) => (
-            <View
-              key={i}
-              style={[
-                styles.levelBar,
-                { height: h },
-                !running && styles.levelBarIdle,
-              ]}
-            />
-          ))}
+        <View style={styles.statusRow}>
+          <View style={[styles.recordingDot, !(running && !paused) && styles.recordingDotIdle]} />
+          <Text style={styles.statusLabel}>
+            {paused ? "一時停止中" : running ? "収録中" : "待機中"}
+          </Text>
+          <Text style={styles.statusTimer}>{fmt(elapsedMs)}</Text>
         </View>
       </View>
 
@@ -450,6 +493,31 @@ export default function RecordScreen() {
             <Text key={i} style={styles.sysText}>
               [{fmt(b.ms)}] {b.text}
             </Text>
+          ) : b.isStarred || b.isTodo ? (
+            <View
+              key={i}
+              style={[
+                styles.transcriptMarkedRow,
+                { borderLeftColor: b.isStarred ? "#f5a623" : "#34c759" },
+              ]}
+            >
+              <View style={styles.transcriptMarkedHeader}>
+                <Ionicons
+                  name={b.isStarred ? "star" : "checkmark"}
+                  size={13}
+                  color={b.isStarred ? "#c98a00" : "#2fa84f"}
+                />
+                <Text
+                  style={[
+                    styles.transcriptMarkedTime,
+                    { color: b.isStarred ? "#c98a00" : "#2fa84f" },
+                  ]}
+                >
+                  {fmt(b.ms)}
+                </Text>
+              </View>
+              <Text style={styles.transcriptText}>{b.text}</Text>
+            </View>
           ) : (
             <View key={i} style={styles.transcriptRow}>
               <Text style={styles.transcriptTime}>{fmt(b.ms)}</Text>
@@ -457,7 +525,6 @@ export default function RecordScreen() {
             </View>
           )
         )}
-        {interim ? <Text style={styles.interimText}>… {interim}</Text> : null}
         {!blocks.length && !interim ? (
           <Text style={styles.placeholderText}>
             {running ? "話しかけると文字起こしが表示されます" : "「開始」を押すと録音が始まります"}
@@ -468,29 +535,37 @@ export default function RecordScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={styles.bottomSection}>
-        <View style={styles.controlCapsule}>
-          <TouchableOpacity
-            style={styles.controlButtonWhite}
-            onPress={running ? stop : start}
-            activeOpacity={0.7}
-          >
-            <Ionicons name={running ? "pause" : "play"} size={26} color="#1c1c1e" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.controlButtonRed, !running && styles.controlButtonDisabled]}
-            onPress={stop}
-            disabled={!running}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="square" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
+      <LiveFocusBand text={interim} running={running && !paused} />
 
-        <View style={styles.tileRow}>
-          {MARK_TILES.map((t) => (
-            <MarkTile key={t.key} tile={t} active={activeMark === t.key} onPress={handleMarkPress} />
-          ))}
+      <View style={styles.bottomSection}>
+        <View style={styles.bottomCard}>
+          <View style={styles.tileRow}>
+            {MARK_TILES.map((t) => (
+              <MarkTile key={t.key} tile={t} active={activeMark === t.key} onPress={handleMarkPress} />
+            ))}
+          </View>
+
+          <View style={styles.controlRow}>
+            <TouchableOpacity
+              style={styles.controlButtonPause}
+              onPress={paused ? resume : running ? pause : start}
+              activeOpacity={0.75}
+            >
+              <Ionicons name={running && !paused ? "pause" : "play"} size={18} color="#1c1c1e" />
+              <Text style={styles.controlButtonPauseText}>
+                {paused ? "再開" : running ? "一時停止" : "開始"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.controlButtonStop, !running && styles.controlButtonDisabled]}
+              onPress={endSession}
+              disabled={!running}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="square" size={14} color="#fff" />
+              <Text style={styles.controlButtonStopText}>終了</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -660,54 +735,111 @@ function MarkTile({
   );
 }
 
+// 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
+// 縮小(1行)⇄展開(円形ビジュアル+複数行テキスト)はタップで切り替える。
+// 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
+function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 収録が止まったら展開状態のままにしない
+  useEffect(() => {
+    if (!running) setExpanded(false);
+  }, [running]);
+
+  const handleToggle = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setExpanded((prev) => !prev);
+  };
+
+  // 音量バー用のダミーレベル(実データではなく簡易な擬似アニメーション)。展開中は大きい円、縮小中はミニイコライザーとして使う。
+  const [circleLevels, setCircleLevels] = useState<number[]>(
+    new Array(LIVE_FOCUS_BAR_COUNT).fill(4)
+  );
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => {
+      setCircleLevels(
+        Array.from({ length: LIVE_FOCUS_BAR_COUNT }, () => 4 + Math.round(Math.random() * 14))
+      );
+    }, 220);
+    return () => clearInterval(id);
+  }, [running]);
+
+  if (!running) return null;
+
+  return (
+    <View style={styles.liveFocusContainer}>
+      <View style={styles.liveFocusDivider} />
+      <TouchableOpacity
+        activeOpacity={0.75}
+        onPress={handleToggle}
+        style={expanded ? styles.liveFocusExpanded : styles.liveFocusCollapsed}
+      >
+        {expanded ? (
+          <>
+            <View style={styles.liveFocusCircle}>
+              <View style={styles.liveFocusCircleBars}>
+                {circleLevels.map((h, i) => (
+                  <View key={i} style={[styles.liveFocusBar, { height: h }]} />
+                ))}
+              </View>
+            </View>
+            <Text style={styles.liveFocusTextExpanded}>{text}</Text>
+          </>
+        ) : (
+          <View style={styles.liveFocusRow}>
+            <View style={styles.miniEqualizer}>
+              {circleLevels.slice(0, 3).map((h, i) => (
+                <View
+                  key={i}
+                  style={[styles.miniEqualizerBar, { height: Math.min(14, h) }]}
+                />
+              ))}
+            </View>
+            <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="tail">
+              {text}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fafafc" },
 
   debugButton: { position: "absolute", top: 0, right: 16, zIndex: 1 },
 
-  topSection: { alignItems: "center", paddingTop: 6, paddingBottom: 4 },
-  recordingBadge: {
+  topSection: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
+  statusRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fdeaea",
-    borderRadius: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    gap: 5,
+    gap: 7,
   },
-  recordingDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#e0342f" },
+  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#e0342f" },
   recordingDotIdle: { backgroundColor: "#b8b8bd" },
-  recordingBadgeText: { fontSize: 12, color: "#3c3c43", fontWeight: "500" },
-
-  timerText: {
-    fontSize: 38,
-    fontWeight: "700",
+  statusLabel: { fontSize: 16, color: "#1c1c1e", fontWeight: "600" },
+  statusTimer: {
+    fontSize: 16,
+    fontWeight: "600",
     fontVariant: ["tabular-nums"],
     color: "#1c1c1e",
-    marginTop: 5,
-    fontFamily: "Menlo",
   },
-
-  levelBarsRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 4,
-    height: 16,
-    marginTop: 5,
-  },
-  levelBar: {
-    width: 4,
-    borderRadius: 2,
-    backgroundColor: "#8fb4f5",
-  },
-  levelBarIdle: { backgroundColor: "#e2e2e7" },
 
   transcriptArea: { flex: 1, marginTop: 4, paddingHorizontal: 20 },
   transcriptContent: { paddingBottom: 16 },
   transcriptRow: { flexDirection: "row", marginBottom: 10, gap: 8 },
   transcriptTime: { fontSize: 12, color: "#8e8e93", marginTop: 2, width: 40 },
   transcriptText: { fontSize: 16, color: "#1c1c1e", flex: 1, lineHeight: 22 },
-  interimText: { fontSize: 16, color: "#a0a0a6", marginBottom: 10 },
+  transcriptMarkedRow: {
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+    marginBottom: 14,
+    gap: 3,
+  },
+  transcriptMarkedHeader: { flexDirection: "row", alignItems: "center", gap: 5 },
+  transcriptMarkedTime: { fontSize: 13, fontWeight: "700" },
   sysText: { fontSize: 12, color: "#c00", marginBottom: 8 },
   placeholderText: {
     fontSize: 13,
@@ -716,46 +848,94 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
 
-  bottomSection: { paddingHorizontal: 14, paddingBottom: 8, paddingTop: 4, gap: 10 },
+  liveFocusContainer: {
+    width: "100%",
+    paddingHorizontal: 24,
+  },
+  liveFocusDivider: {
+    height: 1,
+    backgroundColor: "#e5e5ea",
+    marginBottom: 10,
+  },
+  liveFocusCollapsed: {
+    width: "100%",
+    paddingBottom: 8,
+  },
+  liveFocusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  miniEqualizer: { flexDirection: "row", alignItems: "center", gap: 2, height: 14 },
+  miniEqualizerBar: { width: 2, borderRadius: 1, backgroundColor: "#9c9ca3" },
+  liveFocusTextCollapsed: { flex: 1, fontSize: 13, color: "#a0a0a6" },
 
-  controlCapsule: {
-    alignSelf: "center",
+  liveFocusExpanded: {
+    width: "100%",
+    paddingBottom: 8,
+    alignItems: "center",
+    gap: 12,
+  },
+  liveFocusCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "#1c1c1e",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  liveFocusCircleBars: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    backgroundColor: "rgba(255,255,255,0.7)",
-    borderRadius: 34,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.9)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 4,
+    gap: 3,
+    height: 22,
   },
-  controlButtonWhite: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  liveFocusBar: { width: 3, borderRadius: 1.5, backgroundColor: "#9c9ca3" },
+  liveFocusTextExpanded: {
+    fontSize: 14,
+    color: "#a0a0a6",
+    textAlign: "center",
+    lineHeight: 20,
+    minHeight: 20,
+  },
+
+  bottomSection: { paddingHorizontal: 14, paddingBottom: 8, paddingTop: 4 },
+  bottomCard: {
     backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+    paddingBottom: 14,
+    gap: 14,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 2,
   },
-  controlButtonRed: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#e0342f",
-    justifyContent: "center",
-    alignItems: "center",
+
+  controlRow: {
+    flexDirection: "row",
+    gap: 10,
   },
+  controlButtonPause: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#eceef1",
+  },
+  controlButtonPauseText: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
+  controlButtonStop: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#e0342f",
+  },
+  controlButtonStopText: { fontSize: 16, fontWeight: "600", color: "#fff" },
   controlButtonDisabled: { opacity: 0.35 },
 
   tileRow: { flexDirection: "row", justifyContent: "center", gap: 11 },
