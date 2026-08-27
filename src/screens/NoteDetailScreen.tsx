@@ -34,6 +34,7 @@ import type { AudioFile, Block, Session } from "../db/types";
 import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
+import PhotoViewerModal from "../components/PhotoViewerModal";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
@@ -159,6 +160,8 @@ export default function NoteDetailScreen() {
   // 「メモを追加」で本文を入力してもらうためのプロンプト(挿入位置の基準となるブロックID)
   const [memoPromptAfterBlockId, setMemoPromptAfterBlockId] = useState<string | null>(null);
   const [memoPromptDraft, setMemoPromptDraft] = useState("");
+  // 写真ブロックをタップして全画面表示中のブロック
+  const [viewerBlockId, setViewerBlockId] = useState<string | null>(null);
 
   const player = useAudioPlayer();
   const status = useAudioPlayerStatus(player);
@@ -334,6 +337,9 @@ export default function NoteDetailScreen() {
   };
 
   const closeBlockMenu = () => setMenuAnchor(null);
+
+  const openPhotoViewer = (block: Block) => setViewerBlockId(block.id);
+  const closePhotoViewer = () => setViewerBlockId(null);
 
   const startSplitting = (block: Block) => {
     setMenuAnchor(null);
@@ -755,6 +761,7 @@ export default function NoteDetailScreen() {
   const menuBlockId = menuAnchor?.blockId ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
   const menuBlockMeta = menuBlock ? kindMeta(menuBlock) : null;
+  const viewerBlock = viewerBlockId ? blocks.find((b) => b.id === viewerBlockId) ?? null : null;
   const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
   const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
   const menuNextBlock =
@@ -1006,7 +1013,13 @@ export default function NoteDetailScreen() {
                       </View>
                       {block.kind === "photo" ? (
                         block.photoUri ? (
-                          <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={() => openPhotoViewer(block)}
+                            onLongPress={() => openBlockMenu(block)}
+                          >
+                            <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
+                          </TouchableOpacity>
                         ) : (
                           <View style={styles.timelinePhotoPlaceholder}>
                             <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
@@ -1260,6 +1273,13 @@ export default function NoteDetailScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      <PhotoViewerModal
+        visible={viewerBlockId !== null}
+        photoUri={viewerBlock?.photoUri ?? null}
+        caption={viewerBlock?.text ?? null}
+        onClose={closePhotoViewer}
+      />
     </SafeAreaView>
   );
 }
