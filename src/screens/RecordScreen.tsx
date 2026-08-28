@@ -160,13 +160,6 @@ export default function RecordScreen() {
   const lastBlockIdRef = useRef<string | null>(null); // 直近確定した文字起こしブロックのID
   const audioSeqRef = useRef(0);           // 音声ファイルの連番(再起動のたびにインクリメント)
 
-  // ❓は「質問」(あとで聞きたいこと)か「用語」(わからなかった言葉)かを最初に選ばせる。
-  // questionModalVisible/questionTermInputは「用語」を選んだ場合の単語入力ステップとして再利用する
-  const [questionChoiceVisible, setQuestionChoiceVisible] = useState(false);
-  const [questionModalVisible, setQuestionModalVisible] = useState(false);
-  const [questionTermInput, setQuestionTermInput] = useState("");
-  // ❓の対象ブロック。短押し時はlastBlockIdRef、タイル長押しのピッカーからは選択したブロックが入る
-  const questionTargetBlockIdRef = useRef<string | null>(null);
   const [memoModalVisible, setMemoModalVisible] = useState(false);
   const [memoInput, setMemoInput] = useState("");
 
@@ -192,6 +185,10 @@ export default function RecordScreen() {
   const [scrollPaused, setScrollPaused] = useState(false);
   // 一時停止を始めた時点の発言ブロック数。バッジの「新着N件」はここからの増分
   const pauseBaselineCountRef = useRef(0);
+  // 「↓ 新着N件」バッジは、増えた分が画面内に収まらずスクロールしないと見えない場合だけ出したい。
+  // ScrollViewの表示領域とコンテンツ全体の高さを比較してその判定に使う
+  const [transcriptViewportHeight, setTranscriptViewportHeight] = useState(0);
+  const [transcriptContentHeight, setTranscriptContentHeight] = useState(0);
 
   // セッション全体(録音済み音声の累積時間)での経過ms。再起動をまたいでも連続した値になる
   const sessionElapsedMs = () => contentMsRef.current + Math.max(0, Date.now() - startedAt.current);
@@ -245,39 +242,14 @@ export default function RecordScreen() {
     blocksRepo.toggleTodo(id).catch((e) => console.warn("[DB] ToDo切替に失敗しました", e));
   };
 
-  // 2文字以上のカタカナ連続(長音符ー含む)のうち最も長いものを、用語入力欄の初期値候補として返す
-  const extractLongestKatakana = (text: string | null | undefined): string => {
-    if (!text) return "";
-    const matches = text.match(/[ァ-ヶー]{2,}/g);
-    if (!matches || matches.length === 0) return "";
-    return matches.reduce((longest, cur) => (cur.length > longest.length ? cur : longest), "");
-  };
-
-  // ❓の2択(質問/用語)。「質問」は追加入力なしで即確定、「用語」は単語入力ステップに進む
-  const chooseQuestionKind = (kind: "question" | "term") => {
-    setQuestionChoiceVisible(false);
-    const id = questionTargetBlockIdRef.current;
-    if (kind === "question") {
-      if (!id) return;
-      blocksRepo
-        .setQuestion(id, true, null, "question")
-        .catch((e) => console.warn("[DB] 質問の保存に失敗しました", e));
-      return;
-    }
-    const target = blocks.find((b) => b.id === id);
-    setQuestionTermInput(extractLongestKatakana(target?.text));
-    setQuestionModalVisible(true);
-  };
-
-  const confirmQuestion = () => {
-    const id = questionTargetBlockIdRef.current;
-    const term = questionTermInput.trim();
-    setQuestionModalVisible(false);
-    setQuestionTermInput("");
+  // ★/📝と同じ「即座にマークするだけ」の挙動。録音中は質問/用語の仕分けをさせず、
+  // is_questionだけ立てて後でノート詳細画面から落ち着いて仕分けてもらう
+  // (question_kind/question_termはここでは一切触れない)
+  const toggleQuestionOnLastBlock = () => {
+    const id = lastBlockIdRef.current;
     if (!id) return;
-    blocksRepo
-      .setQuestion(id, true, term || null, "term")
-      .catch((e) => console.warn("[DB] 質問の保存に失敗しました", e));
+    setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isQuestion: !b.isQuestion } : b)));
+    blocksRepo.toggleQuestion(id).catch((e) => console.warn("[DB] ❓切替に失敗しました", e));
   };
 
   const confirmMemo = () => {
@@ -287,8 +259,12 @@ export default function RecordScreen() {
     setMemoInput("");
     if (!sessionId || !text) return;
     const startMs = sessionElapsedMs();
+    const id = genId();
+    // DBには文字起こしと区別できる"note"種別で保存するが、収録画面のログはtext/sysしか
+    // 描画しないため、その場でログにも出るようsysブロックとして画面にも積む
+    push(`📝 メモ: ${text}`, "sys", startMs, id);
     blocksRepo
-      .create({ id: genId(), sessionId, kind: "note", startMs, text })
+      .create({ id, sessionId, kind: "note", startMs, text })
       .catch((e) => console.warn("[DB] メモの保存に失敗しました", e));
   };
 
@@ -371,18 +347,14 @@ export default function RecordScreen() {
     blocksRepo.toggleTodo(id).catch((e) => console.warn("[DB] ToDo切替に失敗しました", e));
   };
 
+  // ★/📝と同じ「即座にマークするだけ」の挙動。question_kind/question_termには触れない
+  // (仕分けはノート詳細画面の長押しメニューで後から行う)
   const toggleBlockQuestion = (block: Block) => {
     setMenuAnchor(null);
     const id = block.id;
     if (!id) return;
-    const next = !block.isQuestion;
-    setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isQuestion: next } : b)));
-    // このトグルは単純なON/OFFのため、質問集(question)側の対象として扱う
-    // (用語のような追加入力は求めないため。question_kindが未設定のままだと
-    // 質問集・用語集のどちらにも表示されなくなってしまう)
-    blocksRepo
-      .setQuestion(id, next, null, next ? "question" : null)
-      .catch((e) => console.warn("[DB] 質問マークの切替に失敗しました", e));
+    setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isQuestion: !b.isQuestion } : b)));
+    blocksRepo.toggleQuestion(id).catch((e) => console.warn("[DB] ❓切替に失敗しました", e));
   };
 
   const startEditingBlock = (block: Block) => {
@@ -721,8 +693,7 @@ export default function RecordScreen() {
         toggleTodoOnLastBlock();
         break;
       case "question":
-        questionTargetBlockIdRef.current = lastBlockIdRef.current;
-        setQuestionChoiceVisible(true);
+        toggleQuestionOnLastBlock();
         break;
       case "photo":
         handlePhotoCapture();
@@ -755,8 +726,7 @@ export default function RecordScreen() {
     } else if (markSelectMode === "todo") {
       toggleBlockTodo(block);
     } else if (markSelectMode === "question") {
-      questionTargetBlockIdRef.current = block.id ?? null;
-      setQuestionChoiceVisible(true);
+      toggleBlockQuestion(block);
     }
     setMarkSelectMode(null);
   };
@@ -887,6 +857,9 @@ export default function RecordScreen() {
   // 「↓ 新着N件」バッジ用: 一時停止中に増えた発言ブロックの件数
   const textBlockCount = blocks.filter((b) => b.kind === "text").length;
   const newArrivalCount = scrollPaused ? Math.max(0, textBlockCount - pauseBaselineCountRef.current) : 0;
+  // 増えた分もまだ表示領域に収まっている(=スクロールしなくても見えている)場合は、
+  // バッジを出す必要がない
+  const transcriptOverflowing = transcriptContentHeight > transcriptViewportHeight;
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -925,7 +898,7 @@ export default function RecordScreen() {
           </View>
         </View>
       ) : null}
-      {scrollPaused && newArrivalCount > 0 ? (
+      {scrollPaused && newArrivalCount > 0 && transcriptOverflowing ? (
         <View style={styles.followBadgeContainer} pointerEvents="box-none">
           <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoScroll}>
             <Ionicons name="arrow-down" size={13} color="#fff" />
@@ -937,7 +910,9 @@ export default function RecordScreen() {
         ref={scrollRef}
         style={styles.transcriptArea}
         contentContainerStyle={styles.transcriptContent}
-        onContentSizeChange={() => {
+        onLayout={(e) => setTranscriptViewportHeight(e.nativeEvent.layout.height)}
+        onContentSizeChange={(_w, h) => {
+          setTranscriptContentHeight(h);
           if (!scrollPaused) scrollRef.current?.scrollToEnd({ animated: true });
         }}
       >
@@ -1134,81 +1109,6 @@ export default function RecordScreen() {
       </Modal>
 
       <Modal
-        visible={questionChoiceVisible}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setQuestionChoiceVisible(false)}
-      >
-        <Pressable style={styles.debugOverlay} onPress={() => setQuestionChoiceVisible(false)}>
-          <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.debugTitle}>❓を記録</Text>
-            <View style={styles.questionChoiceRow}>
-              <TouchableOpacity
-                style={styles.questionChoiceButton}
-                activeOpacity={0.8}
-                onPress={() => chooseQuestionKind("question")}
-              >
-                <Ionicons name="help-circle" size={28} color="#7c4dff" />
-                <Text style={styles.questionChoiceLabel}>質問</Text>
-                <Text style={styles.questionChoiceHint}>あとで聞きたいこと</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.questionChoiceButton}
-                activeOpacity={0.8}
-                onPress={() => chooseQuestionKind("term")}
-              >
-                <Ionicons name="book" size={28} color="#7c4dff" />
-                <Text style={styles.questionChoiceLabel}>用語</Text>
-                <Text style={styles.questionChoiceHint}>わからなかった言葉</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal
-        visible={questionModalVisible}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setQuestionModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          style={styles.promptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.debugOverlay} onPress={() => setQuestionModalVisible(false)}>
-            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.debugTitle}>わからなかった単語</Text>
-              <TextInput
-                style={styles.promptInput}
-                value={questionTermInput}
-                onChangeText={setQuestionTermInput}
-                placeholder="例: アブレーション"
-                autoFocus
-              />
-              <View style={styles.promptButtonRow}>
-                <TouchableOpacity
-                  style={styles.pillButton}
-                  onPress={() => {
-                    setQuestionModalVisible(false);
-                    setQuestionTermInput("");
-                  }}
-                >
-                  <Text style={styles.pillButtonText}>キャンセル</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.pillButton, styles.pillButtonPrimary]}
-                  onPress={confirmQuestion}
-                >
-                  <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
         visible={memoModalVisible}
         animationType="fade"
         transparent
@@ -1263,7 +1163,7 @@ export default function RecordScreen() {
                     top: menuAnchor.y,
                     left: menuAnchor.x,
                     width: menuAnchor.width,
-                    height: menuAnchor.height,
+                    minHeight: menuAnchor.height,
                     transform: [{ scale: menuHighlightScale }],
                   },
                 ]}
@@ -1744,17 +1644,6 @@ const styles = StyleSheet.create({
     width: "88%",
     gap: 12,
   },
-  questionChoiceRow: { flexDirection: "row", gap: 12 },
-  questionChoiceButton: {
-    flex: 1,
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: 18,
-    borderRadius: 14,
-    backgroundColor: "#f5f0ff",
-  },
-  questionChoiceLabel: { fontSize: 16, fontWeight: "700", color: "#1c1c1e" },
-  questionChoiceHint: { fontSize: 11, color: "#8e8e93" },
   promptInput: {
     borderWidth: 1,
     borderColor: "#e2e2e7",

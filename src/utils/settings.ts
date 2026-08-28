@@ -21,7 +21,7 @@ export const SECTION_GAP_OPTIONS: { ms: number; label: string }[] = [
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
-  sectionGroupingEnabled: true,
+  sectionGroupingEnabled: false,
   defaultSectionGapMs: 5000,
 };
 

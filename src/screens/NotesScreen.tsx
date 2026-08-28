@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,14 +25,13 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
 
-type DisplayMode = "list" | "calendar" | "todo" | "question" | "glossary";
+type DisplayMode = "list" | "calendar" | "todo" | "question";
 
 const MODES: { key: DisplayMode; label: string }[] = [
   { key: "list", label: "リスト" },
   { key: "calendar", label: "カレンダー" },
   { key: "todo", label: "ToDo" },
   { key: "question", label: "質問" },
-  { key: "glossary", label: "用語集" },
 ];
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -81,56 +82,6 @@ function groupBySession(blocks: BlockWithSession[]): SessionGroup[] {
     groups[idx].items.push(block);
   }
   return groups;
-}
-
-// 50音索引の行(あ行〜わ行)。用語集の簡易グルーピングに使う
-const KANA_ROWS = ["あ", "か", "さ", "た", "な", "は", "ま", "や", "ら", "わ"] as const;
-type KanaRow = (typeof KANA_ROWS)[number];
-
-const KANA_ROW_CHARS: Record<KanaRow, string[]> = {
-  あ: ["あ", "い", "う", "え", "お", "ぁ", "ぃ", "ぅ", "ぇ", "ぉ"],
-  か: ["か", "き", "く", "け", "こ", "が", "ぎ", "ぐ", "げ", "ご"],
-  さ: ["さ", "し", "す", "せ", "そ", "ざ", "じ", "ず", "ぜ", "ぞ"],
-  た: ["た", "ち", "つ", "て", "と", "だ", "ぢ", "づ", "で", "ど", "っ"],
-  な: ["な", "に", "ぬ", "ね", "の"],
-  は: ["は", "ひ", "ふ", "へ", "ほ", "ば", "び", "ぶ", "べ", "ぼ", "ぱ", "ぴ", "ぷ", "ぺ", "ぽ"],
-  ま: ["ま", "み", "む", "め", "も"],
-  や: ["や", "ゆ", "よ", "ゃ", "ゅ", "ょ"],
-  ら: ["ら", "り", "る", "れ", "ろ"],
-  わ: ["わ", "を", "ん", "ゐ", "ゑ"],
-};
-
-// カタカナはひらがなの対応する行に丸める
-function toHiraganaChar(ch: string): string {
-  const code = ch.charCodeAt(0);
-  if (code >= 0x30a1 && code <= 0x30f6) return String.fromCharCode(code - 0x60);
-  return ch;
-}
-
-// question_term の先頭文字から、機械的に50音の行へ振り分ける。
-// 仮名以外(漢字・英数字など)は読み仮名を推定せず、コードポイント順で
-// 適当な行に配置する簡易実装とする
-function kanaRowOf(term: string): KanaRow {
-  if (!term) return "わ";
-  const ch = toHiraganaChar(term[0]);
-  for (const row of KANA_ROWS) {
-    if (KANA_ROW_CHARS[row].includes(ch)) return row;
-  }
-  const idx = (term.codePointAt(0) ?? 0) % KANA_ROWS.length;
-  return KANA_ROWS[idx];
-}
-
-type GlossaryGroup = { row: KanaRow; items: BlockWithSession[] };
-
-function groupByKanaRow(blocks: BlockWithSession[]): GlossaryGroup[] {
-  const byRow = new Map<KanaRow, BlockWithSession[]>();
-  for (const block of blocks) {
-    const term = block.questionTerm || block.text || "";
-    const row = kanaRowOf(term);
-    if (!byRow.has(row)) byRow.set(row, []);
-    byRow.get(row)!.push(block);
-  }
-  return KANA_ROWS.filter((row) => byRow.has(row)).map((row) => ({ row, items: byRow.get(row)! }));
 }
 
 function formatMonthKey(monthKey: string): string {
@@ -225,16 +176,31 @@ export default function NotesScreen() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [monthGroups, setMonthGroups] = useState<MonthGroup<SessionSummary>[]>([]);
   const [todos, setTodos] = useState<TodoGroups>({ pending: [], done: [] });
-  // 用語集(question_kind='term')。既存のvariable名のまま、質問(question_kind='question')は別状態にする
+  // 「ToDo」タブの項目を長押しして開く、本文の編集(対象ブロックID)
+  const [todoEditBlockId, setTodoEditBlockId] = useState<string | null>(null);
+  const [todoEditDraft, setTodoEditDraft] = useState("");
+  // ToDo/質問タブの「未対応/完了」「未解決/解決済み」区分の開閉状態
+  // (ノート詳細画面のセクション折りたたみと同じ考え方)
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
+  const toggleGroupCollapsed = (key: string) => {
+    setCollapsedGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  // ❓は「わからなかったこと全般」を記録する単一の機能。is_question=1の全件を持つ
   const [questions, setQuestions] = useState<BlockWithSession[]>([]);
-  const [questionMarks, setQuestionMarks] = useState<BlockWithSession[]>([]);
+  // 「質問」タブの各項目をタップして開く、Q(発言テキスト)とA(回答メモ)の編集(対象ブロックID)
+  const [answerPromptBlockId, setAnswerPromptBlockId] = useState<string | null>(null);
+  const [answerPromptQDraft, setAnswerPromptQDraft] = useState("");
+  const [answerPromptDraft, setAnswerPromptDraft] = useState("");
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
-  const glossaryScrollRef = useRef<ScrollView>(null);
-  const glossaryRowYRef = useRef<Map<string, number>>(new Map());
 
   const loadNotes = useCallback(async () => {
     try {
@@ -275,29 +241,77 @@ export default function NotesScreen() {
 
   const loadQuestions = useCallback(async () => {
     try {
-      const rows = await blocksRepo.listAllQuestions("term");
+      const rows = await blocksRepo.listAllQuestions();
       setQuestions(rows);
-    } catch (e) {
-      console.warn("[DB] 用語集の取得に失敗しました", e);
-    }
-  }, []);
-
-  const loadQuestionMarks = useCallback(async () => {
-    try {
-      const rows = await blocksRepo.listAllQuestions("question");
-      setQuestionMarks(rows);
     } catch (e) {
       console.warn("[DB] 質問一覧の取得に失敗しました", e);
     }
   }, []);
+
+  // 「質問」タブの項目をタップして開く、Q(発言テキスト)とA(回答メモ)の編集。
+  // 既に内容があれば編集できるよう、その内容を初期値にする
+  const startAnswerPrompt = (block: BlockWithSession) => {
+    setAnswerPromptBlockId(block.id);
+    setAnswerPromptQDraft(block.text ?? "");
+    setAnswerPromptDraft(block.questionTerm ?? "");
+  };
+
+  const cancelAnswerPrompt = () => {
+    setAnswerPromptBlockId(null);
+    setAnswerPromptQDraft("");
+    setAnswerPromptDraft("");
+  };
+
+  // Aを保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)。
+  // Qが空のままだと発言そのものが消えてしまうため、その場合はQの変更を破棄する
+  const confirmAnswerPrompt = async () => {
+    const id = answerPromptBlockId;
+    const question = answerPromptQDraft.trim();
+    const answer = answerPromptDraft;
+    setAnswerPromptBlockId(null);
+    setAnswerPromptQDraft("");
+    setAnswerPromptDraft("");
+    if (!id) return;
+    try {
+      if (question) await blocksRepo.update(id, question);
+      await blocksRepo.answerQuestion(id, answer);
+      loadQuestions();
+    } catch (e) {
+      console.warn("[DB] 質問の保存に失敗しました", e);
+    }
+  };
+
+  // ToDoタブの長押し編集。既存の本文を初期値にする
+  const startTodoEdit = (block: BlockWithSession) => {
+    setTodoEditBlockId(block.id);
+    setTodoEditDraft(block.text ?? "");
+  };
+
+  const cancelTodoEdit = () => {
+    setTodoEditBlockId(null);
+    setTodoEditDraft("");
+  };
+
+  const confirmTodoEdit = async () => {
+    const id = todoEditBlockId;
+    const text = todoEditDraft.trim();
+    setTodoEditBlockId(null);
+    setTodoEditDraft("");
+    if (!id || !text) return;
+    try {
+      await blocksRepo.update(id, text);
+      loadTodos();
+    } catch (e) {
+      console.warn("[DB] ToDoの本文更新に失敗しました", e);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
       loadNotes();
       loadTodos();
       loadQuestions();
-      loadQuestionMarks();
-    }, [loadNotes, loadTodos, loadQuestions, loadQuestionMarks])
+    }, [loadNotes, loadTodos, loadQuestions])
   );
 
   useEffect(() => {
@@ -393,6 +407,9 @@ export default function NotesScreen() {
   }, [selectedDayGroup]);
 
   const isSearching = query.trim().length > 0;
+  // 「質問」タブ: 回答メモ(question_term)が付いているかどうかで未解決/解決済みに分ける
+  const unresolvedQuestions = questions.filter((q) => !q.questionTerm?.trim());
+  const resolvedQuestions = questions.filter((q) => !!q.questionTerm?.trim());
 
   const goToNote = (noteId: string) => {
     navigation.navigate("NoteDetail", { noteId });
@@ -426,7 +443,6 @@ export default function NotesScreen() {
             loadNotes();
             loadTodos();
             loadQuestions();
-            loadQuestionMarks();
           } catch (e) {
             console.warn("[DB] ノートの削除に失敗しました", e);
           }
@@ -497,6 +513,7 @@ export default function NotesScreen() {
       style={styles.todoCard}
       activeOpacity={0.7}
       onPress={() => goToBlock(block)}
+      onLongPress={() => startTodoEdit(block)}
     >
       <TouchableOpacity
         hitSlop={8}
@@ -518,48 +535,47 @@ export default function NotesScreen() {
     </TouchableOpacity>
   );
 
-  // 「質問」タブの行。用語集と違って「調べて覚える」用ではなく「あとで聞く」用のため、
-  // 50音索引は付けず、ToDoタブと同じ「ノートごとの小見出し+カード」パターンで時系列(新しい順)に並べる
-  const renderQuestionMarkRow = (block: BlockWithSession) => (
-    <TouchableOpacity
-      key={block.id}
-      style={styles.todoCard}
-      activeOpacity={0.7}
-      onPress={() => goToBlock(block)}
-    >
-      <Ionicons name="help-circle" size={22} color="#7c4dff" />
-      <Text style={styles.todoText} numberOfLines={2}>
-        {block.text}
-      </Text>
-      <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
-    </TouchableOpacity>
-  );
+  // 「質問」タブの行。ToDoタブと同じ「ノートごとの小見出し+カード」パターン。
+  // 行タップ=回答(A)の入力を開く(このタブの主目的)、右端の矢印タップ=該当ノートへ遷移
+  // (独立したタップ領域)。回答が付けば「解決済み」。Q(発言テキスト)のみ/Q+A
+  // (question_termを回答として転用)の2パターンを表示する
+  const renderQuestionRow = (block: BlockWithSession) => {
+    const answer = block.questionTerm?.trim();
+    const resolved = !!answer;
+    return (
+      <TouchableOpacity
+        key={block.id}
+        style={styles.todoCard}
+        activeOpacity={0.7}
+        onPress={() => startAnswerPrompt(block)}
+      >
+        <Ionicons
+          name={resolved ? "checkmark-circle" : "help-circle-outline"}
+          size={22}
+          color={resolved ? "#34c759" : "#7c4dff"}
+        />
+        <View style={styles.questionTextCol}>
+          <Text style={styles.todoText} numberOfLines={2}>
+            Q: {block.text}
+          </Text>
+          {resolved ? (
+            <Text style={styles.questionAnswerPreview} numberOfLines={2}>
+              A: {answer}
+            </Text>
+          ) : null}
+        </View>
+        <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
+          <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  };
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
       {group.sessionTitle || "無題のノート"} ・ {formatDateSlash(group.sessionStartedAt)}
     </Text>
   );
-
-  const renderQuestionRow = (block: BlockWithSession) => (
-    <TouchableOpacity
-      key={block.id}
-      style={styles.glossaryRow}
-      activeOpacity={0.7}
-      onPress={() => goToBlock(block)}
-    >
-      <Text style={styles.glossaryTerm}>{block.questionTerm || block.text}</Text>
-      <Text style={styles.glossaryMeta}>
-        {block.sessionTitle || "無題のノート"} ・ {formatDateShort(block.sessionStartedAt)}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const scrollGlossaryToRow = (row: string) => {
-    const y = glossaryRowYRef.current.get(row);
-    if (y === undefined) return;
-    glossaryScrollRef.current?.scrollTo({ y: Math.max(0, y - 4), animated: true });
-  };
 
   const renderSearchRow = (result: SearchResult) => (
     <TouchableOpacity
@@ -612,7 +628,6 @@ export default function NotesScreen() {
         ))}
       </View>
 
-      {(isSearching || mode !== "glossary") && (
       <ScrollView style={styles.content}>
         {isSearching ? (
           <View>
@@ -751,8 +766,16 @@ export default function NotesScreen() {
                   </View>
                 ) : (
                   <>
-                    <Text style={styles.sectionHeader}>未対応 ・ {todos.pending.length}件</Text>
-                    {todos.pending.length === 0 ? (
+                    <TouchableOpacity
+                      style={styles.sectionHeaderRow}
+                      activeOpacity={0.6}
+                      onPress={() => toggleGroupCollapsed("todo-pending")}
+                    >
+                      <Text style={styles.sectionHeader}>
+                        {collapsedGroupKeys.has("todo-pending") ? "▶" : "▼"} 未対応 ・ {todos.pending.length}件
+                      </Text>
+                    </TouchableOpacity>
+                    {collapsedGroupKeys.has("todo-pending") ? null : todos.pending.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
                       groupBySession(todos.pending).map((group) => (
@@ -762,8 +785,16 @@ export default function NotesScreen() {
                         </View>
                       ))
                     )}
-                    <Text style={styles.sectionHeader}>完了 ・ {todos.done.length}件</Text>
-                    {todos.done.length === 0 ? (
+                    <TouchableOpacity
+                      style={styles.sectionHeaderRow}
+                      activeOpacity={0.6}
+                      onPress={() => toggleGroupCollapsed("todo-done")}
+                    >
+                      <Text style={styles.sectionHeader}>
+                        {collapsedGroupKeys.has("todo-done") ? "▶" : "▼"} 完了 ・ {todos.done.length}件
+                      </Text>
+                    </TouchableOpacity>
+                    {collapsedGroupKeys.has("todo-done") ? null : todos.done.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
                       groupBySession(todos.done).map((group) => (
@@ -780,55 +811,143 @@ export default function NotesScreen() {
 
             {mode === "question" && (
               <View>
-                {questionMarks.length === 0 ? (
+                {questions.length === 0 ? (
                   <View style={styles.placeholder}>
                     <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
                     <Text style={styles.placeholderText}>質問はまだありません</Text>
                   </View>
                 ) : (
-                  groupBySession(questionMarks).map((group) => (
-                    <View key={group.sessionId}>
-                      {renderNoteGroupHeader(group)}
-                      {group.items.map(renderQuestionMarkRow)}
-                    </View>
-                  ))
+                  <>
+                    <TouchableOpacity
+                      style={styles.sectionHeaderRow}
+                      activeOpacity={0.6}
+                      onPress={() => toggleGroupCollapsed("question-unresolved")}
+                    >
+                      <Text style={styles.sectionHeader}>
+                        {collapsedGroupKeys.has("question-unresolved") ? "▶" : "▼"} 未解決 ・{" "}
+                        {unresolvedQuestions.length}件
+                      </Text>
+                    </TouchableOpacity>
+                    {collapsedGroupKeys.has("question-unresolved") ? null : unresolvedQuestions.length ===
+                      0 ? (
+                      <Text style={styles.emptyGroupText}>なし</Text>
+                    ) : (
+                      groupBySession(unresolvedQuestions).map((group) => (
+                        <View key={group.sessionId}>
+                          {renderNoteGroupHeader(group)}
+                          {group.items.map(renderQuestionRow)}
+                        </View>
+                      ))
+                    )}
+                    <TouchableOpacity
+                      style={styles.sectionHeaderRow}
+                      activeOpacity={0.6}
+                      onPress={() => toggleGroupCollapsed("question-resolved")}
+                    >
+                      <Text style={styles.sectionHeader}>
+                        {collapsedGroupKeys.has("question-resolved") ? "▶" : "▼"} 解決済み ・{" "}
+                        {resolvedQuestions.length}件
+                      </Text>
+                    </TouchableOpacity>
+                    {collapsedGroupKeys.has("question-resolved") ? null : resolvedQuestions.length === 0 ? (
+                      <Text style={styles.emptyGroupText}>なし</Text>
+                    ) : (
+                      groupBySession(resolvedQuestions).map((group) => (
+                        <View key={group.sessionId}>
+                          {renderNoteGroupHeader(group)}
+                          {group.items.map(renderQuestionRow)}
+                        </View>
+                      ))
+                    )}
+                  </>
                 )}
               </View>
             )}
           </>
         )}
       </ScrollView>
-      )}
 
-      {!isSearching && mode === "glossary" && (
-        <View style={styles.glossaryContainer}>
-          <ScrollView ref={glossaryScrollRef} style={styles.content}>
-            {questions.length === 0 ? (
-              <View style={styles.placeholder}>
-                <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
-                <Text style={styles.placeholderText}>用語集はまだありません</Text>
-              </View>
-            ) : (
-              groupByKanaRow(questions).map((group) => (
-                <View
-                  key={group.row}
-                  onLayout={(e) => glossaryRowYRef.current.set(group.row, e.nativeEvent.layout.y)}
+      <Modal
+        visible={answerPromptBlockId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelAnswerPrompt}
+      >
+        <KeyboardAvoidingView
+          style={styles.answerPromptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.monthPickerOverlay} onPress={cancelAnswerPrompt}>
+            <Pressable style={styles.answerPromptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.answerPromptLabel}>Q</Text>
+              <TextInput
+                style={styles.answerPromptInput}
+                value={answerPromptQDraft}
+                onChangeText={setAnswerPromptQDraft}
+                placeholder="質問の内容"
+                multiline
+              />
+              <Text style={styles.answerPromptLabel}>A</Text>
+              <TextInput
+                style={styles.answerPromptInput}
+                value={answerPromptDraft}
+                onChangeText={setAnswerPromptDraft}
+                placeholder="わかったこと・聞いた答えなどを書き足す"
+                multiline
+                autoFocus
+              />
+              <View style={styles.answerPromptButtonRow}>
+                <TouchableOpacity style={styles.answerPromptButton} onPress={cancelAnswerPrompt}>
+                  <Text style={styles.answerPromptButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.answerPromptButton, styles.answerPromptButtonPrimary]}
+                  onPress={confirmAnswerPrompt}
                 >
-                  <Text style={styles.sectionHeader}>{group.row}行</Text>
-                  {group.items.map(renderQuestionRow)}
-                </View>
-              ))
-            )}
-          </ScrollView>
-          <View style={styles.glossaryIndexBar}>
-            {KANA_ROWS.map((row) => (
-              <TouchableOpacity key={row} hitSlop={4} onPress={() => scrollGlossaryToRow(row)}>
-                <Text style={styles.glossaryIndexText}>{row}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
+                  <Text style={styles.answerPromptButtonPrimaryText}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={todoEditBlockId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelTodoEdit}
+      >
+        <KeyboardAvoidingView
+          style={styles.answerPromptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.monthPickerOverlay} onPress={cancelTodoEdit}>
+            <Pressable style={styles.answerPromptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.monthPickerTitle}>ToDoを編集</Text>
+              <TextInput
+                style={styles.answerPromptInput}
+                value={todoEditDraft}
+                onChangeText={setTodoEditDraft}
+                placeholder="ToDoの内容"
+                multiline
+                autoFocus
+              />
+              <View style={styles.answerPromptButtonRow}>
+                <TouchableOpacity style={styles.answerPromptButton} onPress={cancelTodoEdit}>
+                  <Text style={styles.answerPromptButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.answerPromptButton, styles.answerPromptButtonPrimary]}
+                  onPress={confirmTodoEdit}
+                >
+                  <Text style={styles.answerPromptButtonPrimaryText}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal
         visible={monthPickerVisible}
@@ -939,6 +1058,7 @@ const styles = StyleSheet.create({
   segmentText: { fontSize: 13, color: "#3c3c43" },
   segmentTextSelected: { fontWeight: "600" },
   content: { flex: 1, marginTop: 12 },
+  sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
     fontSize: 13,
     color: "#8e8e93",
@@ -1082,6 +1202,38 @@ const styles = StyleSheet.create({
     color: "#1c1c1e",
     marginBottom: 8,
   },
+  answerPromptKeyboardAvoider: { flex: 1, justifyContent: "flex-end" },
+  answerPromptPanel: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 28,
+    gap: 12,
+  },
+  answerPromptLabel: { fontSize: 12, fontWeight: "700", color: "#8e8e93", marginBottom: -6 },
+  answerPromptInput: {
+    borderWidth: 1,
+    borderColor: "#e2e2e7",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: "#1c1c1e",
+    minHeight: 60,
+    textAlignVertical: "top",
+  },
+  answerPromptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
+  answerPromptButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 14,
+    backgroundColor: "#f2f2f7",
+  },
+  answerPromptButtonPrimary: { backgroundColor: "#06c" },
+  answerPromptButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
+  answerPromptButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   monthPickerYearNav: {
     flexDirection: "row",
     alignItems: "center",
@@ -1144,26 +1296,8 @@ const styles = StyleSheet.create({
   },
   todoText: { flex: 1, fontSize: 15, color: "#1c1c1e" },
   todoTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
-
-  // 用語集表示
-  glossaryContainer: { flex: 1, flexDirection: "row" },
-  glossaryRow: {
-    marginHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5ea",
-  },
-  glossaryTerm: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
-  glossaryMeta: { fontSize: 12, color: "#8e8e93", marginTop: 2 },
-  glossaryIndexBar: {
-    width: 20,
-    marginTop: 12,
-    paddingRight: 4,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 10,
-  },
-  glossaryIndexText: { fontSize: 11, color: "#8e8e93", fontWeight: "600" },
+  questionTextCol: { flex: 1 },
+  questionAnswerPreview: { fontSize: 12, color: "#34c759", marginTop: 3 },
 
   // 検索結果
   searchRow: {

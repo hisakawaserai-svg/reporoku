@@ -3,8 +3,8 @@ import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
 import type { BlockKind, QuestionKind } from "../db/types";
 
-// 開発者向け: 設定画面からタップ一つでノート詳細/ToDo/用語集の見た目を
-// 確認できるテストデータ(セッション3件・ブロック各種)を投入する。
+// 開発者向け: 設定画面からタップ一つでノート詳細/ToDo/質問(未解決・解決済み)の
+// 見た目を確認できるテストデータ(セッション3件・ブロック各種)を投入する。
 // 既存の録音・文字起こしロジックは使わず、通常の保存経路(sessionsRepo/blocksRepo)を
 // そのまま呼び出すだけなので、本番のデータ形式と完全に一致する
 export async function seedDevTestData(): Promise<void> {
@@ -71,7 +71,7 @@ export async function seedDevTestData(): Promise<void> {
     },
   ]);
 
-  // ノート2: 営業ミーティング ― ToDoの未対応/完了、用語集の漢字語確認用
+  // ノート2: 営業ミーティング ― ToDoの未対応/完了、質問の解決済み/未解決確認用
   await createSessionWithBlocks("営業ミーティング", now - 2 * 60 * 60 * 1000, 10 * 60 * 1000, [
     { startMs: 0, text: "議事録をチームに共有する", isTodo: true },
     { startMs: 60000, text: "会議室を予約する", isTodo: true, todoDone: true },
@@ -90,7 +90,7 @@ export async function seedDevTestData(): Promise<void> {
     },
   ]);
 
-  // ノート3: セキュリティ勉強会 ― 用語集の複数行、ToDo完了確認用
+  // ノート3: セキュリティ勉強会 ― 解決済みの質問が複数件、ToDo完了確認用
   await createSessionWithBlocks("セキュリティ勉強会", now - 3 * 60 * 60 * 1000, 15 * 60 * 1000, [
     {
       startMs: 0,

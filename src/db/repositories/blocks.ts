@@ -233,23 +233,18 @@ export async function toggleTodo(id: string): Promise<void> {
   await db.runAsync('UPDATE blocks SET is_todo = 1 - is_todo WHERE id = ?;', [id]);
 }
 
+// ★/📝と同じ「即座にマークするだけ」の挙動。question_termは「回答メモ」として
+// 別管理のため、ここでは触れない
+export async function toggleQuestion(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE blocks SET is_question = 1 - is_question WHERE id = ?;', [id]);
+}
+
 export async function toggleTodoDone(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE blocks SET todo_done = 1 - todo_done WHERE id = ?;', [id]);
 }
 
-export async function setQuestion(
-  id: string,
-  isQuestion: boolean,
-  questionTerm: string | null = null,
-  questionKind: QuestionKind | null = null
-): Promise<void> {
-  const db = await getDb();
-  await db.runAsync(
-    'UPDATE blocks SET is_question = ?, question_term = ?, question_kind = ? WHERE id = ?;',
-    [isQuestion ? 1 : 0, questionTerm, questionKind, id]
-  );
-}
 
 export interface TodoGroups {
   pending: BlockWithSession[];
@@ -276,19 +271,26 @@ export async function listAllTodos(): Promise<TodoGroups> {
   return { pending, done };
 }
 
-// kindを指定すると、質問(question)/用語(term)のどちらか一方だけに絞り込む。
-// 省略時はis_question=1の全件(質問・用語どちらも)を返す
-export async function listAllQuestions(kind?: QuestionKind): Promise<BlockWithSession[]> {
+// ❓は「わからなかったこと全般」を記録する単一の機能。question_kindによる絞り込みは
+// 行わず、is_question=1の全件を返す
+export async function listAllQuestions(): Promise<BlockWithSession[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<BlockWithSessionRow>(
     `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
      FROM blocks
      JOIN sessions ON sessions.id = blocks.session_id
-     WHERE blocks.is_question = 1 ${kind ? 'AND blocks.question_kind = ?' : ''}
-     ORDER BY blocks.created_at DESC;`,
-    kind ? [kind] : []
+     WHERE blocks.is_question = 1
+     ORDER BY blocks.created_at DESC;`
   );
   return rows.map(mapWithSessionRow);
+}
+
+// 「質問」タブでの回答メモ。question_termカラムを「回答メモ」として転用し、
+// 空でなければ「解決済み」として扱う(専用カラムは追加しない)
+export async function answerQuestion(id: string, answer: string): Promise<void> {
+  const db = await getDb();
+  const trimmed = answer.trim();
+  await db.runAsync('UPDATE blocks SET question_term = ? WHERE id = ?;', [trimmed || null, id]);
 }
 
 export async function search(query: string): Promise<SearchResult[]> {
@@ -300,8 +302,10 @@ export async function search(query: string): Promise<SearchResult[]> {
   const ftsQuery = `"${trimmed.replace(/"/g, '""')}"`;
 
   const rows = await db.getAllAsync<SearchResultRow>(
+    // 列番号を-1にすると、text/question_term(❓への回答)のうち実際にマッチした方から
+    // スニペットを作る
     `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at,
-            snippet(blocks_fts, 0, '[', ']', '...', 12) AS snippet
+            snippet(blocks_fts, -1, '[', ']', '...', 12) AS snippet
      FROM blocks_fts
      JOIN blocks ON blocks.rowid = blocks_fts.rowid
      JOIN sessions ON sessions.id = blocks.session_id

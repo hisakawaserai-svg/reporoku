@@ -88,4 +88,38 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE blocks ADD COLUMN end_ms INTEGER;
     `,
   },
+  {
+    // question_termを❓の「回答(A)」として転用したため、全文検索の対象にも含める。
+    // FTS5の外部コンテンツテーブルは列を後から追加できないため、作り直してrebuildする
+    version: 5,
+    sql: `
+      DROP TRIGGER IF EXISTS blocks_ai;
+      DROP TRIGGER IF EXISTS blocks_ad;
+      DROP TRIGGER IF EXISTS blocks_au;
+      DROP TABLE IF EXISTS blocks_fts;
+
+      CREATE VIRTUAL TABLE blocks_fts USING fts5(
+        text,
+        question_term,
+        content='blocks',
+        content_rowid='rowid',
+        tokenize='trigram'
+      );
+
+      INSERT INTO blocks_fts(blocks_fts) VALUES ('rebuild');
+
+      CREATE TRIGGER blocks_ai AFTER INSERT ON blocks BEGIN
+        INSERT INTO blocks_fts(rowid, text, question_term) VALUES (new.rowid, new.text, new.question_term);
+      END;
+
+      CREATE TRIGGER blocks_ad AFTER DELETE ON blocks BEGIN
+        INSERT INTO blocks_fts(blocks_fts, rowid, text, question_term) VALUES ('delete', old.rowid, old.text, old.question_term);
+      END;
+
+      CREATE TRIGGER blocks_au AFTER UPDATE ON blocks BEGIN
+        INSERT INTO blocks_fts(blocks_fts, rowid, text, question_term) VALUES ('delete', old.rowid, old.text, old.question_term);
+        INSERT INTO blocks_fts(rowid, text, question_term) VALUES (new.rowid, new.text, new.question_term);
+      END;
+    `,
+  },
 ];

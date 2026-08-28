@@ -32,9 +32,9 @@ CREATE TABLE IF NOT EXISTS blocks (
   is_starred    INTEGER NOT NULL DEFAULT 0,  -- ★
   is_todo       INTEGER NOT NULL DEFAULT 0,  -- 📝
   todo_done     INTEGER NOT NULL DEFAULT 0,
-  is_question   INTEGER NOT NULL DEFAULT 0,  -- ❓
-  question_term TEXT,                  -- ❓に紐づく「わからなかった単語」(question_kind='term'の場合のみ使用)
-  question_kind TEXT,                  -- is_question=trueの時のみ使用: 'question' | 'term' (migration v2)
+  is_question   INTEGER NOT NULL DEFAULT 0,  -- ❓(Q: このブロックのtextがそのまま質問内容になる)
+  question_term TEXT,                  -- ❓への回答(A)。空なら未解決、値があれば解決済み(旧「わからなかった単語」欄を転用)
+  question_kind TEXT,                  -- 使用しない(旧「質問/用語」区分。migration v2、カラムのみ残存)
   is_edited     INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -45,9 +45,10 @@ CREATE INDEX IF NOT EXISTS idx_blocks_star     ON blocks(session_id, is_starred)
 CREATE INDEX IF NOT EXISTS idx_blocks_todo     ON blocks(is_todo, todo_done);
 CREATE INDEX IF NOT EXISTS idx_blocks_question ON blocks(is_question);
 
--- 全文検索用（日本語対応のtrigramトークナイザ）
+-- 全文検索用（日本語対応のtrigramトークナイザ）。question_term(❓への回答)も対象に含める(migration v5)
 CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
   text,
+  question_term,
   content='blocks',
   content_rowid='rowid',
   tokenize='trigram'
@@ -55,14 +56,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS blocks_fts USING fts5(
 
 -- blocks -> blocks_fts 同期トリガー
 CREATE TRIGGER IF NOT EXISTS blocks_ai AFTER INSERT ON blocks BEGIN
-  INSERT INTO blocks_fts(rowid, text) VALUES (new.rowid, new.text);
+  INSERT INTO blocks_fts(rowid, text, question_term) VALUES (new.rowid, new.text, new.question_term);
 END;
 
 CREATE TRIGGER IF NOT EXISTS blocks_ad AFTER DELETE ON blocks BEGIN
-  INSERT INTO blocks_fts(blocks_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+  INSERT INTO blocks_fts(blocks_fts, rowid, text, question_term) VALUES ('delete', old.rowid, old.text, old.question_term);
 END;
 
 CREATE TRIGGER IF NOT EXISTS blocks_au AFTER UPDATE ON blocks BEGIN
-  INSERT INTO blocks_fts(blocks_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-  INSERT INTO blocks_fts(rowid, text) VALUES (new.rowid, new.text);
+  INSERT INTO blocks_fts(blocks_fts, rowid, text, question_term) VALUES ('delete', old.rowid, old.text, old.question_term);
+  INSERT INTO blocks_fts(rowid, text, question_term) VALUES (new.rowid, new.text, new.question_term);
 END;

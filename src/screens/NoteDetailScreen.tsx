@@ -156,12 +156,8 @@ function formatSectionRange(blocks: Block[], session: Session | null): string {
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
-function kindMeta(block: Block): { color: string; label: string | null; icon: IconName | null } {
-  if (block.isStarred) return { color: "#d98c00", label: "重要", icon: "star" };
-  if (block.isQuestion) return { color: "#7c4dff", label: "質問", icon: "help-circle" };
-  if (block.isTodo) return { color: "#1f9254", label: "ToDo", icon: "checkmark-circle" };
-  return { color: "#8e8e93", label: null, icon: null };
-}
+// マークが付いていないブロックの、ドット・縦線のデフォルト色
+const UNMARKED_DOT_COLOR = "#8e8e93";
 
 type IconBadge = { key: string; icon: IconName; color: string };
 
@@ -211,12 +207,12 @@ export default function NoteDetailScreen() {
   // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
   const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
   const [splitIndex, setSplitIndex] = useState(0);
-  // 「質問にする」で単語を入力してもらうためのプロンプト(対象ブロックID)
-  const [questionPromptBlockId, setQuestionPromptBlockId] = useState<string | null>(null);
-  const [questionPromptDraft, setQuestionPromptDraft] = useState("");
   // 「メモを追加」で本文を入力してもらうためのプロンプト(挿入位置の基準となるブロックID)
   const [memoPromptAfterBlockId, setMemoPromptAfterBlockId] = useState<string | null>(null);
   const [memoPromptDraft, setMemoPromptDraft] = useState("");
+  // ❓ブロックの「回答を記入/編集」で本文を入力してもらうためのプロンプト(対象ブロックID)
+  const [answerPromptBlockId, setAnswerPromptBlockId] = useState<string | null>(null);
+  const [answerPromptDraft, setAnswerPromptDraft] = useState("");
   // 写真ブロックをタップして全画面表示中のブロック
   const [viewerBlockId, setViewerBlockId] = useState<string | null>(null);
 
@@ -273,7 +269,7 @@ export default function NoteDetailScreen() {
     setSectionGroupingEnabled(value);
   };
 
-  // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
+  // 他画面(Todo/検索結果など)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
   useEffect(() => {
     if (jumpToBlockId) {
       setFilter("all");
@@ -416,6 +412,7 @@ export default function NoteDetailScreen() {
   const startEditingBlock = useCallback(
     async (block: Block) => {
       if (splittingBlockId) return; // 分割位置の選択中はテキスト編集を開始しない
+      setMenuAnchor(null); // 長押しメニューの「テキスト編集」から呼ばれた場合、メニューを閉じる
       if (editingBlockId && editingBlockId !== block.id) {
         await commitBlockEdit();
       }
@@ -589,45 +586,48 @@ export default function NoteDetailScreen() {
     );
   }, []);
 
-  const startQuestionPrompt = (block: Block) => {
-    setMenuAnchor(null);
-    setQuestionPromptBlockId(block.id);
-    setQuestionPromptDraft("");
-  };
-
-  const cancelQuestionPrompt = () => {
-    setQuestionPromptBlockId(null);
-    setQuestionPromptDraft("");
-  };
-
-  const confirmQuestionPrompt = useCallback(async () => {
-    const id = questionPromptBlockId;
-    const term = questionPromptDraft.trim();
-    setQuestionPromptBlockId(null);
-    setQuestionPromptDraft("");
-    if (!id) return;
-    try {
-      // このポップアップは「わからなかった単語」を入力させる用語(term)フローのため、
-      // question_kindは常に'term'として保存する(質問集ではなく用語集の対象にするため)
-      await blocksRepo.setQuestion(id, true, term || null, "term");
-      loadBlocks();
-    } catch (e) {
-      console.warn("[DB] 質問マークの設定に失敗しました", e);
-    }
-  }, [questionPromptBlockId, questionPromptDraft, loadBlocks]);
-
-  const clearBlockQuestion = useCallback(
+  // ★/📝と同じ「即座にマークするだけ」の挙動。question_termには触れない
+  // (回答はここでは変えない。既に回答済みのブロックをオフにした場合も回答はそのまま残る)
+  const toggleBlockQuestion = useCallback(
     async (block: Block) => {
       setMenuAnchor(null);
       try {
-        await blocksRepo.setQuestion(block.id, false, null, null);
+        await blocksRepo.toggleQuestion(block.id);
         loadBlocks();
       } catch (e) {
-        console.warn("[DB] 質問マークの解除に失敗しました", e);
+        console.warn("[DB] ❓の切り替えに失敗しました", e);
       }
     },
     [loadBlocks]
   );
+
+  // ❓ブロックの長押しメニューから開く、回答(A)の入力。既に回答があれば
+  // 編集できるよう、その内容を初期値にする
+  const startAnswerPrompt = (block: Block) => {
+    setMenuAnchor(null);
+    setAnswerPromptBlockId(block.id);
+    setAnswerPromptDraft(block.questionTerm ?? "");
+  };
+
+  const cancelAnswerPrompt = () => {
+    setAnswerPromptBlockId(null);
+    setAnswerPromptDraft("");
+  };
+
+  // 回答を保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)
+  const confirmAnswerPrompt = async () => {
+    const id = answerPromptBlockId;
+    const answer = answerPromptDraft;
+    setAnswerPromptBlockId(null);
+    setAnswerPromptDraft("");
+    if (!id) return;
+    try {
+      await blocksRepo.answerQuestion(id, answer);
+      loadBlocks();
+    } catch (e) {
+      console.warn("[DB] 回答の保存に失敗しました", e);
+    }
+  };
 
   const startMemoPrompt = (block: Block) => {
     setMenuAnchor(null);
@@ -815,7 +815,6 @@ export default function NoteDetailScreen() {
   // 数えないと、フィルタで隠れているブロックの位置に飛ぼうとしたり、
   // 表示されないブロックの分まで新着扱いしてしまう
   const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
-
   // 自動再生時: 実際の再生位置(lead分の巻き戻りを含まない currentGlobalMs)が
   // 次のブロックの時刻に到達したら、ハイライトを1つずつ先へ進める。
   // タップ直後(まだleadの手前区間を再生中)は currentGlobalMs がそのブロックの
@@ -972,7 +971,7 @@ export default function NoteDetailScreen() {
   // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
   const menuBlockId = menuAnchor?.blockId ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
-  const menuBlockMeta = menuBlock ? kindMeta(menuBlock) : null;
+  const menuBlockBadges = menuBlock ? activeBadges(menuBlock) : [];
   const viewerBlock = viewerBlockId ? blocks.find((b) => b.id === viewerBlockId) ?? null : null;
   const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
   const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
@@ -1023,8 +1022,7 @@ export default function NoteDetailScreen() {
           active: menuBlock.isQuestion,
           activeColor: "#7c4dff",
           inactiveBg: "#f2e8fc",
-          onPress: () =>
-            menuBlock.isQuestion ? clearBlockQuestion(menuBlock) : startQuestionPrompt(menuBlock),
+          onPress: () => toggleBlockQuestion(menuBlock),
         },
       ]
     : [];
@@ -1040,8 +1038,21 @@ export default function NoteDetailScreen() {
         }
       : null;
 
+  // ❓が付いたブロックだけ、回答(A)の記入/編集を出す
+  const answerItem: MenuItem | null =
+    menuBlock && menuBlock.isQuestion
+      ? {
+          key: "answer",
+          label: menuBlock.questionTerm?.trim() ? "回答を編集" : "回答を記入",
+          icon: "chatbubble-ellipses-outline",
+          color: "#7c4dff",
+          onPress: () => startAnswerPrompt(menuBlock),
+        }
+      : null;
+
   const actionItems: MenuItem[] = menuBlock
     ? [
+        ...(answerItem ? [answerItem] : []),
         {
           key: "edit",
           label: "テキスト編集",
@@ -1124,6 +1135,10 @@ export default function NoteDetailScreen() {
   const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
   let menuListTop = 0;
   let menuLeft = 0;
+  // ハイライトの複製も、対象ブロックが画面の下端近く(ホームインジケータ付近)にあると
+  // そのまま実測値を使ってしまい端に張り付いて見える。メニューと同じ余白ルールで
+  // 縦位置をクランプし、画面外にはみ出さないようにする
+  let highlightTop = 0;
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
@@ -1146,6 +1161,10 @@ export default function NoteDetailScreen() {
     const maxTop = windowHeight - menuHeight - MENU_SCREEN_MARGIN;
     menuListTop = Math.max(minTop, Math.min(menuListTop, maxTop));
     menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
+    highlightTop = Math.max(
+      MENU_SCREEN_MARGIN,
+      Math.min(menuAnchor.y, windowHeight - menuAnchor.height - MENU_SCREEN_MARGIN)
+    );
   }
 
   return (
@@ -1266,8 +1285,8 @@ export default function NoteDetailScreen() {
               {isCollapsed
                 ? null
                 : group.blocks.map((block, blockIndex) => {
-                const meta = kindMeta(block);
                 const badges = activeBadges(block);
+                const dotColor = badges[0]?.color ?? UNMARKED_DOT_COLOR;
                 // ブロック同士を縦線でつなぐ。この線は同じセクション(グループ)内でのみ
                 // つながり、セクションの先頭/末尾では途切れる。将来、発言間の秒数に応じて
                 // セクション(グループ)をさらに細かく分ける予定のため、線の有無は
@@ -1314,9 +1333,24 @@ export default function NoteDetailScreen() {
                   >
                     <View style={styles.timelineDotCol}>
                       <View style={styles.timelineDotWrap}>
-                        <View style={[styles.timelineDot, { backgroundColor: meta.color }]} />
+                        {badges.length > 1 ? (
+                          <View style={styles.timelineDotStack}>
+                            {badges.map((b) => (
+                              <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
+                            ))}
+                          </View>
+                        ) : (
+                          <View style={[styles.timelineDot, { backgroundColor: dotColor }]} />
+                        )}
                       </View>
-                      {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
+                      {hasLineBelow ? (
+                        <View
+                          style={[
+                            styles.timelineConnector,
+                            badges.length > 0 && { backgroundColor: dotColor },
+                          ]}
+                        />
+                      ) : null}
                     </View>
                     <View style={styles.timelineBody}>
                       <View style={styles.timelineMetaRow}>
@@ -1426,7 +1460,7 @@ export default function NoteDetailScreen() {
                         </TouchableOpacity>
                       )}
                       {block.isQuestion && block.questionTerm ? (
-                        <Text style={styles.questionTermText}>わからなかった単語: {block.questionTerm}</Text>
+                        <Text style={styles.questionTermText}>A: {block.questionTerm}</Text>
                       ) : null}
                     </View>
                   </TouchableOpacity>
@@ -1470,17 +1504,30 @@ export default function NoteDetailScreen() {
                 style={[
                   styles.menuHighlight,
                   {
-                    top: menuAnchor.y,
+                    top: highlightTop,
                     left: menuAnchor.x,
                     width: menuAnchor.width,
-                    height: menuAnchor.height,
+                    minHeight: menuAnchor.height,
                     transform: [{ scale: menuHighlightScale }],
                   },
                 ]}
               >
                 <View style={styles.timelineDotCol}>
                   <View style={styles.timelineDotWrap}>
-                    <View style={[styles.timelineDot, { backgroundColor: menuBlockMeta?.color }]} />
+                    {menuBlockBadges.length > 1 ? (
+                      <View style={styles.timelineDotStack}>
+                        {menuBlockBadges.map((b) => (
+                          <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
+                        ))}
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.timelineDot,
+                          { backgroundColor: menuBlockBadges[0]?.color ?? UNMARKED_DOT_COLOR },
+                        ]}
+                      />
+                    )}
                   </View>
                 </View>
                 <View style={styles.timelineBody}>
@@ -1493,17 +1540,12 @@ export default function NoteDetailScreen() {
                         </Text>
                       ) : null}
                     </Text>
-                    {menuBlock ? (
-                      (() => {
-                        const badges = activeBadges(menuBlock);
-                        return badges.length > 0 ? (
-                          <View style={styles.timelineBadgeRow}>
-                            {badges.map((b) => (
-                              <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
-                            ))}
-                          </View>
-                        ) : null;
-                      })()
+                    {menuBlockBadges.length > 0 ? (
+                      <View style={styles.timelineBadgeRow}>
+                        {menuBlockBadges.map((b) => (
+                          <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
+                        ))}
+                      </View>
                     ) : null}
                     {menuBlock.isEdited ? (
                       <View style={styles.editedBadge}>
@@ -1525,9 +1567,7 @@ export default function NoteDetailScreen() {
                     {menuBlock.text || "タップしてメモを追加"}
                   </Text>
                   {menuBlock.isQuestion && menuBlock.questionTerm ? (
-                    <Text style={styles.questionTermText}>
-                      わからなかった単語: {menuBlock.questionTerm}
-                    </Text>
+                    <Text style={styles.questionTermText}>A: {menuBlock.questionTerm}</Text>
                   ) : null}
                 </View>
               </Animated.View>
@@ -1607,42 +1647,6 @@ export default function NoteDetailScreen() {
       </Modal>
 
       <Modal
-        visible={questionPromptBlockId !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={cancelQuestionPrompt}
-      >
-        <KeyboardAvoidingView
-          style={styles.promptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.debugOverlay} onPress={cancelQuestionPrompt}>
-            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.promptTitle}>わからなかった単語</Text>
-              <TextInput
-                style={styles.promptInput}
-                value={questionPromptDraft}
-                onChangeText={setQuestionPromptDraft}
-                placeholder="例: アブレーション"
-                autoFocus
-              />
-              <View style={styles.promptButtonRow}>
-                <TouchableOpacity style={styles.editActionButton} onPress={cancelQuestionPrompt}>
-                  <Text style={styles.editActionButtonText}>キャンセル</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
-                  onPress={confirmQuestionPrompt}
-                >
-                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
         visible={memoPromptAfterBlockId !== null}
         animationType="fade"
         transparent
@@ -1670,6 +1674,43 @@ export default function NoteDetailScreen() {
                 <TouchableOpacity
                   style={[styles.editActionButton, styles.editActionButtonPrimary]}
                   onPress={confirmMemoPrompt}
+                >
+                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={answerPromptBlockId !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={cancelAnswerPrompt}
+      >
+        <KeyboardAvoidingView
+          style={styles.promptKeyboardAvoider}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <Pressable style={styles.debugOverlay} onPress={cancelAnswerPrompt}>
+            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+              <Text style={styles.promptTitle}>回答</Text>
+              <TextInput
+                style={[styles.promptInput, styles.promptInputMultiline]}
+                value={answerPromptDraft}
+                onChangeText={setAnswerPromptDraft}
+                placeholder="わかったこと・聞いた答えなどを書き足す"
+                multiline
+                autoFocus
+              />
+              <View style={styles.promptButtonRow}>
+                <TouchableOpacity style={styles.editActionButton} onPress={cancelAnswerPrompt}>
+                  <Text style={styles.editActionButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                  onPress={confirmAnswerPrompt}
                 >
                   <Text style={styles.editActionButtonPrimaryText}>保存</Text>
                 </TouchableOpacity>
@@ -1936,6 +1977,8 @@ const styles = StyleSheet.create({
   timelineDotWrap: { paddingTop: 6, paddingBottom: 2 },
   timelineConnector: { flex: 1, width: 2, backgroundColor: "#d1d1d6", marginBottom: -8 },
   timelineDot: { width: 6, height: 6, borderRadius: 3 },
+  // ★/ToDo/❓が複数付いている場合、1色に代表させず全部の色を小さく積んで見せる
+  timelineDotStack: { gap: 2, alignItems: "center" },
   timelineBody: { flex: 1 },
   timelineMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
   timelineTime: { fontSize: 12, fontWeight: "600", color: "#8e8e93" },
