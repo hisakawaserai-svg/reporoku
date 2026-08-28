@@ -1,5 +1,5 @@
 import { getDb } from '../index';
-import type { Block, BlockKind, BlockWithSession, SearchResult } from '../types';
+import type { Block, BlockKind, BlockWithSession, QuestionKind, SearchResult } from '../types';
 import { toAbsoluteUri, toStorableUri } from '../../utils/files';
 
 interface BlockRow {
@@ -14,6 +14,7 @@ interface BlockRow {
   todo_done: number;
   is_question: number;
   question_term: string | null;
+  question_kind: string | null;
   is_edited: number;
   created_at: number;
 }
@@ -40,6 +41,7 @@ function mapRow(row: BlockRow): Block {
     todoDone: row.todo_done === 1,
     isQuestion: row.is_question === 1,
     questionTerm: row.question_term,
+    questionKind: row.question_kind as QuestionKind | null,
     isEdited: row.is_edited === 1,
     createdAt: row.created_at,
   };
@@ -64,6 +66,7 @@ export interface CreateBlockInput {
   isTodo?: boolean;
   isQuestion?: boolean;
   questionTerm?: string | null;
+  questionKind?: QuestionKind | null;
 }
 
 export async function create(input: CreateBlockInput): Promise<Block> {
@@ -75,14 +78,15 @@ export async function create(input: CreateBlockInput): Promise<Block> {
   const isTodo = input.isTodo ?? false;
   const isQuestion = input.isQuestion ?? false;
   const questionTerm = input.questionTerm ?? null;
+  const questionKind = input.questionKind ?? null;
 
   // documentDirectory相対のパスとして保存する(理由は toStorableUri のコメントを参照)
   await db.runAsync(
     `INSERT INTO blocks (
        id, session_id, kind, start_ms, text, photo_uri,
-       is_starred, is_todo, todo_done, is_question, question_term,
+       is_starred, is_todo, todo_done, is_question, question_term, question_kind,
        is_edited, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?);`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?);`,
     [
       input.id,
       input.sessionId,
@@ -94,6 +98,7 @@ export async function create(input: CreateBlockInput): Promise<Block> {
       isTodo ? 1 : 0,
       isQuestion ? 1 : 0,
       questionTerm,
+      questionKind,
       now,
     ]
   );
@@ -110,6 +115,7 @@ export async function create(input: CreateBlockInput): Promise<Block> {
     todoDone: false,
     isQuestion,
     questionTerm,
+    questionKind,
     isEdited: false,
     createdAt: now,
   };
@@ -146,6 +152,7 @@ export interface MergeFlags {
   todoDone: boolean;
   isQuestion: boolean;
   questionTerm: string | null;
+  questionKind: QuestionKind | null;
 }
 
 // keepId側にmergedTextとflagsを反映し、removeId側を削除する(結合)
@@ -159,7 +166,7 @@ export async function mergeBlocks(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `UPDATE blocks
-       SET text = ?, is_starred = ?, is_todo = ?, todo_done = ?, is_question = ?, question_term = ?, is_edited = 1
+       SET text = ?, is_starred = ?, is_todo = ?, todo_done = ?, is_question = ?, question_term = ?, question_kind = ?, is_edited = 1
        WHERE id = ?;`,
       [
         mergedText,
@@ -168,6 +175,7 @@ export async function mergeBlocks(
         flags.todoDone ? 1 : 0,
         flags.isQuestion ? 1 : 0,
         flags.questionTerm,
+        flags.questionKind,
         keepId,
       ]
     );
@@ -193,9 +201,9 @@ export async function splitBlock(id: string, leftText: string, newBlock: SplitNe
     await db.runAsync(
       `INSERT INTO blocks (
          id, session_id, kind, start_ms, text, photo_uri,
-         is_starred, is_todo, todo_done, is_question, question_term,
+         is_starred, is_todo, todo_done, is_question, question_term, question_kind,
          is_edited, created_at
-       ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, NULL, 1, ?);`,
+       ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, NULL, NULL, 1, ?);`,
       [newBlock.id, newBlock.sessionId, newBlock.kind, newBlock.startMs, newBlock.text, now]
     );
   });
@@ -219,14 +227,14 @@ export async function toggleTodoDone(id: string): Promise<void> {
 export async function setQuestion(
   id: string,
   isQuestion: boolean,
-  questionTerm: string | null = null
+  questionTerm: string | null = null,
+  questionKind: QuestionKind | null = null
 ): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE blocks SET is_question = ?, question_term = ? WHERE id = ?;', [
-    isQuestion ? 1 : 0,
-    questionTerm,
-    id,
-  ]);
+  await db.runAsync(
+    'UPDATE blocks SET is_question = ?, question_term = ?, question_kind = ? WHERE id = ?;',
+    [isQuestion ? 1 : 0, questionTerm, questionKind, id]
+  );
 }
 
 export interface TodoGroups {
@@ -254,14 +262,17 @@ export async function listAllTodos(): Promise<TodoGroups> {
   return { pending, done };
 }
 
-export async function listAllQuestions(): Promise<BlockWithSession[]> {
+// kindを指定すると、質問(question)/用語(term)のどちらか一方だけに絞り込む。
+// 省略時はis_question=1の全件(質問・用語どちらも)を返す
+export async function listAllQuestions(kind?: QuestionKind): Promise<BlockWithSession[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<BlockWithSessionRow>(
     `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
      FROM blocks
      JOIN sessions ON sessions.id = blocks.session_id
-     WHERE blocks.is_question = 1
-     ORDER BY blocks.created_at DESC;`
+     WHERE blocks.is_question = 1 ${kind ? 'AND blocks.question_kind = ?' : ''}
+     ORDER BY blocks.created_at DESC;`,
+    kind ? [kind] : []
   );
   return rows.map(mapWithSessionRow);
 }

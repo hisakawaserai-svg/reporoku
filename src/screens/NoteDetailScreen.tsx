@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -36,6 +36,7 @@ import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import * as Clipboard from "expo-clipboard";
+import { getSectionGroupingEnabled } from "../utils/settings";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
@@ -49,9 +50,32 @@ const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; t
 ];
 
 const LEAD_SEC = 1.2;
-// この間隔(ミリ秒)以上ブロックの開始時刻が離れていたら、タイムライン上に
-// 新しいセクション見出しを自動挿入する
-const SECTION_GAP_MS = 5000;
+
+// タイムラインのセクション分けに使う閾値(ミリ秒)。後で調整しやすいようここにまとめておく。
+// 「間」は前のブロックの推定終了時刻(startMs + 推定継続時間)から次のブロックのstartMsまでの差。
+// セクションの閾値(旧SECTION_GAP_MS)はノートごとにsessions.section_gap_msとして持つようになったため、
+// ここには「新しい発言として改行するかどうか」の段落閾値と、スライダーの可動範囲だけを残す
+const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として改行なしで自然に繋げて表示する
+const SECTION_GAP_MIN_MS = 2000; // スライダーの下限(細かく分ける)
+const SECTION_GAP_MAX_MS = 8000; // スライダーの上限(まとめる)
+const SECTION_GAP_STEP_MS = 500;
+const SECTION_GAP_FALLBACK_MS = 5000; // sessionsに値が無い場合のフォールバック
+
+// 1文字あたりの推定発話時間(ミリ秒)。ブロックのstart_msには継続時間が記録されていないため、
+// テキスト長からおおまかな発話継続時間を見積もるための経験的な概算値
+const MS_PER_CHAR = 150;
+
+// 発言(transcriptブロック)の推定継続時間。メモ・写真は瞬間的なイベントとして扱い0とする
+function estimateBlockDurationMs(block: Block): number {
+  if (block.kind !== "transcript" || !block.text) return 0;
+  return block.text.length * MS_PER_CHAR;
+}
+
+// 前のブロックの推定終了時刻から次のブロックの開始時刻までの「間」(ミリ秒、負値は0に丸める)
+function gapMsBetween(prev: Block, next: Block): number {
+  const prevEndMs = prev.startMs + estimateBlockDurationMs(prev);
+  return Math.max(0, next.startMs - prevEndMs);
+}
 
 function fmt(ms: number) {
   const s = Math.floor(Math.max(0, ms) / 1000);
@@ -93,17 +117,32 @@ function matchesFilter(block: Block, filter: FilterKey): boolean {
 
 type TimelineGroup = { key: string; blocks: Block[] };
 
-function groupByGap(blocks: Block[]): TimelineGroup[] {
+function groupByGap(blocks: Block[], sectionGapMs: number): TimelineGroup[] {
   const groups: TimelineGroup[] = [];
   blocks.forEach((block, i) => {
     const prev = blocks[i - 1];
-    if (!prev || block.startMs - prev.startMs >= SECTION_GAP_MS) {
+    if (!prev || gapMsBetween(prev, block) >= sectionGapMs) {
       groups.push({ key: block.id, blocks: [block] });
     } else {
       groups[groups.length - 1].blocks.push(block);
     }
   });
   return groups;
+}
+
+// セクション内でのブロック同士の行間隔。「間」が短いほど、同じ段落として詰めて表示する
+type RowSpacing = "paragraph" | "line";
+function rowSpacingFor(prev: Block | undefined, block: Block): RowSpacing {
+  if (!prev) return "line";
+  return gapMsBetween(prev, block) < PARAGRAPH_GAP_MS ? "paragraph" : "line";
+}
+
+// 指定したブロックが属するセクション(グループ)のkeyを探す
+function findSectionKeyForBlock(groups: TimelineGroup[], blockId: string): string | null {
+  for (const g of groups) {
+    if (g.blocks.some((b) => b.id === blockId)) return g.key;
+  }
+  return null;
 }
 
 function formatSectionRange(blocks: Block[], session: Session | null): string {
@@ -122,6 +161,18 @@ function kindMeta(block: Block): { color: string; label: string | null; icon: Ic
   return { color: "#8e8e93", label: null, icon: null };
 }
 
+type IconBadge = { key: string; icon: IconName; color: string };
+
+// ★・📝・❓が同じブロックに複数付いている場合、色を1色に混ぜて代表させるのではなく、
+// 該当するアイコンをすべて横に並べたバッジとして返す
+function activeBadges(block: Block): IconBadge[] {
+  const badges: IconBadge[] = [];
+  if (block.isStarred) badges.push({ key: "star", icon: "star", color: "#d98c00" });
+  if (block.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: "#1f9254" });
+  if (block.isQuestion) badges.push({ key: "question", icon: "help-circle", color: "#7c4dff" });
+  return badges;
+}
+
 export default function NoteDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
@@ -130,6 +181,9 @@ export default function NoteDetailScreen() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [session, setSession] = useState<Session | null>(null);
+  // このノート(セッション)のセクション区切り閾値。sessions.section_gap_msと連動し、
+  // スライダー操作中はDB保存を待たずに即座にここを更新してタイムラインへ反映する
+  const [sectionGapMs, setSectionGapMs] = useState(SECTION_GAP_FALLBACK_MS);
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
@@ -169,13 +223,45 @@ export default function NoteDetailScreen() {
   const pendingActionRef = useRef<{ seconds: number; autoplay: boolean } | null>(null);
   const wasPlayingBeforeDragRef = useRef(false);
   const timelineScrollRef = useRef<ScrollView>(null);
+  // ブロックの本文行のonLayoutは「直接の親(セクションのView)」基準のyしか返さないため、
+  // このMapだけではスクロール先の絶対位置(ScrollView全体基準)を求められない。
+  // セクションのView自体のonLayout(sectionLayoutYRef)と合算して初めて絶対位置になる
   const blockLayoutYRef = useRef<Map<string, number>>(new Map());
+  const sectionLayoutYRef = useRef<Map<string, number>>(new Map());
   // 長押しメニューの位置決めのため、各ブロックの本文Viewの参照を保持する
   const blockRowRefs = useRef<Map<string, View>>(new Map());
   // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
   // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
   const menuHighlightScale = useRef(new Animated.Value(1)).current;
   const jumpedBlockIdRef = useRef<string | null>(null);
+  // ブロックをタップして再生開始した直後は、そのブロックは既に画面内に見えている
+  // (タップできたのだから)ため、自動追従スクロールで無駄に画面をそのブロックの
+  // 位置まで動かさないようにするフラグ。1回分だけ効き、フォロー用useEffectが消費する
+  const skipFollowScrollOnceRef = useRef(false);
+  // 長押しで自動追従(再生位置への自動スクロール)を一時停止しているか。
+  // 「↓ 新着N件」バッジをタップするまで解除しない(タイムラインを自由に見て回れるようにするため)
+  const [scrollPaused, setScrollPaused] = useState(false);
+  // 一時停止を始めた時点の再生中ブロックのインデックス。バッジの「新着N件」はここからの進み具合
+  const pauseBaselineIndexRef = useRef(-1);
+  // 折りたたまれているセクション(グループ)のkeyの集合。この画面を離れれば自然にリセットされてよいので、
+  // 永続化はせずローカルstateのみで管理する
+  const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<Set<string>>(new Set());
+  const toggleSectionCollapsed = (key: string) => {
+    setCollapsedSectionKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  // 設定画面の「セクション分けを表示する」トグル。設定画面で切り替えた後、
+  // この画面に戻ってきた時に反映されるよう、フォーカスの都度読み直す
+  const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
+  useFocusEffect(
+    useCallback(() => {
+      setSectionGroupingEnabledState(getSectionGroupingEnabled());
+    }, [])
+  );
 
   // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
   useEffect(() => {
@@ -198,6 +284,7 @@ export default function NoteDetailScreen() {
     try {
       const row = await sessionsRepo.getById(sessionId);
       setSession(row);
+      if (row) setSectionGapMs(row.sectionGapMs);
     } catch (e) {
       console.warn("[DB] セッションの取得に失敗しました", e);
     }
@@ -288,6 +375,17 @@ export default function NoteDetailScreen() {
     }
   }, [titleDraft, session, sessionId, loadSession]);
 
+  // スライダーのドラッグ中は毎フレームsectionGapMsを直接更新して即座に表示へ反映し(下のuseState経由)、
+  // 指を離した時にだけDBへ保存する(ドラッグ中に毎回書き込むと無駄が多いため)
+  const handleSectionGapChangeComplete = useCallback(
+    (ms: number) => {
+      sessionsRepo
+        .updateSectionGapMs(sessionId, ms)
+        .catch((e) => console.warn("[DB] セクション間隔の保存に失敗しました", e));
+    },
+    [sessionId]
+  );
+
   // 編集中のブロックがあれば内容を確定させ、DBのtextを更新してis_editedを立てる
   const commitBlockEdit = useCallback(async () => {
     const id = editingBlockId;
@@ -323,6 +421,10 @@ export default function NoteDetailScreen() {
   // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する
   const openBlockMenu = (block: Block) => {
     if (editingBlockId || splittingBlockId) return;
+    if (!scrollPaused) {
+      pauseBaselineIndexRef.current = filtered.findIndex((b) => b.id === activeBlockId);
+      setScrollPaused(true);
+    }
     const node = blockRowRefs.current.get(block.id);
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
@@ -338,6 +440,10 @@ export default function NoteDetailScreen() {
   };
 
   const closeBlockMenu = () => setMenuAnchor(null);
+
+  // 「↓ 新着N件」バッジをタップしたときの再開。自動追従を再開するだけで、実際のスクロールは
+  // activeBlockId/scrollPausedを見ているuseEffect(下記)がまとめて行う
+  const resumeAutoFollow = () => setScrollPaused(false);
 
   const openPhotoViewer = (block: Block) => setViewerBlockId(block.id);
   const closePhotoViewer = () => setViewerBlockId(null);
@@ -406,6 +512,7 @@ export default function NoteDetailScreen() {
           todoDone: earlier.todoDone || later.todoDone,
           isQuestion: earlier.isQuestion || later.isQuestion,
           questionTerm: earlier.questionTerm ?? later.questionTerm ?? null,
+          questionKind: earlier.questionKind ?? later.questionKind ?? null,
         });
         loadBlocks();
       } catch (e) {
@@ -489,7 +596,9 @@ export default function NoteDetailScreen() {
     setQuestionPromptDraft("");
     if (!id) return;
     try {
-      await blocksRepo.setQuestion(id, true, term || null);
+      // このポップアップは「わからなかった単語」を入力させる用語(term)フローのため、
+      // question_kindは常に'term'として保存する(質問集ではなく用語集の対象にするため)
+      await blocksRepo.setQuestion(id, true, term || null, "term");
       loadBlocks();
     } catch (e) {
       console.warn("[DB] 質問マークの設定に失敗しました", e);
@@ -500,7 +609,7 @@ export default function NoteDetailScreen() {
     async (block: Block) => {
       setMenuAnchor(null);
       try {
-        await blocksRepo.setQuestion(block.id, false, null);
+        await blocksRepo.setQuestion(block.id, false, null, null);
         loadBlocks();
       } catch (e) {
         console.warn("[DB] 質問マークの解除に失敗しました", e);
@@ -652,6 +761,8 @@ export default function NoteDetailScreen() {
     if (editingBlockId) {
       commitBlockEdit();
     }
+    // タップした行は画面内に見えているはずなので、この変更では追従スクロールしない
+    skipFollowScrollOnceRef.current = true;
     setHighlightedBlockId(block.id);
     seekToPosition(block.startMs, true, true);
   };
@@ -688,6 +799,11 @@ export default function NoteDetailScreen() {
   }, [dragRatio]);
 
   const sortedBlocks = [...blocks].sort((a, b) => a.startMs - b.startMs);
+  // フィルタで絞り込んだ、実際にタイムライン上に表示されているブロック一覧。
+  // 自動追従の対象や「新着N件」の件数は、この「今画面に出せるブロック」基準で
+  // 数えないと、フィルタで隠れているブロックの位置に飛ぼうとしたり、
+  // 表示されないブロックの分まで新着扱いしてしまう
+  const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
 
   // 自動再生時: 実際の再生位置(lead分の巻き戻りを含まない currentGlobalMs)が
   // 次のブロックの時刻に到達したら、ハイライトを1つずつ先へ進める。
@@ -727,6 +843,42 @@ export default function NoteDetailScreen() {
       }
     }
   }
+
+  // 一時停止中、再生位置がバッジを表示した時点からどれだけ進んだか(「新着N件」の件数)。
+  // フィルタで非表示のブロックは数えない(表示中のリストを基準にした進み具合のため)
+  const activeBlockVisibleIndex = activeBlockId ? filtered.findIndex((b) => b.id === activeBlockId) : -1;
+  const newArrivalCount =
+    scrollPaused && activeBlockVisibleIndex >= 0 && pauseBaselineIndexRef.current >= 0
+      ? Math.max(0, activeBlockVisibleIndex - pauseBaselineIndexRef.current)
+      : 0;
+
+  // 再生位置(activeBlockId)の進行にタイムラインを自動追従させる。長押しメニューで
+  // 一時停止中(scrollPaused)は、裏側でactiveBlockIdが進んでいてもスクロールしない。
+  // また、フィルタで今は表示されていないブロックの場合は、blockLayoutYRefに残っている
+  // 古い(フィルタ変更前の)Y座標を使って誤った位置へスクロールしてしまうため、
+  // 現在表示中のリスト(filtered)に実際に含まれている場合のみスクロールする
+  useEffect(() => {
+    // タップ直後の1回だけはスキップする(タップした行=既に見えている行なので動かす必要がない)
+    if (skipFollowScrollOnceRef.current) {
+      skipFollowScrollOnceRef.current = false;
+      return;
+    }
+    // シークバーをドラッグ中は、指の操作に集中させるためタイムライン側は動かさない
+    if (dragRatio !== null) return;
+    if (scrollPaused || !activeBlockId) return;
+    if (!filtered.some((b) => b.id === activeBlockId)) return;
+    // ブロック行のonLayoutは直接の親(セクションのView)基準のyしか返さないため、
+    // セクション自体のonLayoutで得た絶対位置(sectionLayoutYRef)と合算する。
+    // これをしないと、2番目以降のセクションのブロックへ移動した際、セクション内での
+    // 相対的な(小さな)y値がそのままScrollViewの絶対位置として使われてしまい、
+    // 画面が一番上近くまで飛んでしまう
+    const sectionKey = findSectionKeyForBlock(timelineGroups, activeBlockId);
+    const sectionY = sectionKey ? sectionLayoutYRef.current.get(sectionKey) : undefined;
+    const rowY = blockLayoutYRef.current.get(activeBlockId);
+    if (sectionY === undefined || rowY === undefined) return;
+    timelineScrollRef.current?.scrollTo({ y: Math.max(0, sectionY + rowY - 12), animated: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBlockId, scrollPaused, filter, dragRatio]);
 
   // PanResponder は useRef で一度だけ作られるため、内部のコールバックが
   // 生成時点の値を掴んだままにならないよう、参照する値は ref 経由で常に最新化する
@@ -800,8 +952,11 @@ export default function NoteDetailScreen() {
     }
   };
 
-  const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
-  const timelineGroups = groupByGap(filtered);
+  // オフの場合はグルーピングの計算自体を行わず、全ブロックを1つの「グループ」として
+  // 扱うことで、下の描画ロジックを変えずにフラットな時系列リスト表示にする
+  const timelineGroups = sectionGroupingEnabled
+    ? groupByGap(filtered, sectionGapMs)
+    : [{ key: "flat", blocks: filtered }];
 
   // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
   const menuBlockId = menuAnchor?.blockId ?? null;
@@ -1058,25 +1213,77 @@ export default function NoteDetailScreen() {
         })}
       </View>
 
+      {sectionGroupingEnabled ? (
+        <SectionGapSlider
+          valueMs={sectionGapMs}
+          onChange={setSectionGapMs}
+          onChangeComplete={handleSectionGapChangeComplete}
+        />
+      ) : null}
+
+      <View style={styles.timelineWrap}>
+      {scrollPaused && newArrivalCount > 0 ? (
+        <View style={styles.followBadgeContainer} pointerEvents="box-none">
+          <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoFollow}>
+            <Ionicons name="arrow-down" size={13} color="#fff" />
+            <Text style={styles.followBadgeText}>{`新着 ${newArrivalCount}件`}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <ScrollView ref={timelineScrollRef} style={styles.timeline}>
         {filtered.length === 0 ? (
           <Text style={styles.emptyText}>表示できるブロックがありません</Text>
         ) : (
-          timelineGroups.map((group) => (
-            <View key={group.key}>
-              <Text style={styles.sectionHeader}>{formatSectionRange(group.blocks, session)}</Text>
-              {group.blocks.map((block, blockIndex) => {
+          timelineGroups.map((group, groupIndex) => {
+            const isCollapsed = collapsedSectionKeys.has(group.key);
+            return (
+            <View
+              key={group.key}
+              style={styles.sectionWrap}
+              onLayout={(e) => sectionLayoutYRef.current.set(group.key, e.nativeEvent.layout.y)}
+            >
+              {sectionGroupingEnabled && groupIndex > 0 ? <View style={styles.sectionDivider} /> : null}
+              {sectionGroupingEnabled ? (
+                <TouchableOpacity
+                  style={styles.sectionHeaderRow}
+                  activeOpacity={0.6}
+                  onPress={() => toggleSectionCollapsed(group.key)}
+                >
+                  <Text style={styles.sectionHeader}>
+                    {isCollapsed ? "▶" : "▼"} セクション{groupIndex + 1} ({formatSectionRange(group.blocks, session)})
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {isCollapsed
+                ? null
+                : group.blocks.map((block, blockIndex) => {
                 const meta = kindMeta(block);
+                const badges = activeBadges(block);
                 // ブロック同士を縦線でつなぐ。この線は同じセクション(グループ)内でのみ
                 // つながり、セクションの先頭/末尾では途切れる。将来、発言間の秒数に応じて
                 // セクション(グループ)をさらに細かく分ける予定のため、線の有無は
                 // 常にこのグループ境界(groupByGapの結果)に追従させる
                 const hasLineBelow = blockIndex < group.blocks.length - 1;
+                // 「間」が短いほど、同じ段落として行間を詰めて自然に繋げて見せる
+                // (セクション分けをオフにしている時は、フラットな時系列リストにするため計算しない)
+                const spacing = sectionGroupingEnabled
+                  ? rowSpacingFor(group.blocks[blockIndex - 1], block)
+                  : "line";
+                // 1.5〜5秒の「間」は改行はするがセクションほどではないため、見出しの代わりに
+                // 沈黙の長さだけを小さく表示する(セクション境界は見出しの時間帯表示で十分なため対象外)
+                const silenceSec =
+                  sectionGroupingEnabled && blockIndex > 0 && spacing === "line"
+                    ? Math.round(gapMsBetween(group.blocks[blockIndex - 1], block) / 1000)
+                    : null;
                 return (
+                  <Fragment key={block.id}>
+                  {silenceSec !== null ? (
+                    <Text style={styles.silenceLabel}>{`【${silenceSec}秒の沈黙】`}</Text>
+                  ) : null}
                   <TouchableOpacity
-                    key={block.id}
                     style={[
                       styles.timelineRow,
+                      spacing === "paragraph" && styles.timelineRowParagraph,
                       block.id === activeBlockId && styles.timelineRowActive,
                       block.id === jumpToBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
@@ -1097,8 +1304,9 @@ export default function NoteDetailScreen() {
                         jumpedBlockIdRef.current !== block.id
                       ) {
                         jumpedBlockIdRef.current = block.id;
+                        const sectionY = sectionLayoutYRef.current.get(group.key) ?? 0;
                         timelineScrollRef.current?.scrollTo({
-                          y: Math.max(0, e.nativeEvent.layout.y - 12),
+                          y: Math.max(0, sectionY + e.nativeEvent.layout.y - 12),
                           animated: true,
                         });
                       }
@@ -1106,20 +1314,22 @@ export default function NoteDetailScreen() {
                   >
                     <View style={styles.timelineDotCol}>
                       <View style={styles.timelineDotWrap}>
-                        {meta.icon ? (
-                          <Ionicons name={meta.icon} size={14} color={meta.color} />
-                        ) : (
-                          <View style={[styles.timelineDot, { backgroundColor: meta.color }]} />
-                        )}
+                        <View style={[styles.timelineDot, { backgroundColor: meta.color }]} />
                       </View>
                       {hasLineBelow ? <View style={styles.timelineConnector} /> : null}
                     </View>
                     <View style={styles.timelineBody}>
                       <View style={styles.timelineMetaRow}>
-                        <Text style={[styles.timelineTime, { color: meta.color }]}>
+                        <Text style={styles.timelineTime}>
                           {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
-                          {meta.label ? ` ・ ${meta.label}` : ""}
                         </Text>
+                        {badges.length > 0 ? (
+                          <View style={styles.timelineBadgeRow}>
+                            {badges.map((b) => (
+                              <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
+                            ))}
+                          </View>
+                        ) : null}
                         {block.isEdited ? (
                           <View style={styles.editedBadge}>
                             <Ionicons name="pencil" size={10} color="#8e8e93" />
@@ -1215,12 +1425,15 @@ export default function NoteDetailScreen() {
                       ) : null}
                     </View>
                   </TouchableOpacity>
+                  </Fragment>
                 );
               })}
             </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
+      </View>
 
       {audioFiles.length > 0 ? (
         <View style={styles.playerBar}>
@@ -1262,21 +1475,28 @@ export default function NoteDetailScreen() {
               >
                 <View style={styles.timelineDotCol}>
                   <View style={styles.timelineDotWrap}>
-                    {menuBlockMeta?.icon ? (
-                      <Ionicons name={menuBlockMeta.icon} size={14} color={menuBlockMeta.color} />
-                    ) : (
-                      <View style={[styles.timelineDot, { backgroundColor: menuBlockMeta?.color }]} />
-                    )}
+                    <View style={[styles.timelineDot, { backgroundColor: menuBlockMeta?.color }]} />
                   </View>
                 </View>
                 <View style={styles.timelineBody}>
                   <View style={styles.timelineMetaRow}>
-                    <Text style={[styles.timelineTime, { color: menuBlockMeta?.color }]}>
+                    <Text style={styles.timelineTime}>
                       {session
                         ? formatHHMM(session.startedAt + menuBlock.startMs)
                         : fmt(menuBlock.startMs)}
-                      {menuBlockMeta?.label ? ` ・ ${menuBlockMeta.label}` : ""}
                     </Text>
+                    {menuBlock ? (
+                      (() => {
+                        const badges = activeBadges(menuBlock);
+                        return badges.length > 0 ? (
+                          <View style={styles.timelineBadgeRow}>
+                            {badges.map((b) => (
+                              <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
+                            ))}
+                          </View>
+                        ) : null;
+                      })()
+                    ) : null}
                     {menuBlock.isEdited ? (
                       <View style={styles.editedBadge}>
                         <Ionicons name="pencil" size={10} color="#8e8e93" />
@@ -1461,6 +1681,95 @@ export default function NoteDetailScreen() {
   );
 }
 
+// セクション区切りの閾値(2.0〜8.0秒、0.5秒刻み)を調整するスライダー。
+// 再生バーのシークバー(PanResponder方式)と同じ考え方の、専用の独立したトラック
+function SectionGapSlider({
+  valueMs,
+  onChange,
+  onChangeComplete,
+}: {
+  valueMs: number;
+  onChange: (ms: number) => void;
+  onChangeComplete: (ms: number) => void;
+}) {
+  const trackRef = useRef<View>(null);
+  const trackWidthRef = useRef(0);
+  const trackPageXRef = useRef(0);
+  const [trackWidth, setTrackWidth] = useState(0);
+  // PanResponderはuseRefで一度だけ作られるため、内部から呼ぶコールバックは常に最新のpropsを
+  // 参照するようrefを介す(再生バーのシークバーと同じ理由)
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const onChangeCompleteRef = useRef(onChangeComplete);
+  onChangeCompleteRef.current = onChangeComplete;
+
+  const msFromRatio = (ratio: number): number => {
+    const raw = SECTION_GAP_MIN_MS + ratio * (SECTION_GAP_MAX_MS - SECTION_GAP_MIN_MS);
+    const stepped = Math.round(raw / SECTION_GAP_STEP_MS) * SECTION_GAP_STEP_MS;
+    return Math.min(SECTION_GAP_MAX_MS, Math.max(SECTION_GAP_MIN_MS, stepped));
+  };
+
+  const ratioFromPageX = (pageX: number): number => {
+    if (trackWidthRef.current <= 0) return 0;
+    return Math.min(1, Math.max(0, (pageX - trackPageXRef.current) / trackWidthRef.current));
+  };
+
+  const handleTrackLayout = (e: LayoutChangeEvent) => {
+    setTrackWidth(e.nativeEvent.layout.width);
+    trackWidthRef.current = e.nativeEvent.layout.width;
+    trackRef.current?.measure((_x, _y, _width, _height, pageX) => {
+      trackPageXRef.current = pageX;
+    });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: (evt: GestureResponderEvent) => {
+        onChangeRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
+      },
+      onPanResponderMove: (evt: GestureResponderEvent) => {
+        onChangeRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
+      },
+      onPanResponderRelease: (evt: GestureResponderEvent) => {
+        onChangeCompleteRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
+      },
+      onPanResponderTerminate: (evt: GestureResponderEvent) => {
+        onChangeCompleteRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
+      },
+    })
+  ).current;
+
+  const ratio = (valueMs - SECTION_GAP_MIN_MS) / (SECTION_GAP_MAX_MS - SECTION_GAP_MIN_MS);
+
+  return (
+    <View style={styles.gapSliderWrap}>
+      <Text style={styles.gapSliderLabel}>
+        区切りの細かさ: {(valueMs / 1000).toFixed(1)}秒
+      </Text>
+      <View
+        ref={trackRef}
+        style={styles.gapSliderTrack}
+        onLayout={handleTrackLayout}
+        {...panResponder.panHandlers}
+      >
+        <View style={styles.gapSliderTrackBg} />
+        <View style={[styles.gapSliderTrackFill, { width: `${ratio * 100}%` }]} />
+        <View style={[styles.gapSliderThumb, { left: `${ratio * 100}%` }]} />
+      </View>
+      <View style={styles.gapSliderEndsRow}>
+        <Text style={styles.gapSliderEndText}>細かく分ける</Text>
+        <Text style={styles.gapSliderEndText}>まとめる</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
 
@@ -1509,18 +1818,85 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
   chipTextSelected: { color: "#fff", fontWeight: "600" },
 
+  // セクション区切りの細かさスライダー
+  gapSliderWrap: { paddingHorizontal: 16, paddingBottom: 10 },
+  gapSliderLabel: { fontSize: 12, color: "#8e8e93", marginBottom: 6 },
+  gapSliderTrack: { height: 24, justifyContent: "center" },
+  gapSliderTrackBg: { height: 4, borderRadius: 2, backgroundColor: "#e2e2e7" },
+  gapSliderTrackFill: {
+    position: "absolute",
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#06c",
+  },
+  gapSliderThumb: {
+    position: "absolute",
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#06c",
+    marginLeft: -9,
+  },
+  gapSliderEndsRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
+  gapSliderEndText: { fontSize: 11, color: "#c7c7cc" },
+
+  timelineWrap: { flex: 1 },
+  // タイムラインの一番下(プレイヤーバーのすぐ上)に浮かせる。timelineWrap自体が
+  // プレイヤーバーの手前で終わるコンテナのため、bottom基準でもプレイヤーバーとは重ならない
+  followBadgeContainer: {
+    position: "absolute",
+    bottom: 8,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 5,
+  },
+  followBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(28,28,30,0.9)",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  followBadgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   timeline: { flex: 1, paddingHorizontal: 16 },
+  // セクション(発言間の「間」が5秒以上)の区切り。見出しの上に薄い罫線を入れて、
+  // 余白だけでなく視覚的にもセクションの境目とわかるようにする
+  sectionWrap: { marginTop: 14 },
+  sectionDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e5ea",
+  },
+  sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
     fontSize: 13,
     color: "#8e8e93",
-    marginTop: 14,
+    marginTop: 10,
     marginBottom: 6,
+  },
+  // 1.5〜5秒の「間」を示す小さな沈黙ラベル。セクション見出しほど目立たせず、行の間にそっと挟む
+  silenceLabel: {
+    fontSize: 11,
+    color: "#c7c7cc",
+    textAlign: "center",
+    marginTop: 4,
+    marginBottom: -2,
   },
   timelineRow: {
     flexDirection: "row",
     alignItems: "stretch",
     paddingVertical: 8,
   },
+  // 発言間の「間」が1.5秒未満のブロックは、同じ段落として自然に繋がって見えるよう
+  // 行間を詰める(見出しや余白は入れず、現状の行ベースの見た目を保ったまま間隔だけ縮める)
+  timelineRowParagraph: { paddingVertical: 1 },
   timelineRowActive: { backgroundColor: "#eaf2ff" },
   timelineRowJumped: { backgroundColor: "#fff4d6" },
   timelineRowEditing: { backgroundColor: "#fffaf0" },
@@ -1531,7 +1907,8 @@ const styles = StyleSheet.create({
   timelineDot: { width: 6, height: 6, borderRadius: 3 },
   timelineBody: { flex: 1 },
   timelineMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
-  timelineTime: { fontSize: 12, fontWeight: "600" },
+  timelineTime: { fontSize: 12, fontWeight: "600", color: "#8e8e93" },
+  timelineBadgeRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   editedBadge: { flexDirection: "row", alignItems: "center", gap: 2 },
   editedBadgeText: { fontSize: 10, color: "#8e8e93" },
   timelineText: { fontSize: 15, color: "#1c1c1e", lineHeight: 21 },
@@ -1565,7 +1942,13 @@ const styles = StyleSheet.create({
   editActionButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   splitHintText: { fontSize: 12, color: "#8e8e93", marginBottom: 4 },
 
-  debugOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
+  // 0.3だと薄すぎてキーボードが透けて見えてしまうため、適切な濃さまで上げる
+  debugOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+    zIndex: 10,
+  },
 
   // 長押しメニュー(iOSネイティブ風): 暗幕の上に、実測した位置・サイズぴったりの
   // 明るい複製を重ねてハイライトとし、その近くに項目リストを吹き出し表示する
@@ -1623,6 +2006,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     marginHorizontal: 24,
+    // キーボードがすぐ下に来た時に入力欄が密着しないよう、下に余白を確保する
+    marginBottom: 28,
     alignSelf: "center",
     width: "88%",
     gap: 12,

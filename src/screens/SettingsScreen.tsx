@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { seedDevTestData } from "../utils/devTestData";
+import {
+  SECTION_GAP_OPTIONS,
+  getDefaultSectionGapMs,
+  getSectionGroupingEnabled,
+  setDefaultSectionGapMs,
+  setSectionGroupingEnabled,
+} from "../utils/settings";
 
 type Row = { icon: keyof typeof Ionicons.glyphMap; label: string; value?: string };
 type Section = { title: string; rows: Row[] };
@@ -45,6 +52,18 @@ const SECTIONS: Section[] = [
 
 export default function SettingsScreen() {
   const [isSeeding, setIsSeeding] = useState(false);
+  const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
+  const [defaultSectionGapMs, setDefaultSectionGapMsState] = useState(getDefaultSectionGapMs);
+
+  const handleToggleSectionGrouping = (value: boolean) => {
+    setSectionGroupingEnabledState(value);
+    setSectionGroupingEnabled(value);
+  };
+
+  const handleSelectDefaultSectionGap = (ms: number) => {
+    setDefaultSectionGapMsState(ms);
+    setDefaultSectionGapMs(ms);
+  };
 
   const handleSeedTestData = async () => {
     if (isSeeding) return;
@@ -85,6 +104,39 @@ export default function SettingsScreen() {
             </View>
           </View>
         ))}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>タイムライン表示</Text>
+          <View style={styles.card}>
+            <View style={[styles.row, styles.rowDivider]}>
+              <Ionicons name="layers-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>セクション分けを表示する</Text>
+              <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
+            </View>
+            <View style={styles.gapRow}>
+              <Text style={styles.rowLabel}>新しい録音のデフォルト間隔</Text>
+              <View style={styles.gapOptionRow}>
+                {SECTION_GAP_OPTIONS.map((opt) => {
+                  const selected = opt.ms === defaultSectionGapMs;
+                  return (
+                    <TouchableOpacity
+                      key={opt.ms}
+                      style={[styles.gapOption, selected && styles.gapOptionSelected]}
+                      onPress={() => handleSelectDefaultSectionGap(opt.ms)}
+                    >
+                      <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.gapHint}>
+                新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。
+              </Text>
+            </View>
+          </View>
+        </View>
 
         {__DEV__ ? (
           <View style={styles.section}>
@@ -139,4 +191,17 @@ const styles = StyleSheet.create({
   rowIcon: { marginRight: 10 },
   rowLabel: { flex: 1, fontSize: 16 },
   rowValue: { fontSize: 15, color: "#8e8e93", marginRight: 6 },
+  gapRow: { paddingVertical: 12, paddingHorizontal: 12, gap: 10 },
+  gapOptionRow: { flexDirection: "row", gap: 8 },
+  gapOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#f2f2f7",
+    alignItems: "center",
+  },
+  gapOptionSelected: { backgroundColor: "#06c" },
+  gapOptionText: { fontSize: 14, fontWeight: "600", color: "#3c3c43" },
+  gapOptionTextSelected: { color: "#fff" },
+  gapHint: { fontSize: 12, color: "#8e8e93" },
 });

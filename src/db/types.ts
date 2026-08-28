@@ -1,4 +1,5 @@
 export type BlockKind = 'transcript' | 'note' | 'photo';
+export type QuestionKind = 'question' | 'term';
 
 export interface Session {
   id: string;
@@ -7,6 +8,7 @@ export interface Session {
   durationMs: number;
   createdAt: number;
   updatedAt: number;
+  sectionGapMs: number;
 }
 
 export interface AudioFile {
@@ -30,6 +32,7 @@ export interface Block {
   todoDone: boolean;
   isQuestion: boolean;
   questionTerm: string | null;
+  questionKind: QuestionKind | null;
   isEdited: boolean;
   createdAt: number;
 }

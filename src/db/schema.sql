@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   started_at   INTEGER NOT NULL,      -- Unix時刻(ms)
   duration_ms  INTEGER NOT NULL DEFAULT 0,
   created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL
+  updated_at   INTEGER NOT NULL,
+  section_gap_ms INTEGER NOT NULL DEFAULT 5000 -- タイムラインのセクション分け閾値(ms、migration v3)
 );
 
 CREATE TABLE IF NOT EXISTS audio_files (
@@ -30,7 +31,8 @@ CREATE TABLE IF NOT EXISTS blocks (
   is_todo       INTEGER NOT NULL DEFAULT 0,  -- 📝
   todo_done     INTEGER NOT NULL DEFAULT 0,
   is_question   INTEGER NOT NULL DEFAULT 0,  -- ❓
-  question_term TEXT,                  -- ❓に紐づく「わからなかった単語」
+  question_term TEXT,                  -- ❓に紐づく「わからなかった単語」(question_kind='term'の場合のみ使用)
+  question_kind TEXT,                  -- is_question=trueの時のみ使用: 'question' | 'term' (migration v2)
   is_edited     INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE

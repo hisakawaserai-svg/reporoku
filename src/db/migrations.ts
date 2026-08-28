@@ -70,4 +70,16 @@ export const MIGRATIONS: Migration[] = [
       END;
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE blocks ADD COLUMN question_kind TEXT;
+    `,
+  },
+  {
+    version: 3,
+    sql: `
+      ALTER TABLE sessions ADD COLUMN section_gap_ms INTEGER NOT NULL DEFAULT 5000;
+    `,
+  },
 ];

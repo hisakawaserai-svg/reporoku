@@ -8,6 +8,7 @@ interface SessionRow {
   duration_ms: number;
   created_at: number;
   updated_at: number;
+  section_gap_ms: number;
 }
 
 function mapRow(row: SessionRow): Session {
@@ -18,6 +19,7 @@ function mapRow(row: SessionRow): Session {
     durationMs: row.duration_ms,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    sectionGapMs: row.section_gap_ms,
   };
 }
 
@@ -33,6 +35,7 @@ export interface CreateSessionInput {
   title?: string;
   startedAt: number;
   durationMs?: number;
+  sectionGapMs?: number;
 }
 
 export async function create(input: CreateSessionInput): Promise<Session> {
@@ -40,11 +43,12 @@ export async function create(input: CreateSessionInput): Promise<Session> {
   const now = Date.now();
   const title = input.title ?? '';
   const durationMs = input.durationMs ?? 0;
+  const sectionGapMs = input.sectionGapMs ?? 5000;
 
   await db.runAsync(
-    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?);`,
-    [input.id, title, input.startedAt, durationMs, now, now]
+    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at, section_gap_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    [input.id, title, input.startedAt, durationMs, now, now, sectionGapMs]
   );
 
   return {
@@ -54,6 +58,7 @@ export async function create(input: CreateSessionInput): Promise<Session> {
     durationMs,
     createdAt: now,
     updatedAt: now,
+    sectionGapMs,
   };
 }
 
@@ -99,6 +104,16 @@ export async function updateDuration(id: string, durationMs: number): Promise<vo
   const now = Date.now();
   await db.runAsync('UPDATE sessions SET duration_ms = ?, updated_at = ? WHERE id = ?;', [
     durationMs,
+    now,
+    id,
+  ]);
+}
+
+export async function updateSectionGapMs(id: string, sectionGapMs: number): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.runAsync('UPDATE sessions SET section_gap_ms = ?, updated_at = ? WHERE id = ?;', [
+    sectionGapMs,
     now,
     id,
   ]);

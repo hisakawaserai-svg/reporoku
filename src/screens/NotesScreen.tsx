@@ -23,12 +23,13 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
 
-type DisplayMode = "list" | "calendar" | "todo" | "glossary";
+type DisplayMode = "list" | "calendar" | "todo" | "question" | "glossary";
 
 const MODES: { key: DisplayMode; label: string }[] = [
   { key: "list", label: "リスト" },
   { key: "calendar", label: "カレンダー" },
   { key: "todo", label: "ToDo" },
+  { key: "question", label: "質問" },
   { key: "glossary", label: "用語集" },
 ];
 
@@ -224,7 +225,9 @@ export default function NotesScreen() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [monthGroups, setMonthGroups] = useState<MonthGroup<SessionSummary>[]>([]);
   const [todos, setTodos] = useState<TodoGroups>({ pending: [], done: [] });
+  // 用語集(question_kind='term')。既存のvariable名のまま、質問(question_kind='question')は別状態にする
   const [questions, setQuestions] = useState<BlockWithSession[]>([]);
+  const [questionMarks, setQuestionMarks] = useState<BlockWithSession[]>([]);
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
@@ -272,10 +275,19 @@ export default function NotesScreen() {
 
   const loadQuestions = useCallback(async () => {
     try {
-      const rows = await blocksRepo.listAllQuestions();
+      const rows = await blocksRepo.listAllQuestions("term");
       setQuestions(rows);
     } catch (e) {
       console.warn("[DB] 用語集の取得に失敗しました", e);
+    }
+  }, []);
+
+  const loadQuestionMarks = useCallback(async () => {
+    try {
+      const rows = await blocksRepo.listAllQuestions("question");
+      setQuestionMarks(rows);
+    } catch (e) {
+      console.warn("[DB] 質問一覧の取得に失敗しました", e);
     }
   }, []);
 
@@ -284,7 +296,8 @@ export default function NotesScreen() {
       loadNotes();
       loadTodos();
       loadQuestions();
-    }, [loadNotes, loadTodos, loadQuestions])
+      loadQuestionMarks();
+    }, [loadNotes, loadTodos, loadQuestions, loadQuestionMarks])
   );
 
   useEffect(() => {
@@ -413,6 +426,7 @@ export default function NotesScreen() {
             loadNotes();
             loadTodos();
             loadQuestions();
+            loadQuestionMarks();
           } catch (e) {
             console.warn("[DB] ノートの削除に失敗しました", e);
           }
@@ -498,6 +512,23 @@ export default function NotesScreen() {
         style={[styles.todoText, block.todoDone && styles.todoTextDone]}
         numberOfLines={2}
       >
+        {block.text}
+      </Text>
+      <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+    </TouchableOpacity>
+  );
+
+  // 「質問」タブの行。用語集と違って「調べて覚える」用ではなく「あとで聞く」用のため、
+  // 50音索引は付けず、ToDoタブと同じ「ノートごとの小見出し+カード」パターンで時系列(新しい順)に並べる
+  const renderQuestionMarkRow = (block: BlockWithSession) => (
+    <TouchableOpacity
+      key={block.id}
+      style={styles.todoCard}
+      activeOpacity={0.7}
+      onPress={() => goToBlock(block)}
+    >
+      <Ionicons name="help-circle" size={22} color="#7c4dff" />
+      <Text style={styles.todoText} numberOfLines={2}>
         {block.text}
       </Text>
       <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
@@ -743,6 +774,24 @@ export default function NotesScreen() {
                       ))
                     )}
                   </>
+                )}
+              </View>
+            )}
+
+            {mode === "question" && (
+              <View>
+                {questionMarks.length === 0 ? (
+                  <View style={styles.placeholder}>
+                    <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
+                    <Text style={styles.placeholderText}>質問はまだありません</Text>
+                  </View>
+                ) : (
+                  groupBySession(questionMarks).map((group) => (
+                    <View key={group.sessionId}>
+                      {renderNoteGroupHeader(group)}
+                      {group.items.map(renderQuestionMarkRow)}
+                    </View>
+                  ))
                 )}
               </View>
             )}

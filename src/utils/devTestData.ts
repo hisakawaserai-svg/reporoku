@@ -1,7 +1,7 @@
 import { genId } from "./id";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
-import type { BlockKind } from "../db/types";
+import type { BlockKind, QuestionKind } from "../db/types";
 
 // 開発者向け: 設定画面からタップ一つでノート詳細/ToDo/用語集の見た目を
 // 確認できるテストデータ(セッション3件・ブロック各種)を投入する。
@@ -18,6 +18,7 @@ export async function seedDevTestData(): Promise<void> {
     isTodo?: boolean;
     isQuestion?: boolean;
     questionTerm?: string | null;
+    questionKind?: QuestionKind | null;
     todoDone?: boolean;
   };
 
@@ -39,6 +40,7 @@ export async function seedDevTestData(): Promise<void> {
         isTodo: seed.isTodo,
         isQuestion: seed.isQuestion,
         questionTerm: seed.questionTerm,
+        questionKind: seed.questionKind,
       });
       if (seed.todoDone) {
         await blocksRepo.toggleTodoDone(block.id);
@@ -58,8 +60,15 @@ export async function seedDevTestData(): Promise<void> {
       text: "実技演習の評価基準はどこで確認できますか。",
       isQuestion: true,
       questionTerm: "評価基準",
+      questionKind: "term",
     },
     { startMs: 727000, text: "演習レポートを8/30までに提出する", isTodo: true },
+    {
+      startMs: 730000,
+      text: "実技演習の合格ラインは何点からですか。",
+      isQuestion: true,
+      questionKind: "question",
+    },
   ]);
 
   // ノート2: 営業ミーティング ― ToDoの未対応/完了、用語集の漢字語確認用
@@ -71,13 +80,32 @@ export async function seedDevTestData(): Promise<void> {
       text: "与信管理という言葉が出てきた",
       isQuestion: true,
       questionTerm: "与信管理",
+      questionKind: "term",
+    },
+    {
+      startMs: 180000,
+      text: "この見積もりはいつまでに先方へ送ればいいですか。",
+      isQuestion: true,
+      questionKind: "question",
     },
   ]);
 
   // ノート3: セキュリティ勉強会 ― 用語集の複数行、ToDo完了確認用
   await createSessionWithBlocks("セキュリティ勉強会", now - 3 * 60 * 60 * 1000, 15 * 60 * 1000, [
-    { startMs: 0, text: "ゼロトラストについて学んだ", isQuestion: true, questionTerm: "ゼロトラスト" },
-    { startMs: 60000, text: "シャドーイングの練習方法", isQuestion: true, questionTerm: "シャドーイング" },
+    {
+      startMs: 0,
+      text: "ゼロトラストについて学んだ",
+      isQuestion: true,
+      questionTerm: "ゼロトラスト",
+      questionKind: "term",
+    },
+    {
+      startMs: 60000,
+      text: "シャドーイングの練習方法",
+      isQuestion: true,
+      questionTerm: "シャドーイング",
+      questionKind: "term",
+    },
     { startMs: 120000, text: "研修資料をアーカイブする", isTodo: true, todoDone: true },
     { startMs: 180000, text: "2段階認証を8/30までに設定する", isTodo: true },
   ]);
