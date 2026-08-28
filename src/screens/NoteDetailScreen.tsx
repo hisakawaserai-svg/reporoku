@@ -13,6 +13,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -36,7 +37,7 @@ import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import * as Clipboard from "expo-clipboard";
-import { getSectionGroupingEnabled } from "../utils/settings";
+import { getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
@@ -61,8 +62,8 @@ const SECTION_GAP_MAX_MS = 8000; // スライダーの上限(まとめる)
 const SECTION_GAP_STEP_MS = 500;
 const SECTION_GAP_FALLBACK_MS = 5000; // sessionsに値が無い場合のフォールバック
 
-// 1文字あたりの推定発話時間(ミリ秒)。ブロックのstart_msには継続時間が記録されていないため、
-// テキスト長からおおまかな発話継続時間を見積もるための経験的な概算値
+// 1文字あたりの推定発話時間(ミリ秒)。block.endMs(実測の発話終了時刻)が無い古いデータの
+// フォールバックとしてのみ使う、テキスト長からのおおまかな発話継続時間の見積もり
 const MS_PER_CHAR = 150;
 
 // 発言(transcriptブロック)の推定継続時間。メモ・写真は瞬間的なイベントとして扱い0とする
@@ -71,9 +72,10 @@ function estimateBlockDurationMs(block: Block): number {
   return block.text.length * MS_PER_CHAR;
 }
 
-// 前のブロックの推定終了時刻から次のブロックの開始時刻までの「間」(ミリ秒、負値は0に丸める)
+// 前のブロックの終了時刻から次のブロックの開始時刻までの「間」(ミリ秒、負値は0に丸める)。
+// 長い発言ほど文字数からの推定が外れやすいため、実測のendMsがあれば必ずそちらを優先する
 function gapMsBetween(prev: Block, next: Block): number {
-  const prevEndMs = prev.startMs + estimateBlockDurationMs(prev);
+  const prevEndMs = prev.endMs ?? prev.startMs + estimateBlockDurationMs(prev);
   return Math.max(0, next.startMs - prevEndMs);
 }
 
@@ -254,6 +256,9 @@ export default function NoteDetailScreen() {
       return next;
     });
   };
+  // このノート固有の設定(区切りの細かさなど、今後も追加予定)を開閉するシート。
+  // フィルタチップと同じ列に置く歯車ボタンから開く
+  const [noteSettingsVisible, setNoteSettingsVisible] = useState(false);
   // 設定画面の「セクション分けを表示する」トグル。設定画面で切り替えた後、
   // この画面に戻ってきた時に反映されるよう、フォーカスの都度読み直す
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
@@ -262,6 +267,11 @@ export default function NoteDetailScreen() {
       setSectionGroupingEnabledState(getSectionGroupingEnabled());
     }, [])
   );
+  // このノートの設定シートからも切り替えられるようにする(設定画面と同じグローバル値)
+  const handleToggleSectionGrouping = (value: boolean) => {
+    setSectionGroupingEnabledState(value);
+    setSectionGroupingEnabled(value);
+  };
 
   // 他画面(Todo/用語集)からのジャンプ指定があれば、絞り込みを解除して該当ブロックが見えるようにする
   useEffect(() => {
@@ -513,6 +523,7 @@ export default function NoteDetailScreen() {
           isQuestion: earlier.isQuestion || later.isQuestion,
           questionTerm: earlier.questionTerm ?? later.questionTerm ?? null,
           questionKind: earlier.questionKind ?? later.questionKind ?? null,
+          endMs: later.endMs,
         });
         loadBlocks();
       } catch (e) {
@@ -1211,15 +1222,13 @@ export default function NoteDetailScreen() {
             </TouchableOpacity>
           );
         })}
+        <TouchableOpacity
+          style={styles.chip}
+          onPress={() => setNoteSettingsVisible(true)}
+        >
+          <Ionicons name="options-outline" size={16} color="#3c3c43" />
+        </TouchableOpacity>
       </View>
-
-      {sectionGroupingEnabled ? (
-        <SectionGapSlider
-          valueMs={sectionGapMs}
-          onChange={setSectionGapMs}
-          onChangeComplete={handleSectionGapChangeComplete}
-        />
-      ) : null}
 
       <View style={styles.timelineWrap}>
       {scrollPaused && newArrivalCount > 0 ? (
@@ -1269,17 +1278,8 @@ export default function NoteDetailScreen() {
                 const spacing = sectionGroupingEnabled
                   ? rowSpacingFor(group.blocks[blockIndex - 1], block)
                   : "line";
-                // 1.5〜5秒の「間」は改行はするがセクションほどではないため、見出しの代わりに
-                // 沈黙の長さだけを小さく表示する(セクション境界は見出しの時間帯表示で十分なため対象外)
-                const silenceSec =
-                  sectionGroupingEnabled && blockIndex > 0 && spacing === "line"
-                    ? Math.round(gapMsBetween(group.blocks[blockIndex - 1], block) / 1000)
-                    : null;
                 return (
                   <Fragment key={block.id}>
-                  {silenceSec !== null ? (
-                    <Text style={styles.silenceLabel}>{`【${silenceSec}秒の沈黙】`}</Text>
-                  ) : null}
                   <TouchableOpacity
                     style={[
                       styles.timelineRow,
@@ -1321,7 +1321,12 @@ export default function NoteDetailScreen() {
                     <View style={styles.timelineBody}>
                       <View style={styles.timelineMetaRow}>
                         <Text style={styles.timelineTime}>
-                          {session ? formatHHMM(session.startedAt + block.startMs) : fmt(block.startMs)}
+                          {fmt(block.startMs)}
+                          {session ? (
+                            <Text style={styles.timelineTimeWallClock}>
+                              {` ・ ${formatHHMM(session.startedAt + block.startMs)}`}
+                            </Text>
+                          ) : null}
                         </Text>
                         {badges.length > 0 ? (
                           <View style={styles.timelineBadgeRow}>
@@ -1481,9 +1486,12 @@ export default function NoteDetailScreen() {
                 <View style={styles.timelineBody}>
                   <View style={styles.timelineMetaRow}>
                     <Text style={styles.timelineTime}>
-                      {session
-                        ? formatHHMM(session.startedAt + menuBlock.startMs)
-                        : fmt(menuBlock.startMs)}
+                      {fmt(menuBlock.startMs)}
+                      {session ? (
+                        <Text style={styles.timelineTimeWallClock}>
+                          {` ・ ${formatHHMM(session.startedAt + menuBlock.startMs)}`}
+                        </Text>
+                      ) : null}
                     </Text>
                     {menuBlock ? (
                       (() => {
@@ -1677,6 +1685,34 @@ export default function NoteDetailScreen() {
         caption={viewerBlock?.text ?? null}
         onClose={closePhotoViewer}
       />
+
+      <Modal
+        visible={noteSettingsVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setNoteSettingsVisible(false)}
+      >
+        <Pressable style={styles.debugOverlay} onPress={() => setNoteSettingsVisible(false)}>
+          <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.promptTitle}>このノートの設定</Text>
+            <View style={styles.noteSettingsRow}>
+              <Text style={styles.noteSettingsRowLabel}>セクション分けを表示する</Text>
+              <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
+            </View>
+            {sectionGroupingEnabled ? (
+              <SectionGapSlider
+                valueMs={sectionGapMs}
+                onChange={setSectionGapMs}
+                onChangeComplete={handleSectionGapChangeComplete}
+              />
+            ) : (
+              <Text style={styles.noteSettingsDisabledText}>
+                セクション分けをオフにしているため、区切りの細かさは調整できません。
+              </Text>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1819,7 +1855,10 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: "#fff", fontWeight: "600" },
 
   // セクション区切りの細かさスライダー
-  gapSliderWrap: { paddingHorizontal: 16, paddingBottom: 10 },
+  gapSliderWrap: {},
+  noteSettingsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  noteSettingsRowLabel: { fontSize: 15, color: "#1c1c1e" },
+  noteSettingsDisabledText: { fontSize: 13, color: "#8e8e93", lineHeight: 19 },
   gapSliderLabel: { fontSize: 12, color: "#8e8e93", marginBottom: 6 },
   gapSliderTrack: { height: 24, justifyContent: "center" },
   gapSliderTrackBg: { height: 4, borderRadius: 2, backgroundColor: "#e2e2e7" },
@@ -1881,14 +1920,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 6,
   },
-  // 1.5〜5秒の「間」を示す小さな沈黙ラベル。セクション見出しほど目立たせず、行の間にそっと挟む
-  silenceLabel: {
-    fontSize: 11,
-    color: "#c7c7cc",
-    textAlign: "center",
-    marginTop: 4,
-    marginBottom: -2,
-  },
   timelineRow: {
     flexDirection: "row",
     alignItems: "stretch",
@@ -1908,6 +1939,8 @@ const styles = StyleSheet.create({
   timelineBody: { flex: 1 },
   timelineMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
   timelineTime: { fontSize: 12, fontWeight: "600", color: "#8e8e93" },
+  // 収録開始からの経過時間を主表示にし、時刻(壁時計)は補助として小さく添える
+  timelineTimeWallClock: { fontSize: 11, fontWeight: "400", color: "#c7c7cc" },
   timelineBadgeRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   editedBadge: { flexDirection: "row", alignItems: "center", gap: 2 },
   editedBadgeText: { fontSize: 10, color: "#8e8e93" },

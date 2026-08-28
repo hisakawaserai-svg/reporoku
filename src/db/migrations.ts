@@ -82,4 +82,10 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE sessions ADD COLUMN section_gap_ms INTEGER NOT NULL DEFAULT 5000;
     `,
   },
+  {
+    version: 4,
+    sql: `
+      ALTER TABLE blocks ADD COLUMN end_ms INTEGER;
+    `,
+  },
 ];

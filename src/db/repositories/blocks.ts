@@ -7,6 +7,7 @@ interface BlockRow {
   session_id: string;
   kind: string;
   start_ms: number;
+  end_ms: number | null;
   text: string | null;
   photo_uri: string | null;
   is_starred: number;
@@ -34,6 +35,7 @@ function mapRow(row: BlockRow): Block {
     sessionId: row.session_id,
     kind: row.kind as BlockKind,
     startMs: row.start_ms,
+    endMs: row.end_ms,
     text: row.text,
     photoUri: row.photo_uri ? toAbsoluteUri(row.photo_uri) : null,
     isStarred: row.is_starred === 1,
@@ -60,6 +62,7 @@ export interface CreateBlockInput {
   sessionId: string;
   kind: BlockKind;
   startMs: number;
+  endMs?: number | null;
   text?: string | null;
   photoUri?: string | null;
   isStarred?: boolean;
@@ -72,6 +75,7 @@ export interface CreateBlockInput {
 export async function create(input: CreateBlockInput): Promise<Block> {
   const db = await getDb();
   const now = Date.now();
+  const endMs = input.endMs ?? null;
   const text = input.text ?? null;
   const photoUri = input.photoUri ?? null;
   const isStarred = input.isStarred ?? false;
@@ -83,15 +87,16 @@ export async function create(input: CreateBlockInput): Promise<Block> {
   // documentDirectory相対のパスとして保存する(理由は toStorableUri のコメントを参照)
   await db.runAsync(
     `INSERT INTO blocks (
-       id, session_id, kind, start_ms, text, photo_uri,
+       id, session_id, kind, start_ms, end_ms, text, photo_uri,
        is_starred, is_todo, todo_done, is_question, question_term, question_kind,
        is_edited, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?);`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, ?);`,
     [
       input.id,
       input.sessionId,
       input.kind,
       input.startMs,
+      endMs,
       text,
       photoUri ? toStorableUri(photoUri) : null,
       isStarred ? 1 : 0,
@@ -108,6 +113,7 @@ export async function create(input: CreateBlockInput): Promise<Block> {
     sessionId: input.sessionId,
     kind: input.kind,
     startMs: input.startMs,
+    endMs,
     text,
     photoUri,
     isStarred,
@@ -153,6 +159,9 @@ export interface MergeFlags {
   isQuestion: boolean;
   questionTerm: string | null;
   questionKind: QuestionKind | null;
+  // 結合後のブロックは「早い方の開始〜遅い方の終了」の実測値になるため、
+  // 遅い方(later)ブロックのendMsをそのまま引き継ぐ
+  endMs: number | null;
 }
 
 // keepId側にmergedTextとflagsを反映し、removeId側を削除する(結合)
@@ -166,10 +175,11 @@ export async function mergeBlocks(
   await db.withTransactionAsync(async () => {
     await db.runAsync(
       `UPDATE blocks
-       SET text = ?, is_starred = ?, is_todo = ?, todo_done = ?, is_question = ?, question_term = ?, question_kind = ?, is_edited = 1
+       SET text = ?, end_ms = ?, is_starred = ?, is_todo = ?, todo_done = ?, is_question = ?, question_term = ?, question_kind = ?, is_edited = 1
        WHERE id = ?;`,
       [
         mergedText,
+        flags.endMs,
         flags.isStarred ? 1 : 0,
         flags.isTodo ? 1 : 0,
         flags.todoDone ? 1 : 0,
@@ -192,18 +202,22 @@ export interface SplitNewBlock {
 }
 
 // idのブロックをleftTextに書き換え、newBlockを新しい行として挿入する(分割)。
-// 新しい行に★/ToDo/質問フラグは引き継がない(前半にのみ残す)
+// 分割点の正確な発話終了時刻は分からないため、両方ともend_msはNULLにリセットし
+// (間隔計算は文字数推定にフォールバックする)、★/ToDo/質問フラグも前半にのみ残す
 export async function splitBlock(id: string, leftText: string, newBlock: SplitNewBlock): Promise<void> {
   const db = await getDb();
   const now = Date.now();
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE blocks SET text = ?, is_edited = 1 WHERE id = ?;', [leftText, id]);
+    await db.runAsync('UPDATE blocks SET text = ?, end_ms = NULL, is_edited = 1 WHERE id = ?;', [
+      leftText,
+      id,
+    ]);
     await db.runAsync(
       `INSERT INTO blocks (
-         id, session_id, kind, start_ms, text, photo_uri,
+         id, session_id, kind, start_ms, end_ms, text, photo_uri,
          is_starred, is_todo, todo_done, is_question, question_term, question_kind,
          is_edited, created_at
-       ) VALUES (?, ?, ?, ?, ?, NULL, 0, 0, 0, 0, NULL, NULL, 1, ?);`,
+       ) VALUES (?, ?, ?, ?, NULL, ?, NULL, 0, 0, 0, 0, NULL, NULL, 1, ?);`,
       [newBlock.id, newBlock.sessionId, newBlock.kind, newBlock.startMs, newBlock.text, now]
     );
   });

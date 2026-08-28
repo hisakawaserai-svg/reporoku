@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS blocks (
   id            TEXT PRIMARY KEY,
   session_id    TEXT NOT NULL,
   kind          TEXT NOT NULL,        -- 'transcript' | 'note' | 'photo'
-  start_ms      INTEGER NOT NULL,     -- セッション開始からの経過ms
+  start_ms      INTEGER NOT NULL,     -- セッション開始からの経過ms(発話開始の実測値)
+  end_ms        INTEGER,              -- 発話終了の実測値(ms、migration v4)。transcriptのみ録音時に記録。
+                                       -- NULLの場合はセクション分けの間隔計算で文字数からの推定にフォールバックする
   text          TEXT,
   photo_uri     TEXT,
   is_starred    INTEGER NOT NULL DEFAULT 0,  -- ★

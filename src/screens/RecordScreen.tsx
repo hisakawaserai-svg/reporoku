@@ -39,6 +39,9 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 type Block = {
   id?: string;
   ms: number;
+  // 発話終了の実測値(音声認識がfinal結果を返した時刻)。セクション分けの間隔計算で
+  // 文字数からの推定より正確な値として使う(長い発言ほど推定が外れやすいため)
+  endMs?: number;
   text: string;
   kind: "text" | "sys";
   isStarred?: boolean;
@@ -74,14 +77,18 @@ const MARK_TILES: {
 const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として行間を詰める
 const MS_PER_CHAR = 150; // 1文字あたりの推定発話時間(ms)。ノート詳細画面と同じ概算値
 
-// 発言(text)ブロックの推定継続時間。sysメッセージ(エラー等)は瞬間的なものとして0とする
+// 発言(text)ブロックの推定継続時間。sysメッセージ(エラー等)は瞬間的なものとして0とする。
+// endMs(音声認識のfinal結果が返ってきた実測終了時刻)があればそちらを使うため、
+// これは古いデータなどendMsが無い場合のフォールバックとしてのみ使われる
 function estimateBlockDurationMs(block: Block): number {
   if (block.kind !== "text" || !block.text) return 0;
   return block.text.length * MS_PER_CHAR;
 }
 
+// 前のブロックの終了時刻から次のブロックの開始時刻までの「間」。
+// 長い発言ほど文字数からの推定が外れやすいため、実測のendMsがあれば必ずそちらを優先する
 function gapMsBetween(prev: Block, next: Block): number {
-  const prevEndMs = prev.ms + estimateBlockDurationMs(prev);
+  const prevEndMs = prev.endMs ?? prev.ms + estimateBlockDurationMs(prev);
   return Math.max(0, next.ms - prevEndMs);
 }
 
@@ -163,9 +170,9 @@ export default function RecordScreen() {
   const [memoModalVisible, setMemoModalVisible] = useState(false);
   const [memoInput, setMemoInput] = useState("");
 
-  // ★/📝/❓タイルを長押しした時に出す「直近5件から選ぶ」ピッカー
-  const [pickerKey, setPickerKey] = useState<MarkKey | null>(null);
-  const [pickerVisible, setPickerVisible] = useState(false);
+  // ★/📝/❓タイルを長押しした時の「ログの発言をタップして選ぶ」モード。
+  // 別モーダルは出さず、画面内に既に見えているタイムラインをそのまま選択先にする
+  const [markSelectMode, setMarkSelectMode] = useState<MarkKey | null>(null);
 
   // タイムライン上でブロックを長押しして開く「結合/分割/マーク」メニュー相当(録音中は結合/分割は無し)。
   // ノート詳細画面のものと同様の見た目・挙動にするため、対象ブロックの実測座標を保持する
@@ -185,31 +192,19 @@ export default function RecordScreen() {
   const [scrollPaused, setScrollPaused] = useState(false);
   // 一時停止を始めた時点の発言ブロック数。バッジの「新着N件」はここからの増分
   const pauseBaselineCountRef = useRef(0);
-  // 折りたたまれているセクションのkey集合。最新セクションはこれに入っていても
-  // 強制的に展開表示される(下のuseEffect参照)ため、常に自由に開閉できるわけではない
-  const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<Set<string>>(new Set());
-  const toggleSectionCollapsed = (key: string) => {
-    setCollapsedSectionKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-  const prevBlockCountRef = useRef(0);
 
   // セッション全体(録音済み音声の累積時間)での経過ms。再起動をまたいでも連続した値になる
   const sessionElapsedMs = () => contentMsRef.current + Math.max(0, Date.now() - startedAt.current);
 
-  const push = (text: string, kind: Block["kind"] = "text", ms?: number, id?: string) =>
-    setBlocks((p) => [...p, { id, ms: ms ?? sessionElapsedMs(), text, kind }]);
+  const push = (text: string, kind: Block["kind"] = "text", ms?: number, id?: string, endMs?: number) =>
+    setBlocks((p) => [...p, { id, ms: ms ?? sessionElapsedMs(), endMs, text, kind }]);
 
-  const persistTranscriptBlock = (id: string, text: string, startMs: number) => {
+  const persistTranscriptBlock = (id: string, text: string, startMs: number, endMs: number) => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
     lastBlockIdRef.current = id;
     blocksRepo
-      .create({ id, sessionId, kind: "transcript", startMs, text })
+      .create({ id, sessionId, kind: "transcript", startMs, endMs, text })
       .catch((e) => console.warn("[DB] transcriptブロックの保存に失敗しました", e));
   };
 
@@ -233,7 +228,6 @@ export default function RecordScreen() {
   const clearScreenState = () => {
     setBlocks([]);
     setAudioUris([]);
-    setCollapsedSectionKeys(new Set());
     setInterim("");
   };
 
@@ -462,8 +456,10 @@ export default function RecordScreen() {
         // 開始時刻の候補：interim が来ていればそれ、なければ「前の発言の終わり」
         const start = segStart.current ?? prevEnd.current;
         const id = genId();
-        push(text, "text", start, id);
-        persistTranscriptBlock(id, text, start);
+        // nowはfinal結果が返ってきた実際の時刻(=この発言の実測終了時刻)。文字数からの
+        // 推定より正確なので、そのままセクション分けの間隔計算に使う
+        push(text, "text", start, id, now);
+        persistTranscriptBlock(id, text, start, now);
         prevEnd.current = now;      // 今の終わりを、次の発言の開始点にする
         segStart.current = null;    // 空文字finalでリセットすると、同じ発話が続いている場合に開始時刻がズレるため、ここでのみリセット
         setInterim("");             // 確定した発話をタイムラインに反映したので、進行中表示をクリアする
@@ -737,63 +733,44 @@ export default function RecordScreen() {
     }
   };
 
-  // ★/📝/❓タイル自体を長押しした時の「直近5件から選ぶ」ピッカーを開く。
+  // ★/📝/❓タイル自体を長押しした時、「ログの発言をタップして選ぶ」モードに入る。
   // タイムライン上の文字を直接長押しするメニューとは別の入口(こちらは「今どのブロックか
-  // 見なくても押せる」タイル操作の延長として、直近の発言だけを選択肢に絞る)
-  const openMarkPicker = (key: MarkKey) => {
+  // 見なくても押せる」タイル操作の延長)だが、選択自体は既に見えているログをそのまま使う
+  const startMarkSelectMode = (key: MarkKey) => {
     if (key !== "star" && key !== "todo" && key !== "question") return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setPickerKey(key);
-    setPickerVisible(true);
+    setMarkSelectMode(key);
+    // 選び終わるまでログが自動で下にスクロールしてしまうと対象を見失うため一時停止する
+    if (!scrollPaused) {
+      pauseBaselineCountRef.current = blocks.filter((b) => b.kind === "text").length;
+      setScrollPaused(true);
+    }
   };
 
-  const closeMarkPicker = () => {
-    setPickerVisible(false);
-    setPickerKey(null);
-  };
+  const cancelMarkSelectMode = () => setMarkSelectMode(null);
 
   const pickBlockForMark = (block: Block) => {
-    if (pickerKey === "star") {
+    if (markSelectMode === "star") {
       toggleBlockStar(block);
-    } else if (pickerKey === "todo") {
+    } else if (markSelectMode === "todo") {
       toggleBlockTodo(block);
-    } else if (pickerKey === "question") {
+    } else if (markSelectMode === "question") {
       questionTargetBlockIdRef.current = block.id ?? null;
       setQuestionChoiceVisible(true);
     }
-    closeMarkPicker();
+    setMarkSelectMode(null);
   };
 
   // 文字起こしリストの自動スクロール
   const scrollRef = useRef<ScrollView>(null);
 
-  // ノート詳細画面と同じグループ化ロジックでセクション分けする。最新セクション(今まさに
-  // 発言が追加され続けているセクション)は常に展開状態を保つ。オフの場合は計算自体を
-  // 行わず、全ブロックを1つの「セクション」として扱いフラットな時系列リストにする
+  // ノート詳細画面と同じグループ化ロジックでセクション分けする。録音中は折りたたみを
+  // 一切行わない(常に全セクション展開)ため、ノート詳細画面と違って開閉状態は持たない。
+  // オフの場合は計算自体を行わず、全ブロックを1つの「セクション」として扱いフラットな
+  // 時系列リストにする
   const sections = sectionGroupingEnabled
     ? groupBlocksIntoSections(blocks, sectionGapMsRef.current)
     : [{ key: "flat", blocks }];
-  const latestSectionKey = sections.length > 0 ? sections[sections.length - 1].key : null;
-
-  // 新しい発言(ブロック)が増えた時だけ、最新セクションが手動で畳まれていても再展開する。
-  // ★/📝/❓のトグルやテキスト編集はblocks配列の長さを変えないため、ここでは反応しない
-  useEffect(() => {
-    if (blocks.length > prevBlockCountRef.current && latestSectionKey) {
-      setCollapsedSectionKeys((prev) => {
-        if (!prev.has(latestSectionKey)) return prev;
-        const next = new Set(prev);
-        next.delete(latestSectionKey);
-        return next;
-      });
-    }
-    prevBlockCountRef.current = blocks.length;
-  }, [blocks.length, latestSectionKey]);
-
-  // ピッカーに出す「直近5件」の確定済み発言ブロック(新しい順)
-  const recentTextBlocks = blocks
-    .filter((b) => b.kind === "text" && b.id)
-    .slice(-5)
-    .reverse();
 
   // 長押しメニューの対象ブロックと、メニュー項目
   const menuBlockId = menuAnchor?.blockId ?? null;
@@ -932,6 +909,22 @@ export default function RecordScreen() {
       </View>
 
       <View style={styles.transcriptWrap}>
+      {markSelectMode ? (
+        <View style={styles.markSelectBannerContainer} pointerEvents="box-none">
+          <View style={styles.markSelectBanner}>
+            <Text style={styles.markSelectBannerText}>
+              {markSelectMode === "star"
+                ? "★を付ける発言をタップしてください"
+                : markSelectMode === "todo"
+                ? "📝を付ける発言をタップしてください"
+                : "❓を記録する発言をタップしてください"}
+            </Text>
+            <TouchableOpacity onPress={cancelMarkSelectMode} hitSlop={8}>
+              <Ionicons name="close-circle" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
       {scrollPaused && newArrivalCount > 0 ? (
         <View style={styles.followBadgeContainer} pointerEvents="box-none">
           <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoScroll}>
@@ -949,7 +942,6 @@ export default function RecordScreen() {
         }}
       >
         {sections.map((section, sectionIndex) => {
-          const isCollapsed = collapsedSectionKeys.has(section.key);
           const rangeText =
             section.blocks.length === 0
               ? ""
@@ -960,19 +952,14 @@ export default function RecordScreen() {
             <View key={section.key} style={styles.sectionWrap}>
               {sectionGroupingEnabled && sectionIndex > 0 ? <View style={styles.sectionDivider} /> : null}
               {sectionGroupingEnabled ? (
-                <TouchableOpacity
-                  style={styles.sectionHeaderRow}
-                  activeOpacity={0.6}
-                  onPress={() => toggleSectionCollapsed(section.key)}
-                >
+                // 録音中は折りたたみを行わないため、見出しはタップ不可のプレーンな表示にする
+                <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionHeader}>
-                    {isCollapsed ? "▶" : "▼"} セクション{sectionIndex + 1} ({rangeText})
+                    セクション{sectionIndex + 1} ({rangeText})
                   </Text>
-                </TouchableOpacity>
+                </View>
               ) : null}
-              {isCollapsed
-                ? null
-                : section.blocks.map((b, blockIndexInSection) => {
+              {section.blocks.map((b, blockIndexInSection) => {
               if (b.kind === "sys") {
                 return (
                   <Text key={b.id ?? `${section.key}-${blockIndexInSection}`} style={styles.sysText}>
@@ -1017,7 +1004,8 @@ export default function RecordScreen() {
                 <TouchableOpacity
                   key={b.id ?? `${section.key}-${blockIndexInSection}`}
                   activeOpacity={0.7}
-                  onLongPress={() => b.id && openBlockMenu(b)}
+                  onPress={markSelectMode && b.id ? () => pickBlockForMark(b) : undefined}
+                  onLongPress={() => !markSelectMode && b.id && openBlockMenu(b)}
                   ref={(node) => {
                     if (!b.id) return;
                     if (node) blockRowRefs.current.set(b.id, node as unknown as View);
@@ -1074,7 +1062,7 @@ export default function RecordScreen() {
                 tile={t}
                 active={activeMark === t.key}
                 onPress={handleMarkPress}
-                onLongPress={openMarkPicker}
+                onLongPress={startMarkSelectMode}
               />
             ))}
           </View>
@@ -1261,41 +1249,6 @@ export default function RecordScreen() {
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={pickerVisible} animationType="fade" transparent onRequestClose={closeMarkPicker}>
-        <Pressable style={styles.debugOverlay} onPress={closeMarkPicker}>
-          <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.debugTitle}>
-              {pickerKey === "star" ? "★を付ける発言を選択" : pickerKey === "todo" ? "📝を付ける発言を選択" : "❓を記録する発言を選択"}
-            </Text>
-            {recentTextBlocks.length === 0 ? (
-              <Text style={styles.pickerEmptyText}>まだ確定した発言がありません</Text>
-            ) : (
-              recentTextBlocks.map((b, i) => (
-                <TouchableOpacity
-                  key={b.id ?? i}
-                  style={[styles.pickerRow, i > 0 && styles.pickerRowDivider]}
-                  activeOpacity={0.7}
-                  onPress={() => pickBlockForMark(b)}
-                >
-                  <Text style={styles.pickerRowTime}>{fmt(b.ms)}</Text>
-                  <Text style={styles.pickerRowText} numberOfLines={2}>
-                    {b.text}
-                  </Text>
-                  {(pickerKey === "star" && b.isStarred) ||
-                  (pickerKey === "todo" && b.isTodo) ||
-                  (pickerKey === "question" && b.isQuestion) ? (
-                    <Ionicons name="checkmark-circle" size={18} color="#1f9254" />
-                  ) : null}
-                </TouchableOpacity>
-              ))
-            )}
-            <TouchableOpacity style={[styles.pillButton, styles.pickerCancelButton]} onPress={closeMarkPicker}>
-              <Text style={styles.pillButtonText}>キャンセル</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
       </Modal>
 
       <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
@@ -1527,6 +1480,30 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   followBadgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  // ★/📝/❓タイル長押しで「ログから選ぶ」モードに入った時、画面上部に出す案内バナー
+  markSelectBannerContainer: {
+    position: "absolute",
+    top: 8,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 5,
+  },
+  markSelectBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(28,28,30,0.9)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  markSelectBannerText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   transcriptArea: { flex: 1, marginTop: 4, paddingHorizontal: 20 },
   transcriptContent: { paddingBottom: 16 },
   // セクション(発言間の「間」が5秒以上)の区切り。ノート詳細画面と同じ考え方
@@ -1778,12 +1755,6 @@ const styles = StyleSheet.create({
   },
   questionChoiceLabel: { fontSize: 16, fontWeight: "700", color: "#1c1c1e" },
   questionChoiceHint: { fontSize: 11, color: "#8e8e93" },
-  pickerEmptyText: { fontSize: 13, color: "#8e8e93", textAlign: "center", paddingVertical: 12 },
-  pickerRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10 },
-  pickerRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
-  pickerRowTime: { fontSize: 12, color: "#8e8e93", width: 40 },
-  pickerRowText: { flex: 1, fontSize: 14, color: "#1c1c1e" },
-  pickerCancelButton: { alignSelf: "center" },
   promptInput: {
     borderWidth: 1,
     borderColor: "#e2e2e7",

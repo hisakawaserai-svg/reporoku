@@ -25,6 +25,9 @@ export interface Block {
   sessionId: string;
   kind: BlockKind;
   startMs: number;
+  // 発話終了の実測値(録音時にtranscriptのみ記録)。nullの場合はセクション分けの
+  // 間隔計算で文字数からの推定にフォールバックする(古いデータやnote/photoなど)
+  endMs: number | null;
   text: string | null;
   photoUri: string | null;
   isStarred: boolean;
