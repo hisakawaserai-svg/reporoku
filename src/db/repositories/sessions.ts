@@ -1,5 +1,6 @@
 import { getDb } from '../index';
 import type { MonthGroup, Session } from '../types';
+import { genId } from '../../utils/id';
 
 interface SessionRow {
   id: string;
@@ -9,6 +10,7 @@ interface SessionRow {
   created_at: number;
   updated_at: number;
   section_gap_ms: number;
+  is_quick: number;
 }
 
 function mapRow(row: SessionRow): Session {
@@ -20,6 +22,7 @@ function mapRow(row: SessionRow): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     sectionGapMs: row.section_gap_ms,
+    isQuick: row.is_quick === 1,
   };
 }
 
@@ -36,6 +39,7 @@ export interface CreateSessionInput {
   startedAt: number;
   durationMs?: number;
   sectionGapMs?: number;
+  isQuick?: boolean;
 }
 
 export async function create(input: CreateSessionInput): Promise<Session> {
@@ -44,11 +48,12 @@ export async function create(input: CreateSessionInput): Promise<Session> {
   const title = input.title ?? '';
   const durationMs = input.durationMs ?? 0;
   const sectionGapMs = input.sectionGapMs ?? 5000;
+  const isQuick = input.isQuick ?? false;
 
   await db.runAsync(
-    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at, section_gap_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?);`,
-    [input.id, title, input.startedAt, durationMs, now, now, sectionGapMs]
+    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at, section_gap_ms, is_quick)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+    [input.id, title, input.startedAt, durationMs, now, now, sectionGapMs, isQuick ? 1 : 0]
   );
 
   return {
@@ -59,6 +64,7 @@ export async function create(input: CreateSessionInput): Promise<Session> {
     createdAt: now,
     updatedAt: now,
     sectionGapMs,
+    isQuick,
   };
 }
 
@@ -70,8 +76,25 @@ export async function getById(id: string): Promise<Session | null> {
 
 export async function listAll(): Promise<Session[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<SessionRow>('SELECT * FROM sessions ORDER BY started_at DESC;');
+  const rows = await db.getAllAsync<SessionRow>(
+    'SELECT * FROM sessions WHERE is_quick = 0 ORDER BY started_at DESC;'
+  );
   return rows.map(mapRow);
+}
+
+// Todo/質問タブの「クイック追加」(録音を伴わない項目)専用の、非表示セッションを
+// 取得または作成する。ユーザーからは見えない裏側の処理で、常に1つだけ存在する
+export async function getOrCreateQuickSession(): Promise<Session> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<SessionRow>('SELECT * FROM sessions WHERE is_quick = 1 LIMIT 1;');
+  if (row) return mapRow(row);
+
+  return create({
+    id: genId(),
+    title: 'クイック追加',
+    startedAt: Date.now(),
+    isQuick: true,
+  });
 }
 
 export async function listAllGroupedByMonth(): Promise<MonthGroup<Session>[]> {

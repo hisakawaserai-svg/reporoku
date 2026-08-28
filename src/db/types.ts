@@ -9,6 +9,7 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   sectionGapMs: number;
+  isQuick: boolean;
 }
 
 export interface AudioFile {

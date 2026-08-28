@@ -122,4 +122,11 @@ export const MIGRATIONS: Migration[] = [
       END;
     `,
   },
+  {
+    // Todo/質問タブの「クイック追加」(録音を伴わない項目)専用の、非表示セッションを識別するフラグ
+    version: 6,
+    sql: `
+      ALTER TABLE sessions ADD COLUMN is_quick INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];

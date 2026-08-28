@@ -1202,7 +1202,10 @@ export default function NoteDetailScreen() {
         )}
         {session ? (
           <Text style={styles.titleMeta}>
-            {formatHHMM(session.startedAt)} 開始 ・ {formatMinutes(totalDurationMs || session.durationMs)}
+            {formatHHMM(session.startedAt)} 開始
+            {audioFiles.length > 0
+              ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs)}`
+              : ""}
           </Text>
         ) : null}
       </View>

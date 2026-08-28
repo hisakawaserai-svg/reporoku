@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -24,6 +25,9 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
+import { genId } from "../utils/id";
+
+type IconName = keyof typeof Ionicons.glyphMap;
 
 type DisplayMode = "list" | "calendar" | "todo" | "question";
 
@@ -106,11 +110,6 @@ function formatDateSlash(unixMs: number): string {
   ).padStart(2, "0")}`;
 }
 
-function formatDateShort(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-
 function dayKeyOf(unixMs: number): string {
   const d = new Date(unixMs);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -168,6 +167,112 @@ function noteDisplayTitle(session: Session): string {
   return session.title || `${formatDateSlash(session.startedAt)} の記録`;
 }
 
+// ToDo/質問タブの「追加」「編集」で共通のカード型モーダル。アイコンバッジ付きヘッダー+
+// 下線入力+丸型保存ボタンのレイアウトを、クイック追加・ToDo編集・質問編集の3箇所で使い回す
+type ItemFormModalProps = {
+  visible: boolean;
+  kind: "todo" | "question";
+  title: string;
+  subtitle: string;
+  mainValue: string;
+  onMainChange: (text: string) => void;
+  mainPlaceholder: string;
+  mainCaption: string;
+  showAnswer?: boolean;
+  answerValue?: string;
+  onAnswerChange?: (text: string) => void;
+  answerPlaceholder?: string;
+  answerCaption?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function ItemFormModal({
+  visible,
+  kind,
+  title,
+  subtitle,
+  mainValue,
+  onMainChange,
+  mainPlaceholder,
+  mainCaption,
+  showAnswer,
+  answerValue,
+  onAnswerChange,
+  answerPlaceholder,
+  answerCaption,
+  onCancel,
+  onConfirm,
+}: ItemFormModalProps) {
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onCancel}>
+      <KeyboardAvoidingView
+        style={styles.answerPromptKeyboardAvoider}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <Pressable style={styles.monthPickerOverlay} onPress={onCancel}>
+          <Pressable style={styles.quickAddPanel} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.quickAddHeader}>
+              <View
+                style={[
+                  styles.quickAddIconBadge,
+                  kind === "todo" ? styles.quickAddIconBadgeTodo : styles.quickAddIconBadgeQuestion,
+                ]}
+              >
+                <Ionicons
+                  name={kind === "todo" ? "checkmark" : "help"}
+                  size={22}
+                  color={kind === "todo" ? "#1f9254" : "#7c4dff"}
+                />
+              </View>
+              <View>
+                <Text style={styles.quickAddTitle}>{title}</Text>
+                <Text style={styles.quickAddSubtitle}>{subtitle}</Text>
+              </View>
+            </View>
+
+            <TextInput
+              style={styles.quickAddUnderlineInput}
+              value={mainValue}
+              onChangeText={onMainChange}
+              placeholder={mainPlaceholder}
+              autoFocus
+            />
+            <Text style={styles.quickAddFieldCaption}>{mainCaption}</Text>
+
+            {showAnswer ? (
+              <>
+                <TextInput
+                  style={styles.quickAddUnderlineInput}
+                  value={answerValue}
+                  onChangeText={onAnswerChange}
+                  placeholder={answerPlaceholder}
+                />
+                <Text style={styles.quickAddFieldCaption}>{answerCaption}</Text>
+              </>
+            ) : null}
+
+            <View style={styles.quickAddFooter}>
+              <TouchableOpacity onPress={onCancel}>
+                <Text style={styles.quickAddCancelText}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.quickAddSaveButton,
+                  kind === "todo" ? styles.quickAddSaveButtonTodo : styles.quickAddSaveButtonQuestion,
+                ]}
+                onPress={onConfirm}
+              >
+                <Ionicons name="checkmark" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 export default function NotesScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -179,6 +284,8 @@ export default function NotesScreen() {
   // 「ToDo」タブの項目を長押しして開く、本文の編集(対象ブロックID)
   const [todoEditBlockId, setTodoEditBlockId] = useState<string | null>(null);
   const [todoEditDraft, setTodoEditDraft] = useState("");
+  // 編集モーダルのヘッダーに表示する、対象アイテムが属するノートの見出し
+  const [todoEditSubtitle, setTodoEditSubtitle] = useState("");
   // ToDo/質問タブの「未対応/完了」「未解決/解決済み」区分の開閉状態
   // (ノート詳細画面のセクション折りたたみと同じ考え方)
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
@@ -196,6 +303,24 @@ export default function NotesScreen() {
   const [answerPromptBlockId, setAnswerPromptBlockId] = useState<string | null>(null);
   const [answerPromptQDraft, setAnswerPromptQDraft] = useState("");
   const [answerPromptDraft, setAnswerPromptDraft] = useState("");
+  const [answerPromptSubtitle, setAnswerPromptSubtitle] = useState("");
+  // Todo/質問タブの「+」ボタンで開く、クイック追加(録音を伴わない項目)の入力。
+  // 質問タブのみ、Q(必須)に加えてA(回答、任意)も入力できる
+  const [quickAddKind, setQuickAddKind] = useState<"todo" | "question" | null>(null);
+  const [quickAddDraft, setQuickAddDraft] = useState("");
+  const [quickAddAnswerDraft, setQuickAddAnswerDraft] = useState("");
+  // ToDo/質問タブの行を長押しして開く選択肢メニュー。ノート詳細画面の長押しメニューと
+  // レイアウトを揃えるため、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
+  type RowMenuKind = "todo" | "question";
+  const [rowMenuAnchor, setRowMenuAnchor] = useState<{
+    kind: RowMenuKind;
+    block: BlockWithSession;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const rowMenuRefs = useRef<Map<string, View>>(new Map());
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
@@ -254,12 +379,16 @@ export default function NotesScreen() {
     setAnswerPromptBlockId(block.id);
     setAnswerPromptQDraft(block.text ?? "");
     setAnswerPromptDraft(block.questionTerm ?? "");
+    setAnswerPromptSubtitle(
+      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
+    );
   };
 
   const cancelAnswerPrompt = () => {
     setAnswerPromptBlockId(null);
     setAnswerPromptQDraft("");
     setAnswerPromptDraft("");
+    setAnswerPromptSubtitle("");
   };
 
   // Aを保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)。
@@ -281,15 +410,31 @@ export default function NotesScreen() {
     }
   };
 
+  // ToDo/質問タブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
+  // 同じく、対象行の画面上の実測座標を取得してその近くにメニューを表示する
+  const openRowMenu = (kind: RowMenuKind, block: BlockWithSession) => {
+    const node = rowMenuRefs.current.get(block.id);
+    if (!node) return;
+    node.measureInWindow((x, y, width, height) => {
+      setRowMenuAnchor({ kind, block, x, y, width, height });
+    });
+  };
+
+  const closeRowMenu = () => setRowMenuAnchor(null);
+
   // ToDoタブの長押し編集。既存の本文を初期値にする
   const startTodoEdit = (block: BlockWithSession) => {
     setTodoEditBlockId(block.id);
     setTodoEditDraft(block.text ?? "");
+    setTodoEditSubtitle(
+      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
+    );
   };
 
   const cancelTodoEdit = () => {
     setTodoEditBlockId(null);
     setTodoEditDraft("");
+    setTodoEditSubtitle("");
   };
 
   const confirmTodoEdit = async () => {
@@ -306,6 +451,50 @@ export default function NotesScreen() {
     }
   };
 
+  // Todo/質問タブの「+」ボタン。録音を伴わない項目のため、裏側の非表示セッション
+  // (is_quick=1、無ければ自動作成)にkind='note'のブロックとして追加する
+  const startQuickAdd = (kind: "todo" | "question") => {
+    setQuickAddKind(kind);
+    setQuickAddDraft("");
+    setQuickAddAnswerDraft("");
+  };
+
+  const cancelQuickAdd = () => {
+    setQuickAddKind(null);
+    setQuickAddDraft("");
+    setQuickAddAnswerDraft("");
+  };
+
+  const confirmQuickAdd = async () => {
+    const kind = quickAddKind;
+    const text = quickAddDraft.trim();
+    const answer = quickAddAnswerDraft.trim();
+    setQuickAddKind(null);
+    setQuickAddDraft("");
+    setQuickAddAnswerDraft("");
+    if (!kind || !text) return;
+    try {
+      const session = await sessionsRepo.getOrCreateQuickSession();
+      const id = genId();
+      await blocksRepo.create({
+        id,
+        sessionId: session.id,
+        kind: "note",
+        startMs: 0,
+        text,
+        isTodo: kind === "todo",
+        isQuestion: kind === "question",
+      });
+      if (kind === "question" && answer) {
+        await blocksRepo.answerQuestion(id, answer);
+      }
+      if (kind === "todo") loadTodos();
+      else loadQuestions();
+    } catch (e) {
+      console.warn("[DB] クイック追加の保存に失敗しました", e);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       loadNotes();
@@ -314,15 +503,18 @@ export default function NotesScreen() {
     }, [loadNotes, loadTodos, loadQuestions])
   );
 
+  const trimmedQuery = query.trim();
+  // trigramトークナイザの制約で3文字未満は検索できない(ヒット0件と区別して案内する)
+  const queryTooShort = trimmedQuery.length > 0 && trimmedQuery.length < 3;
+
   useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed) {
+    if (!trimmedQuery || queryTooShort) {
       setSearchResults([]);
       return;
     }
     let cancelled = false;
     blocksRepo
-      .search(trimmed)
+      .search(trimmedQuery)
       .then((rows) => {
         if (!cancelled) setSearchResults(rows);
       })
@@ -330,7 +522,7 @@ export default function NotesScreen() {
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [trimmedQuery, queryTooShort]);
 
   const dayGroups = useMemo<DayGroup[]>(() => {
     const groups: DayGroup[] = [];
@@ -406,10 +598,35 @@ export default function NotesScreen() {
     return groups;
   }, [selectedDayGroup]);
 
-  const isSearching = query.trim().length > 0;
+  const isSearching = trimmedQuery.length > 0;
   // 「質問」タブ: 回答メモ(question_term)が付いているかどうかで未解決/解決済みに分ける
   const unresolvedQuestions = questions.filter((q) => !q.questionTerm?.trim());
   const resolvedQuestions = questions.filter((q) => !!q.questionTerm?.trim());
+
+  // タブごとの検索対象の絞り込み。ToDo/質問タブはそれぞれis_todo/is_questionの
+  // ブロックのみを対象にする(❓は質問文Qだけでなく回答Aもblocks_ftsの検索対象に
+  // 含まれているため、is_question=1の絞り込みだけで両方カバーできる)
+  const searchTodoResults = useMemo(
+    () => searchResults.filter((r) => r.isTodo),
+    [searchResults]
+  );
+  const searchQuestionResults = useMemo(
+    () => searchResults.filter((r) => r.isQuestion),
+    [searchResults]
+  );
+  const searchGroupsForMode = useMemo(() => {
+    if (mode === "todo") return groupBySession(searchTodoResults);
+    if (mode === "question") return groupBySession(searchQuestionResults);
+    return groupBySession(searchResults);
+  }, [mode, searchResults, searchTodoResults, searchQuestionResults]);
+  const searchResultCountForMode =
+    mode === "todo"
+      ? searchTodoResults.length
+      : mode === "question"
+      ? searchQuestionResults.length
+      : searchResults.length;
+  const searchPlaceholder =
+    mode === "todo" ? "ToDoを検索" : mode === "question" ? "質問・回答を検索" : "ノートを検索";
 
   const goToNote = (noteId: string) => {
     navigation.navigate("NoteDetail", { noteId });
@@ -512,8 +729,12 @@ export default function NotesScreen() {
       key={block.id}
       style={styles.todoCard}
       activeOpacity={0.7}
-      onPress={() => goToBlock(block)}
-      onLongPress={() => startTodoEdit(block)}
+      onPress={() => startTodoEdit(block)}
+      onLongPress={() => openRowMenu("todo", block)}
+      ref={(node) => {
+        if (node) rowMenuRefs.current.set(block.id, node);
+        else rowMenuRefs.current.delete(block.id);
+      }}
     >
       <TouchableOpacity
         hitSlop={8}
@@ -531,14 +752,16 @@ export default function NotesScreen() {
       >
         {block.text}
       </Text>
-      <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+      <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
+        <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 
   // 「質問」タブの行。ToDoタブと同じ「ノートごとの小見出し+カード」パターン。
   // 行タップ=回答(A)の入力を開く(このタブの主目的)、右端の矢印タップ=該当ノートへ遷移
-  // (独立したタップ領域)。回答が付けば「解決済み」。Q(発言テキスト)のみ/Q+A
-  // (question_termを回答として転用)の2パターンを表示する
+  // (独立したタップ領域)、長押し=選択肢メニュー。回答が付けば「解決済み」。
+  // Q(発言テキスト)のみ/Q+A(question_termを回答として転用)の2パターンを表示する
   const renderQuestionRow = (block: BlockWithSession) => {
     const answer = block.questionTerm?.trim();
     const resolved = !!answer;
@@ -548,6 +771,11 @@ export default function NotesScreen() {
         style={styles.todoCard}
         activeOpacity={0.7}
         onPress={() => startAnswerPrompt(block)}
+        onLongPress={() => openRowMenu("question", block)}
+        ref={(node) => {
+          if (node) rowMenuRefs.current.set(block.id, node);
+          else rowMenuRefs.current.delete(block.id);
+        }}
       >
         <Ionicons
           name={resolved ? "checkmark-circle" : "help-circle-outline"}
@@ -571,12 +799,99 @@ export default function NotesScreen() {
     );
   };
 
+  // ToDo/質問タブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
+  // 横並び行)と同じ形にする
+  type RowMenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
+  const rowMenuItems: RowMenuItem[] = !rowMenuAnchor
+    ? []
+    : rowMenuAnchor.kind === "todo"
+    ? [
+        {
+          key: "edit",
+          label: "編集",
+          icon: "create-outline",
+          color: "#8e8e93",
+          onPress: () => {
+            closeRowMenu();
+            startTodoEdit(rowMenuAnchor.block);
+          },
+        },
+        {
+          key: "toggleDone",
+          label: rowMenuAnchor.block.todoDone ? "未対応に戻す" : "完了にする",
+          icon: "checkmark-done-outline",
+          color: "#1f9254",
+          onPress: () => {
+            closeRowMenu();
+            blocksRepo.toggleTodoDone(rowMenuAnchor.block.id).then(loadTodos);
+          },
+        },
+        {
+          key: "open",
+          label: "ノートを開く",
+          icon: "open-outline",
+          color: "#06c",
+          onPress: () => {
+            closeRowMenu();
+            goToBlock(rowMenuAnchor.block);
+          },
+        },
+      ]
+    : [
+        {
+          key: "answer",
+          label: rowMenuAnchor.block.questionTerm?.trim() ? "回答を編集" : "回答を記入",
+          icon: "chatbubble-ellipses-outline",
+          color: "#7c4dff",
+          onPress: () => {
+            closeRowMenu();
+            startAnswerPrompt(rowMenuAnchor.block);
+          },
+        },
+        {
+          key: "open",
+          label: "ノートを開く",
+          icon: "open-outline",
+          color: "#06c",
+          onPress: () => {
+            closeRowMenu();
+            goToBlock(rowMenuAnchor.block);
+          },
+        },
+      ];
+
+  // メニューの位置決め。ノート詳細画面のmenuList位置計算と同じロジック
+  // (吹き出しが画面外にはみ出さないよう、上下どちらに表示するかを空きスペースで判定する)
+  const ROW_MENU_ITEM_HEIGHT = 44;
+  const ROW_MENU_GAP = 8;
+  const ROW_MENU_WIDTH = 220;
+  const ROW_MENU_SCREEN_MARGIN = 40;
+  let rowMenuTop = 0;
+  let rowMenuLeft = 0;
+  if (rowMenuAnchor) {
+    const windowHeight = Dimensions.get("window").height;
+    const windowWidth = Dimensions.get("window").width;
+    const menuHeight = rowMenuItems.length * ROW_MENU_ITEM_HEIGHT;
+    const spaceBelow = windowHeight - (rowMenuAnchor.y + rowMenuAnchor.height) - ROW_MENU_GAP;
+    const spaceAbove = rowMenuAnchor.y - ROW_MENU_GAP;
+    const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+    rowMenuTop = showBelow
+      ? rowMenuAnchor.y + rowMenuAnchor.height + ROW_MENU_GAP
+      : rowMenuAnchor.y - ROW_MENU_GAP - menuHeight;
+    const minTop = ROW_MENU_SCREEN_MARGIN;
+    const maxTop = windowHeight - menuHeight - ROW_MENU_SCREEN_MARGIN;
+    rowMenuTop = Math.max(minTop, Math.min(rowMenuTop, maxTop));
+    rowMenuLeft = Math.max(16, Math.min(rowMenuAnchor.x, windowWidth - ROW_MENU_WIDTH - 16));
+  }
+
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
       {group.sessionTitle || "無題のノート"} ・ {formatDateSlash(group.sessionStartedAt)}
     </Text>
   );
 
+  // リスト/カレンダータブの検索結果行。ヒットしたセッション単位でまとめて表示するため
+  // (renderNoteGroupHeaderが見出しを出す)、ここでは行ごとのスニペットのみを表示する
   const renderSearchRow = (result: SearchResult) => (
     <TouchableOpacity
       key={result.id}
@@ -584,9 +899,6 @@ export default function NotesScreen() {
       activeOpacity={0.7}
       onPress={() => goToBlock(result)}
     >
-      <Text style={styles.searchMeta}>
-        {result.sessionTitle || "無題のノート"} ・ {formatDateShort(result.sessionStartedAt)}
-      </Text>
       <Text style={styles.searchSnippet}>{result.snippet}</Text>
     </TouchableOpacity>
   );
@@ -598,7 +910,7 @@ export default function NotesScreen() {
         <Ionicons name="search" size={18} color="#8e8e93" />
         <TextInput
           style={styles.searchInput}
-          placeholder="ノートを検索"
+          placeholder={searchPlaceholder}
           placeholderTextColor="#8e8e93"
           value={query}
           onChangeText={setQuery}
@@ -631,13 +943,27 @@ export default function NotesScreen() {
       <ScrollView style={styles.content}>
         {isSearching ? (
           <View>
-            {searchResults.length === 0 ? (
+            {queryTooShort ? (
+              <View style={styles.placeholder}>
+                <Ionicons name="search-outline" size={32} color="#c7c7cc" />
+                <Text style={styles.placeholderText}>もう少し詳しく入力してください</Text>
+              </View>
+            ) : searchResultCountForMode === 0 ? (
               <View style={styles.placeholder}>
                 <Ionicons name="search-outline" size={32} color="#c7c7cc" />
                 <Text style={styles.placeholderText}>検索結果がありません</Text>
               </View>
             ) : (
-              searchResults.map(renderSearchRow)
+              searchGroupsForMode.map((group) => (
+                <View key={group.sessionId}>
+                  {renderNoteGroupHeader(group)}
+                  {mode === "todo"
+                    ? (group.items as BlockWithSession[]).map(renderTodoRow)
+                    : mode === "question"
+                    ? (group.items as BlockWithSession[]).map(renderQuestionRow)
+                    : (group.items as SearchResult[]).map(renderSearchRow)}
+                </View>
+              ))
             )}
           </View>
         ) : (
@@ -867,87 +1193,83 @@ export default function NotesScreen() {
         )}
       </ScrollView>
 
-      <Modal
-        visible={answerPromptBlockId !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={cancelAnswerPrompt}
-      >
-        <KeyboardAvoidingView
-          style={styles.answerPromptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+      {!isSearching && (mode === "todo" || mode === "question") ? (
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.8}
+          onPress={() => startQuickAdd(mode)}
         >
-          <Pressable style={styles.monthPickerOverlay} onPress={cancelAnswerPrompt}>
-            <Pressable style={styles.answerPromptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.answerPromptLabel}>Q</Text>
-              <TextInput
-                style={styles.answerPromptInput}
-                value={answerPromptQDraft}
-                onChangeText={setAnswerPromptQDraft}
-                placeholder="質問の内容"
-                multiline
-              />
-              <Text style={styles.answerPromptLabel}>A</Text>
-              <TextInput
-                style={styles.answerPromptInput}
-                value={answerPromptDraft}
-                onChangeText={setAnswerPromptDraft}
-                placeholder="わかったこと・聞いた答えなどを書き足す"
-                multiline
-                autoFocus
-              />
-              <View style={styles.answerPromptButtonRow}>
-                <TouchableOpacity style={styles.answerPromptButton} onPress={cancelAnswerPrompt}>
-                  <Text style={styles.answerPromptButtonText}>キャンセル</Text>
-                </TouchableOpacity>
+          <Ionicons name="add" size={28} color="#fff" />
+        </TouchableOpacity>
+      ) : null}
+
+      <ItemFormModal
+        visible={answerPromptBlockId !== null}
+        kind="question"
+        title="質問を編集"
+        subtitle={answerPromptSubtitle}
+        mainValue={answerPromptQDraft}
+        onMainChange={setAnswerPromptQDraft}
+        mainPlaceholder="質問の内容"
+        mainCaption="Q ・ 必須"
+        showAnswer
+        answerValue={answerPromptDraft}
+        onAnswerChange={setAnswerPromptDraft}
+        answerPlaceholder="わかったこと・聞いた答えなど"
+        answerCaption="A ・ 任意"
+        onCancel={cancelAnswerPrompt}
+        onConfirm={confirmAnswerPrompt}
+      />
+
+      <ItemFormModal
+        visible={todoEditBlockId !== null}
+        kind="todo"
+        title="ToDoを編集"
+        subtitle={todoEditSubtitle}
+        mainValue={todoEditDraft}
+        onMainChange={setTodoEditDraft}
+        mainPlaceholder="ToDoの内容"
+        mainCaption="必須"
+        onCancel={cancelTodoEdit}
+        onConfirm={confirmTodoEdit}
+      />
+
+      <Modal visible={rowMenuAnchor !== null} animationType="fade" transparent onRequestClose={closeRowMenu}>
+        <Pressable style={styles.rowMenuOverlay} onPress={closeRowMenu}>
+          {rowMenuAnchor ? (
+            <View style={[styles.rowMenuList, { top: rowMenuTop, left: rowMenuLeft, width: ROW_MENU_WIDTH }]}>
+              {rowMenuItems.map((item, index) => (
                 <TouchableOpacity
-                  style={[styles.answerPromptButton, styles.answerPromptButtonPrimary]}
-                  onPress={confirmAnswerPrompt}
+                  key={item.key}
+                  style={[styles.rowMenuItem, index > 0 && styles.rowMenuItemDivider]}
+                  onPress={item.onPress}
                 >
-                  <Text style={styles.answerPromptButtonPrimaryText}>保存</Text>
+                  <Text style={styles.rowMenuItemText}>{item.label}</Text>
+                  <Ionicons name={item.icon} size={18} color={item.color} />
                 </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
+              ))}
+            </View>
+          ) : null}
+        </Pressable>
       </Modal>
 
-      <Modal
-        visible={todoEditBlockId !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={cancelTodoEdit}
-      >
-        <KeyboardAvoidingView
-          style={styles.answerPromptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.monthPickerOverlay} onPress={cancelTodoEdit}>
-            <Pressable style={styles.answerPromptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.monthPickerTitle}>ToDoを編集</Text>
-              <TextInput
-                style={styles.answerPromptInput}
-                value={todoEditDraft}
-                onChangeText={setTodoEditDraft}
-                placeholder="ToDoの内容"
-                multiline
-                autoFocus
-              />
-              <View style={styles.answerPromptButtonRow}>
-                <TouchableOpacity style={styles.answerPromptButton} onPress={cancelTodoEdit}>
-                  <Text style={styles.answerPromptButtonText}>キャンセル</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.answerPromptButton, styles.answerPromptButtonPrimary]}
-                  onPress={confirmTodoEdit}
-                >
-                  <Text style={styles.answerPromptButtonPrimaryText}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
+      <ItemFormModal
+        visible={quickAddKind !== null}
+        kind={quickAddKind ?? "todo"}
+        title={quickAddKind === "todo" ? "ToDoを追加" : "質問を追加"}
+        subtitle="クイック追加"
+        mainValue={quickAddDraft}
+        onMainChange={setQuickAddDraft}
+        mainPlaceholder={quickAddKind === "todo" ? "ToDoの内容" : "質問の内容"}
+        mainCaption={quickAddKind === "todo" ? "必須" : "Q ・ 必須"}
+        showAnswer={quickAddKind === "question"}
+        answerValue={quickAddAnswerDraft}
+        onAnswerChange={setQuickAddAnswerDraft}
+        answerPlaceholder="わかったこと・聞いた答えなど"
+        answerCaption="A ・ 任意・あとで記入してもOK"
+        onCancel={cancelQuickAdd}
+        onConfirm={confirmQuickAdd}
+      />
 
       <Modal
         visible={monthPickerVisible}
@@ -1057,6 +1379,45 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, color: "#3c3c43" },
   segmentTextSelected: { fontWeight: "600" },
+  fab: {
+    position: "absolute",
+    left: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#06c",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  // ToDo/質問タブの長押しメニュー。ノート詳細画面のmenuOverlay/menuList/menuItemと
+  // 同じ見た目(丸角カード+区切り線付きの行)に揃える
+  rowMenuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
+  rowMenuList: {
+    position: "absolute",
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  rowMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+  },
+  rowMenuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
+  rowMenuItemText: { fontSize: 15, color: "#1c1c1e" },
   content: { flex: 1, marginTop: 12 },
   sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
@@ -1203,37 +1564,58 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   answerPromptKeyboardAvoider: { flex: 1, justifyContent: "flex-end" },
-  answerPromptPanel: {
+
+  // クイック追加(ToDo/質問タブの「+」)のパネル。アイコンバッジ付きヘッダー+
+  // 下線入力+丸型保存ボタンのカード型レイアウト
+  quickAddPanel: {
     backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
     paddingBottom: 28,
-    gap: 12,
   },
-  answerPromptLabel: { fontSize: 12, fontWeight: "700", color: "#8e8e93", marginBottom: -6 },
-  answerPromptInput: {
-    borderWidth: 1,
-    borderColor: "#e2e2e7",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#1c1c1e",
-    minHeight: 60,
-    textAlignVertical: "top",
+  quickAddHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22 },
+  quickAddIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  answerPromptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
-  answerPromptButton: {
-    paddingHorizontal: 16,
+  quickAddIconBadgeTodo: { backgroundColor: "#e0f7e6" },
+  quickAddIconBadgeQuestion: { backgroundColor: "#f2e8fc" },
+  quickAddTitle: { fontSize: 18, fontWeight: "700", color: "#1c1c1e" },
+  quickAddSubtitle: { fontSize: 13, color: "#8e8e93", marginTop: 2 },
+  quickAddUnderlineInput: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#d1d1d6",
     paddingVertical: 8,
-    borderRadius: 14,
-    backgroundColor: "#f2f2f7",
+    fontSize: 16,
+    color: "#1c1c1e",
   },
-  answerPromptButtonPrimary: { backgroundColor: "#06c" },
-  answerPromptButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
-  answerPromptButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
+  quickAddFieldCaption: { fontSize: 12, color: "#8e8e93", marginTop: 6, marginBottom: 18 },
+  quickAddFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  quickAddCancelText: { fontSize: 16, color: "#8e8e93" },
+  quickAddSaveButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  quickAddSaveButtonTodo: { backgroundColor: "#34c759" },
+  quickAddSaveButtonQuestion: { backgroundColor: "#7c4dff" },
   monthPickerYearNav: {
     flexDirection: "row",
     alignItems: "center",
@@ -1306,7 +1688,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#e5e5ea",
   },
-  searchMeta: { fontSize: 12, color: "#8e8e93" },
   searchSnippet: { fontSize: 15, color: "#1c1c1e", marginTop: 3 },
 
   placeholder: {
