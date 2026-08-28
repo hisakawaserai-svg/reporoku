@@ -35,6 +35,7 @@ import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
+import * as Clipboard from "expo-clipboard";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
@@ -450,6 +451,26 @@ export default function NoteDetailScreen() {
     [loadBlocks]
   );
 
+  const toggleBlockTodoDone = useCallback(
+    async (block: Block) => {
+      setMenuAnchor(null);
+      try {
+        await blocksRepo.toggleTodoDone(block.id);
+        loadBlocks();
+      } catch (e) {
+        console.warn("[DB] ToDo完了状態の切り替えに失敗しました", e);
+      }
+    },
+    [loadBlocks]
+  );
+
+  const copyBlockText = useCallback((block: Block) => {
+    setMenuAnchor(null);
+    Clipboard.setStringAsync(block.text ?? "").catch((e) =>
+      console.warn("[Clipboard] コピーに失敗しました", e)
+    );
+  }, []);
+
   const startQuestionPrompt = (block: Block) => {
     setMenuAnchor(null);
     setQuestionPromptBlockId(block.id);
@@ -800,82 +821,138 @@ export default function NoteDetailScreen() {
   const canSplit = !!menuBlock && menuBlock.kind !== "photo" && (menuBlock.text ?? "").trim().length >= 2;
 
   // iOSのネイティブな長押しコンテキストメニューに寄せた見た目にするため、
-  // 項目リストを先に組み立ててから位置(上下どちらに出すか)を計算する
+  // 項目を「属性(横並び3つ)」「結合(横並び2つ)」「その他(縦積み)」に分けて組み立ててから
+  // 全体の高さを計算し、上下どちらに表示するかを決める
   type MenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
-  const menuItems: MenuItem[] = menuBlock
-    ? ([
-        canSplit && {
-          key: "split",
-          label: "分割",
-          icon: "swap-horizontal" as IconName,
-          color: "#8e8e93",
-          onPress: () => startSplitting(menuBlock),
-        },
-        canMergePrev && {
-          key: "mergePrev",
-          label: "前のブロックと結合",
-          icon: "arrow-up" as IconName,
-          color: "#8e8e93",
-          onPress: () => mergeWithNeighbor(menuBlock, "prev"),
-        },
-        canMergeNext && {
-          key: "mergeNext",
-          label: "次のブロックと結合",
-          icon: "arrow-down" as IconName,
-          color: "#8e8e93",
-          onPress: () => mergeWithNeighbor(menuBlock, "next"),
-        },
+  type AttrButton = {
+    key: string;
+    icon: IconName;
+    active: boolean;
+    activeColor: string;
+    inactiveBg: string;
+    onPress: () => void;
+  };
+
+  const attributeButtons: AttrButton[] = menuBlock
+    ? [
         {
           key: "star",
-          label: menuBlock.isStarred ? "★を外す" : "星をつける",
-          icon: "star" as IconName,
-          color: "#d98c00",
+          icon: "star",
+          active: menuBlock.isStarred,
+          activeColor: "#d98c00",
+          inactiveBg: "#fdf0dc",
           onPress: () => toggleBlockStar(menuBlock),
         },
         {
           key: "todo",
-          label: menuBlock.isTodo ? "ToDoを解除" : "Todoにする",
-          icon: "checkmark" as IconName,
-          color: "#1f9254",
+          icon: "checkmark",
+          active: menuBlock.isTodo,
+          activeColor: "#1f9254",
+          inactiveBg: "#e0f7e6",
           onPress: () => toggleBlockTodo(menuBlock),
         },
         {
           key: "question",
-          label: menuBlock.isQuestion ? "質問マークを解除" : "質問にする",
-          icon: "help-circle" as IconName,
-          color: "#7c4dff",
+          icon: "help-circle",
+          active: menuBlock.isQuestion,
+          activeColor: "#7c4dff",
+          inactiveBg: "#f2e8fc",
           onPress: () =>
             menuBlock.isQuestion ? clearBlockQuestion(menuBlock) : startQuestionPrompt(menuBlock),
+        },
+      ]
+    : [];
+
+  const todoDoneItem: MenuItem | null =
+    menuBlock && menuBlock.isTodo
+      ? {
+          key: "todoDone",
+          label: menuBlock.todoDone ? "未完了に戻す" : "完了にする",
+          icon: "checkmark-done-outline",
+          color: "#1f9254",
+          onPress: () => toggleBlockTodoDone(menuBlock),
+        }
+      : null;
+
+  const actionItems: MenuItem[] = menuBlock
+    ? [
+        {
+          key: "edit",
+          label: "テキスト編集",
+          icon: "create-outline",
+          color: "#8e8e93",
+          onPress: () => startEditingBlock(menuBlock),
+        },
+        {
+          key: "copy",
+          label: "コピー",
+          icon: "copy-outline",
+          color: "#8e8e93",
+          onPress: () => copyBlockText(menuBlock),
         },
         {
           key: "memo",
           label: "メモを追加",
-          icon: "document-text-outline" as IconName,
+          icon: "document-text-outline",
           color: "#8e8e93",
           onPress: () => startMemoPrompt(menuBlock),
         },
         {
           key: "photo",
           label: "写真を追加",
-          icon: "camera-outline" as IconName,
+          icon: "camera-outline",
           color: "#8e8e93",
           onPress: () => addPhotoAfter(menuBlock),
         },
-        {
-          key: "delete",
-          label: "削除",
-          icon: "trash-outline" as IconName,
-          color: "#ff3b30",
-          onPress: () => confirmDeleteBlock(menuBlock),
+      ]
+    : [];
+
+  const mergeButtons: MenuItem[] = menuBlock
+    ? ([
+        canMergePrev && {
+          key: "mergePrev",
+          label: "前と結合",
+          icon: "arrow-up" as IconName,
+          color: "#8e8e93",
+          onPress: () => mergeWithNeighbor(menuBlock, "prev"),
+        },
+        canMergeNext && {
+          key: "mergeNext",
+          label: "次と結合",
+          icon: "arrow-down" as IconName,
+          color: "#8e8e93",
+          onPress: () => mergeWithNeighbor(menuBlock, "next"),
         },
       ].filter(Boolean) as MenuItem[])
     : [];
+
+  const splitItem: MenuItem | null =
+    menuBlock && canSplit
+      ? {
+          key: "split",
+          label: "分割",
+          icon: "swap-horizontal",
+          color: "#8e8e93",
+          onPress: () => startSplitting(menuBlock),
+        }
+      : null;
+
+  const deleteItem: MenuItem | null = menuBlock
+    ? {
+        key: "delete",
+        label: "削除",
+        icon: "trash-outline",
+        color: "#ff3b30",
+        onPress: () => confirmDeleteBlock(menuBlock),
+      }
+    : null;
 
   // Modalの暗いオーバーレイは画面全体の上に重なるため、対象ブロックの実際の背景色を
   // 変えるだけでは暗幕越しに見えてしまいハイライトに見えない。そこで、実測した位置・
   // サイズぴったりに「明るい複製」をオーバーレイの上に重ねて表示し、ブロック自体が
   // 浮き上がって見えるようにする(プレビュー用に余分な余白は足さない)
-  const MENU_ITEM_HEIGHT = 44;
+  const MENU_ROW_HEIGHT = 44;
+  const MENU_ATTR_ROW_HEIGHT = 48;
   const MENU_GAP = 10;
   const MENU_WIDTH = 230;
   const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
@@ -884,7 +961,13 @@ export default function NoteDetailScreen() {
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
-    const menuHeight = menuItems.length * MENU_ITEM_HEIGHT;
+    const menuHeight =
+      (menuBlock ? MENU_ATTR_ROW_HEIGHT : 0) +
+      (todoDoneItem ? MENU_ROW_HEIGHT : 0) +
+      actionItems.length * MENU_ROW_HEIGHT +
+      (mergeButtons.length > 0 ? MENU_ROW_HEIGHT : 0) +
+      (splitItem ? MENU_ROW_HEIGHT : 0) +
+      (deleteItem ? MENU_ROW_HEIGHT : 0);
     // 項目数によってメニューの高さが変わるため、上下どちらに実際に収まる余白が
     // あるかで表示方向を決め、それでも収まりきらない場合は画面内に収まるよう位置を補正する
     const spaceBelow = windowHeight - (menuAnchor.y + menuAnchor.height) - MENU_GAP;
@@ -1221,18 +1304,74 @@ export default function NoteDetailScreen() {
                 </View>
               </Animated.View>
               <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
-                {menuItems.map((item, index) => (
+                <View style={styles.menuAttrRow}>
+                  {attributeButtons.map((attr, index) => (
+                    <TouchableOpacity
+                      key={attr.key}
+                      style={[
+                        styles.menuAttrButton,
+                        index > 0 && styles.menuAttrButtonDivider,
+                        { backgroundColor: attr.active ? attr.activeColor : attr.inactiveBg },
+                      ]}
+                      onPress={attr.onPress}
+                    >
+                      <Ionicons name={attr.icon} size={18} color={attr.active ? "#fff" : attr.activeColor} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {todoDoneItem ? (
+                  <TouchableOpacity
+                    style={[styles.menuItem, styles.menuItemDivider]}
+                    onPress={todoDoneItem.onPress}
+                  >
+                    <Text style={styles.menuItemText}>{todoDoneItem.label}</Text>
+                    <Ionicons name={todoDoneItem.icon} size={18} color={todoDoneItem.color} />
+                  </TouchableOpacity>
+                ) : null}
+                {actionItems.map((item, index) => (
                   <TouchableOpacity
                     key={item.key}
-                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    style={[styles.menuItem, (index > 0 || todoDoneItem) && styles.menuItemDivider]}
                     onPress={item.onPress}
                   >
-                    <Text style={[styles.menuItemText, item.key === "delete" && { color: item.color }]}>
-                      {item.label}
-                    </Text>
+                    <Text style={styles.menuItemText}>{item.label}</Text>
                     <Ionicons name={item.icon} size={18} color={item.color} />
                   </TouchableOpacity>
                 ))}
+                {mergeButtons.length > 0 ? (
+                  <View style={[styles.menuMergeRow, styles.menuItemDivider]}>
+                    {mergeButtons.map((item, index) => (
+                      <TouchableOpacity
+                        key={item.key}
+                        style={[styles.menuMergeButton, index > 0 && styles.menuAttrButtonDivider]}
+                        onPress={item.onPress}
+                      >
+                        <Ionicons name={item.icon} size={16} color={item.color} />
+                        <Text style={styles.menuMergeButtonText}>{item.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+                {splitItem ? (
+                  <TouchableOpacity
+                    style={[styles.menuItem, mergeButtons.length === 0 && styles.menuItemDivider]}
+                    onPress={splitItem.onPress}
+                  >
+                    <Text style={styles.menuItemText}>{splitItem.label}</Text>
+                    <Ionicons name={splitItem.icon} size={18} color={splitItem.color} />
+                  </TouchableOpacity>
+                ) : null}
+                {deleteItem ? (
+                  <TouchableOpacity
+                    style={[styles.menuItem, styles.menuItemDivider]}
+                    onPress={deleteItem.onPress}
+                  >
+                    <Text style={[styles.menuItemText, { color: deleteItem.color }]}>
+                      {deleteItem.label}
+                    </Text>
+                    <Ionicons name={deleteItem.icon} size={18} color={deleteItem.color} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </>
           ) : null}
@@ -1465,6 +1604,18 @@ const styles = StyleSheet.create({
   },
   menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
   menuItemText: { fontSize: 15, color: "#1c1c1e" },
+  menuAttrRow: { flexDirection: "row", height: 48 },
+  menuAttrButton: { flex: 1, alignItems: "center", justifyContent: "center" },
+  menuAttrButtonDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e5ea" },
+  menuMergeRow: { flexDirection: "row", height: 44 },
+  menuMergeButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  menuMergeButtonText: { fontSize: 13, fontWeight: "600", color: "#8e8e93" },
 
   promptKeyboardAvoider: { flex: 1 },
   promptPanel: {
