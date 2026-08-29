@@ -47,7 +47,8 @@
         }
       ],
       "expo-audio",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-sharing"
     ]
   }
 }

@@ -1,24 +1,117 @@
-import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useCallback, useState } from "react";
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
-import { useRoute } from "@react-navigation/native";
+import { useFocusEffect, useRoute } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import { Share } from "react-native";
+import { Directory, File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import * as blocksRepo from "../db/repositories/blocks";
+import * as sessionsRepo from "../db/repositories/sessions";
+import type { Block, Session } from "../db/types";
+import { buildReportText, reportFileName, type ReportTemplate } from "../utils/report";
 
-type Template = "summary" | "full";
+type IconName = keyof typeof Ionicons.glyphMap;
 
-const TEMPLATES: { key: Template; label: string; description: string }[] = [
-  { key: "summary", label: "要点抜粋", description: "★・📝・写真のみ(デフォルト)" },
+// ノート詳細画面のバッジ(activeBadges)と同じアイコン・配色に揃える
+const SUMMARY_ICONS: { key: string; icon: IconName; color: string }[] = [
+  { key: "star", icon: "star", color: "#d98c00" },
+  { key: "todo", icon: "checkmark-circle", color: "#1f9254" },
+  { key: "question", icon: "help-circle", color: "#7c4dff" },
+];
+
+const TEMPLATES: { key: ReportTemplate; label: string; description: string }[] = [
+  { key: "summary", label: "要点抜粋", description: "のみ(デフォルト)" },
   { key: "full", label: "全文", description: "文字起こし全体を含む" },
 ];
 
+// 書き出したテキストファイルの一時保存先。DBやユーザーデータとは無関係の、
+// 書き出しのたびに上書きしてよい一時的な出力先として documentDirectory 配下に置く
+const reportsDirectory = new Directory(Paths.document, "reports");
+
+async function writeReportFile(session: Session, text: string): Promise<File> {
+  if (!reportsDirectory.exists) {
+    reportsDirectory.create({ intermediates: true, idempotent: true });
+  }
+  const file = new File(reportsDirectory, reportFileName(session));
+  file.create({ overwrite: true });
+  file.write(text);
+  return file;
+}
+
 export default function ReportScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "Report">>();
-  const [template, setTemplate] = useState<Template>("summary");
+  const sessionId = route.params.noteId;
+  const [template, setTemplate] = useState<ReportTemplate>("summary");
+  const [session, setSession] = useState<Session | null>(null);
+  const [blocks, setBlocks] = useState<Block[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      sessionsRepo
+        .getById(sessionId)
+        .then(setSession)
+        .catch((e) => console.warn("[DB] セッションの取得に失敗しました", e));
+      blocksRepo
+        .listBySessionId(sessionId)
+        .then(setBlocks)
+        .catch((e) => console.warn("[DB] ブロック一覧の取得に失敗しました", e));
+    }, [sessionId])
+  );
+
+  const reportText = session ? buildReportText(session, blocks, template) : "";
+
+  const handleCopy = async () => {
+    if (!session) return;
+    try {
+      await Clipboard.setStringAsync(reportText);
+      Alert.alert("コピーしました", "クリップボードにレポートをコピーしました。");
+    } catch (e) {
+      console.warn("[Clipboard] コピーに失敗しました", e);
+      Alert.alert("コピーに失敗しました");
+    }
+  };
+
+  const handleShareSheet = async () => {
+    if (!session) return;
+    try {
+      await Share.share({ message: reportText, title: session.title });
+    } catch (e) {
+      console.warn("[Share] 共有に失敗しました", e);
+    }
+  };
+
+  const handleSaveFile = async () => {
+    if (!session) return;
+    try {
+      const file = await writeReportFile(session, reportText);
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(file.uri, {
+          mimeType: "text/plain",
+          dialogTitle: reportFileName(session),
+        });
+      } else {
+        Alert.alert("保存しました", file.uri);
+      }
+    } catch (e) {
+      console.warn("[FS] テキストファイルの保存に失敗しました", e);
+      Alert.alert("保存に失敗しました");
+    }
+  };
+
+  const EXPORT_ACTIONS = [
+    { key: "copy", label: "クリップボードにコピー", onPress: handleCopy },
+    { key: "share", label: "共有シート", onPress: handleShareSheet },
+    { key: "save", label: "テキストファイルとして保存", onPress: handleSaveFile },
+  ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.sectionHeader}>テンプレート</Text>
         <View style={styles.templateGroup}>
@@ -28,12 +121,16 @@ export default function ReportScreen() {
               style={[styles.templateCard, template === t.key && styles.templateCardSelected]}
               onPress={() => setTemplate(t.key)}
             >
-              <View
-                style={[styles.radio, template === t.key && styles.radioSelected]}
-              />
+              <View style={[styles.radio, template === t.key && styles.radioSelected]} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.templateLabel}>{t.label}</Text>
-                <Text style={styles.templateDescription}>{t.description}</Text>
+                <View style={styles.templateDescriptionRow}>
+                  {t.key === "summary" &&
+                    SUMMARY_ICONS.map((icon) => (
+                      <Ionicons key={icon.key} name={icon.icon} size={15} color={icon.color} />
+                    ))}
+                  <Text style={styles.templateDescription}>{t.description}</Text>
+                </View>
               </View>
             </TouchableOpacity>
           ))}
@@ -41,31 +138,24 @@ export default function ReportScreen() {
 
         <Text style={styles.sectionHeader}>プレビュー</Text>
         <View style={styles.previewBox}>
-          <Text style={styles.previewText}>
-            {"【受講報告】新入社員セキュリティ研修\n"}
-            {"日時：2026/08/26 14:00〜16:00\n\n"}
-            {"■ 重要なポイント\n"}
-            {"・[00:47] パスワードは使い回さないこと\n\n"}
-            {"■ 今後のアクション\n"}
-            {"・[01:30] 8/30までに2段階認証の設定を完了させる"}
+          <Text style={styles.previewText} selectable>
+            {session ? reportText : "読み込み中..."}
           </Text>
         </View>
 
         <Text style={styles.sectionHeader}>書き出し方法</Text>
         <View style={styles.card}>
-          {["クリップボードにコピー", "共有シート", "テキストファイルとして保存"].map(
-            (label, i, arr) => (
-              <TouchableOpacity
-                key={label}
-                style={[styles.row, i < arr.length - 1 && styles.rowDivider]}
-              >
-                <Text style={styles.rowLabel}>{label}</Text>
-              </TouchableOpacity>
-            )
-          )}
+          {EXPORT_ACTIONS.map((action, i) => (
+            <TouchableOpacity
+              key={action.key}
+              style={[styles.row, i < EXPORT_ACTIONS.length - 1 && styles.rowDivider]}
+              onPress={action.onPress}
+              disabled={!session}
+            >
+              <Text style={styles.rowLabel}>{action.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-
-        <Text style={styles.noteIdHint}>note: {route.params.noteId}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -102,7 +192,8 @@ const styles = StyleSheet.create({
   },
   radioSelected: { borderColor: "#06c", backgroundColor: "#06c" },
   templateLabel: { fontSize: 16, fontWeight: "600" },
-  templateDescription: { fontSize: 13, color: "#8e8e93", marginTop: 2 },
+  templateDescriptionRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  templateDescription: { fontSize: 13, color: "#8e8e93" },
   previewBox: {
     backgroundColor: "#fff",
     borderRadius: 10,
@@ -115,5 +206,4 @@ const styles = StyleSheet.create({
   row: { paddingVertical: 12, paddingHorizontal: 14 },
   rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#c6c6c8" },
   rowLabel: { fontSize: 16, color: "#06c" },
-  noteIdHint: { marginTop: 20, fontSize: 11, color: "#c7c7cc" },
 });
