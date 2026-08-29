@@ -129,4 +129,35 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE sessions ADD COLUMN is_quick INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // 「まとめ」画面の確認事項セクション用。★ブロックの元の発言を体言止めで要約した一言メモ
+    version: 7,
+    sql: `
+      ALTER TABLE blocks ADD COLUMN summary_note TEXT;
+    `,
+  },
+  {
+    // 「まとめ」画面の「よく使うリスト」タブ用。★グループ(セッション単位)をピン留めできるようにする
+    // (このタブ自体は後に廃止したが、カラムはそのまま残している)
+    version: 8,
+    sql: `
+      ALTER TABLE sessions ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // 「質問」タブの「保留」グループ、および「まとめ」画面の未解決の質問セクション用。
+    // ❓のうち、今は答えを探さない(一覧から一時的に外したい)ことを示すフラグ
+    version: 9,
+    sql: `
+      ALTER TABLE blocks ADD COLUMN is_deferred INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // 「まとめ」画面・★重要セクション用。ノートをまたいで似た★をユーザーが自分で
+    // 束ねられるように、任意のグループ名を持たせる(NULL=未分類)
+    version: 10,
+    sql: `
+      ALTER TABLE blocks ADD COLUMN important_group TEXT;
+    `,
+  },
 ];

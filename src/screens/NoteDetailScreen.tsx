@@ -36,6 +36,8 @@ import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
+import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCard";
+import GroupSettingForm from "../components/GroupSettingForm";
 import * as Clipboard from "expo-clipboard";
 import { getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
 
@@ -49,6 +51,15 @@ const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; t
   { key: "photo", icon: "camera-outline", bg: "#eef1f4", tint: "#57575c" },
   { key: "note", icon: "document-text-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
+
+const VIEW_MODES: { key: "timeline" | "summary"; label: string }[] = [
+  { key: "timeline", label: "タイムライン" },
+  { key: "summary", label: "まとめ" },
+];
+
+// 「まとめ」タブの区分。上から重要度の高い順に並べる:
+// ★(重要)→❓(質問・用語)→ToDo→写真→メモ
+type SummarySectionKey = "star" | "question" | "todo" | "photo" | "note";
 
 const LEAD_SEC = 1.2;
 
@@ -87,6 +98,13 @@ function fmt(ms: number) {
 function formatHHMM(unixMs: number): string {
   const d = new Date(unixMs);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatDateSlash(unixMs: number): string {
+  const d = new Date(unixMs);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
 }
 
 function formatMinutes(durationMs: number): string {
@@ -171,11 +189,25 @@ function activeBadges(block: Block): IconBadge[] {
   return badges;
 }
 
+// 行内編集カード(InlineEditCard)の配色に使う種別。複数付いていても代表1つだけ表示する
+// (★>Todo>❓の優先順、activeBadgesと同じ並び)
+function blockPrimaryInlineKind(block: Block): InlineEditKind {
+  if (block.isStarred) return "star";
+  if (block.isTodo) return "todo";
+  if (block.isQuestion) return "question";
+  return "neutral";
+}
+
 export default function NoteDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
   const sessionId = route.params.noteId;
   const jumpToBlockId = route.params.jumpToBlockId;
+  // 「まとめ」タブの行をタップした際のジャンプ先。route側のjumpToBlockIdとは独立に、
+  // 画面内での遷移(まとめ→タイムライン)にも同じハイライト・自動スクロール機構を使い回す
+  const [manualJumpBlockId, setManualJumpBlockId] = useState<string | null>(null);
+  const effectiveJumpBlockId = manualJumpBlockId ?? jumpToBlockId;
+  const [viewMode, setViewMode] = useState<"timeline" | "summary">("timeline");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [session, setSession] = useState<Session | null>(null);
@@ -204,15 +236,25 @@ export default function NoteDetailScreen() {
     width: number;
     height: number;
   } | null>(null);
+  // 長押しメニューの項目が画面に収まりきらないとき、スクロールではなくページ送りにする。
+  // メニューを開き直すたびに1ページ目に戻す
+  const [menuPage, setMenuPage] = useState(0);
   // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
   const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
   const [splitIndex, setSplitIndex] = useState(0);
-  // 「メモを追加」で本文を入力してもらうためのプロンプト(挿入位置の基準となるブロックID)
-  const [memoPromptAfterBlockId, setMemoPromptAfterBlockId] = useState<string | null>(null);
-  const [memoPromptDraft, setMemoPromptDraft] = useState("");
-  // ❓ブロックの「回答を記入/編集」で本文を入力してもらうためのプロンプト(対象ブロックID)
-  const [answerPromptBlockId, setAnswerPromptBlockId] = useState<string | null>(null);
-  const [answerPromptDraft, setAnswerPromptDraft] = useState("");
+  // 「メモを追加」もInlineEditCardで統一。afterBlockIdがnullなら「ブロックが1つも無いセッション」
+  // への追加(先頭に挿入)で、その場合は空状態のボックス内にインライン展開する
+  const [newBlockDraft, setNewBlockDraft] = useState<{ afterBlockId: string | null; text: string } | null>(
+    null
+  );
+  // 「回答を記入/編集」「一言メモを書く」「グループを設定」は、テキスト編集(editingBlockId)と
+  // 同じ「行内展開カード」の見た目に統一しているため、状態も1つにまとめている
+  type InlineFieldMode = "answer" | "summaryNote" | "group";
+  const [inlineFieldBlockId, setInlineFieldBlockId] = useState<string | null>(null);
+  const [inlineFieldMode, setInlineFieldMode] = useState<InlineFieldMode | null>(null);
+  const [inlineFieldDraft, setInlineFieldDraft] = useState("");
+  // グループ選択のクイック選択肢(既存グループ名)。groupモード以外では使わない
+  const [inlineFieldGroupExisting, setInlineFieldGroupExisting] = useState<string[]>([]);
   // 写真ブロックをタップして全画面表示中のブロック
   const [viewerBlockId, setViewerBlockId] = useState<string | null>(null);
 
@@ -231,7 +273,6 @@ export default function NoteDetailScreen() {
   // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
   // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
   const menuHighlightScale = useRef(new Animated.Value(1)).current;
-  const menuHighlightTilt = useRef(new Animated.Value(0)).current;
   const jumpedBlockIdRef = useRef<string | null>(null);
   // ブロックをタップして再生開始した直後は、そのブロックは既に画面内に見えている
   // (タップできたのだから)ため、自動追従スクロールで無駄に画面をそのブロックの
@@ -242,6 +283,10 @@ export default function NoteDetailScreen() {
   const [scrollPaused, setScrollPaused] = useState(false);
   // 一時停止を始めた時点の再生中ブロックのインデックス。バッジの「新着N件」はここからの進み具合
   const pauseBaselineIndexRef = useRef(-1);
+  // 「↓ 新着N件」バッジは、新しく進んだブロックが既に画面内に見えている場合は
+  // 邪魔なだけなので出さない。そのためスクロール位置と表示領域の高さを持っておく
+  const [timelineScrollY, setTimelineScrollY] = useState(0);
+  const [timelineViewportHeight, setTimelineViewportHeight] = useState(0);
   // 折りたたまれているセクション(グループ)のkeyの集合。この画面を離れれば自然にリセットされてよいので、
   // 永続化はせずローカルstateのみで管理する
   const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<Set<string>>(new Set());
@@ -277,6 +322,19 @@ export default function NoteDetailScreen() {
       jumpedBlockIdRef.current = null;
     }
   }, [jumpToBlockId]);
+
+  // 「まとめ」タブの行タップによるジャンプも同様に、絞り込みを解除して該当ブロックへスクロールする
+  useEffect(() => {
+    if (manualJumpBlockId) {
+      setFilter("all");
+      jumpedBlockIdRef.current = null;
+    }
+  }, [manualJumpBlockId]);
+
+  const jumpToBlockInTimeline = (blockId: string) => {
+    setViewMode("timeline");
+    setManualJumpBlockId(blockId);
+  };
 
   const loadBlocks = useCallback(async () => {
     try {
@@ -426,27 +484,23 @@ export default function NoteDetailScreen() {
   const cancelBlockEdit = () => setEditingBlockId(null);
 
   // 長押しで「結合/分割/マーク」メニューを開く。編集中・分割選択中は開かない。
-  // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する
-  const openBlockMenu = (block: Block) => {
-    if (editingBlockId || splittingBlockId) return;
+  // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する。
+  // 「まとめ」タブの行など、blockRowRefsに登録されていない呼び出し元からは
+  // nodeOverrideで直接そのTouchableOpacityの参照を渡す
+  const openBlockMenu = (block: Block, nodeOverride?: View | null) => {
+    if (editingBlockId || splittingBlockId || inlineFieldBlockId || newBlockDraft) return;
     if (!scrollPaused) {
       pauseBaselineIndexRef.current = filtered.findIndex((b) => b.id === activeBlockId);
       setScrollPaused(true);
     }
-    const node = blockRowRefs.current.get(block.id);
+    const node = nodeOverride ?? blockRowRefs.current.get(block.id);
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
       setMenuAnchor({ blockId: block.id, x, y, width, height });
+      setMenuPage(0);
       menuHighlightScale.setValue(1);
-      menuHighlightTilt.setValue(0);
       Animated.spring(menuHighlightScale, {
         toValue: 1.08,
-        friction: 4,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
-      Animated.spring(menuHighlightTilt, {
-        toValue: 1,
         friction: 4,
         tension: 160,
         useNativeDriver: true,
@@ -454,12 +508,11 @@ export default function NoteDetailScreen() {
     });
   };
 
-  // 閉じる時も、拡大・傾きを元に戻すアニメーションを再生してから消す
+  // 閉じる時も、拡大を元に戻すアニメーションを再生してから消す
   const closeBlockMenu = () => {
-    Animated.parallel([
-      Animated.timing(menuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }),
-      Animated.timing(menuHighlightTilt, { toValue: 0, duration: 140, useNativeDriver: true }),
-    ]).start(() => setMenuAnchor(null));
+    Animated.timing(menuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }).start(() =>
+      setMenuAnchor(null)
+    );
   };
 
   // 「↓ 新着N件」バッジをタップしたときの再開。自動追従を再開するだけで、実際のスクロールは
@@ -615,69 +668,91 @@ export default function NoteDetailScreen() {
     [loadBlocks]
   );
 
-  // ❓ブロックの長押しメニューから開く、回答(A)の入力。既に回答があれば
-  // 編集できるよう、その内容を初期値にする
-  const startAnswerPrompt = (block: Block) => {
+  // ❓の「回答を記入/編集」、★の「一言メモを書く」「グループを設定」は、いずれも
+  // 「ブロックの1つのフィールドをテキストで編集する」という同じ形なので、行内展開カード
+  // (InlineEditCard)1つを、モード違いとして使い回す
+  const startInlineField = (block: Block, mode: InlineFieldMode) => {
     setMenuAnchor(null);
-    setAnswerPromptBlockId(block.id);
-    setAnswerPromptDraft(block.questionTerm ?? "");
+    setInlineFieldBlockId(block.id);
+    setInlineFieldMode(mode);
+    setInlineFieldDraft(
+      mode === "answer"
+        ? block.questionTerm ?? ""
+        : mode === "summaryNote"
+        ? block.summaryNote ?? ""
+        : block.importantGroup ?? ""
+    );
+    if (mode === "group") {
+      blocksRepo.listImportantGroupNames().then(setInlineFieldGroupExisting);
+    } else {
+      setInlineFieldGroupExisting([]);
+    }
   };
 
-  const cancelAnswerPrompt = () => {
-    setAnswerPromptBlockId(null);
-    setAnswerPromptDraft("");
+  const cancelInlineField = () => {
+    setInlineFieldBlockId(null);
+    setInlineFieldMode(null);
+    setInlineFieldDraft("");
+    setInlineFieldGroupExisting([]);
   };
 
-  // 回答を保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)
-  const confirmAnswerPrompt = async () => {
-    const id = answerPromptBlockId;
-    const answer = answerPromptDraft;
-    setAnswerPromptBlockId(null);
-    setAnswerPromptDraft("");
-    if (!id) return;
+  // answer: 保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)
+  const confirmInlineField = async () => {
+    const id = inlineFieldBlockId;
+    const mode = inlineFieldMode;
+    const draft = inlineFieldDraft;
+    setInlineFieldBlockId(null);
+    setInlineFieldMode(null);
+    setInlineFieldDraft("");
+    setInlineFieldGroupExisting([]);
+    if (!id || !mode) return;
     try {
-      await blocksRepo.answerQuestion(id, answer);
+      if (mode === "answer") await blocksRepo.answerQuestion(id, draft);
+      else if (mode === "summaryNote") await blocksRepo.setSummaryNote(id, draft);
+      else await blocksRepo.setImportantGroup(id, draft);
       loadBlocks();
     } catch (e) {
-      console.warn("[DB] 回答の保存に失敗しました", e);
+      console.warn("[DB] 保存に失敗しました", e);
     }
   };
 
   const startMemoPrompt = (block: Block) => {
     setMenuAnchor(null);
-    setMemoPromptAfterBlockId(block.id);
-    setMemoPromptDraft("");
+    setNewBlockDraft({ afterBlockId: block.id, text: "" });
+  };
+
+  // ブロックが1つも無いセッション用。挿入位置の基準が無いので、先頭(startMs: 0)に追加する
+  const startMemoPromptForEmpty = () => {
+    setNewBlockDraft({ afterBlockId: null, text: "" });
   };
 
   const cancelMemoPrompt = () => {
-    setMemoPromptAfterBlockId(null);
-    setMemoPromptDraft("");
+    setNewBlockDraft(null);
   };
 
   const confirmMemoPrompt = useCallback(async () => {
-    const afterId = memoPromptAfterBlockId;
-    const text = memoPromptDraft.trim();
-    setMemoPromptAfterBlockId(null);
-    setMemoPromptDraft("");
-    if (!afterId || !text) return;
-    const afterBlock = blocks.find((b) => b.id === afterId);
-    if (!afterBlock) return;
+    const draft = newBlockDraft;
+    const text = draft?.text.trim() ?? "";
+    setNewBlockDraft(null);
+    if (!text) return;
+    const afterBlock = draft?.afterBlockId ? blocks.find((b) => b.id === draft.afterBlockId) : null;
     try {
       await blocksRepo.create({
         id: genId(),
         sessionId,
         kind: "note",
-        startMs: startMsAfter(afterBlock),
+        startMs: afterBlock ? startMsAfter(afterBlock) : 0,
         text,
       });
       loadBlocks();
     } catch (e) {
       console.warn("[DB] メモの追加に失敗しました", e);
     }
-  }, [memoPromptAfterBlockId, memoPromptDraft, blocks, sessionId, startMsAfter, loadBlocks]);
+  }, [newBlockDraft, blocks, sessionId, startMsAfter, loadBlocks]);
 
+  // afterがnullの場合(ブロックが1つも無いセッション)は、挿入位置の基準が無いので先頭に追加する
   const addPhotoAfter = useCallback(
-    async (block: Block) => {
+    async (after: Block | null) => {
       setMenuAnchor(null);
       try {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -696,7 +771,7 @@ export default function NoteDetailScreen() {
           id: genId(),
           sessionId,
           kind: "photo",
-          startMs: startMsAfter(block),
+          startMs: after ? startMsAfter(after) : 0,
           photoUri,
         });
         loadBlocks();
@@ -982,10 +1057,33 @@ export default function NoteDetailScreen() {
     ? groupByGap(filtered, sectionGapMs)
     : [{ key: "flat", blocks: filtered }];
 
+  // 再生中のブロックが、今まさに(スクロールを止めたまま)画面内に見えているかどうか。
+  // 見えているならバッジで案内する必要が無いどころか、表示中の内容に被って邪魔になる
+  let isActiveBlockVisible = false;
+  if (scrollPaused && activeBlockId) {
+    const sectionKey = findSectionKeyForBlock(timelineGroups, activeBlockId);
+    const sectionY = sectionKey ? sectionLayoutYRef.current.get(sectionKey) : undefined;
+    const rowY = blockLayoutYRef.current.get(activeBlockId);
+    if (sectionY !== undefined && rowY !== undefined) {
+      const absoluteY = sectionY + rowY;
+      isActiveBlockVisible =
+        absoluteY >= timelineScrollY - 12 &&
+        absoluteY <= timelineScrollY + timelineViewportHeight - 12;
+    }
+  }
+
   // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
   const menuBlockId = menuAnchor?.blockId ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
-  const menuBlockBadges = menuBlock ? activeBadges(menuBlock) : [];
+  // ゴーストカードの接続線(下に次のブロックがある場合だけ表示)を、実際のタイムライン行と
+  // 同じ判定で出す。セクション区切りが無効なときはtimelineGroupsが1グループにまとまるため、
+  // その中での位置で判定すれば結果的に同じになる
+  const menuBlockGroup = menuBlock
+    ? timelineGroups.find((g) => g.blocks.some((b) => b.id === menuBlock.id))
+    : undefined;
+  const menuBlockHasLineBelow = menuBlockGroup
+    ? menuBlockGroup.blocks.findIndex((b) => b.id === menuBlock!.id) < menuBlockGroup.blocks.length - 1
+    : false;
   const viewerBlock = viewerBlockId ? blocks.find((b) => b.id === viewerBlockId) ?? null : null;
   const menuBlockIndex = menuBlock ? sortedBlocks.findIndex((b) => b.id === menuBlock.id) : -1;
   const menuPrevBlock = menuBlockIndex > 0 ? sortedBlocks[menuBlockIndex - 1] : null;
@@ -1060,13 +1158,41 @@ export default function NoteDetailScreen() {
           label: menuBlock.questionTerm?.trim() ? "回答を編集" : "回答を記入",
           icon: "chatbubble-ellipses-outline",
           color: "#7c4dff",
-          onPress: () => startAnswerPrompt(menuBlock),
+          onPress: () => startInlineField(menuBlock, "answer"),
+        }
+      : null;
+
+  // ★が付いたブロックだけ、「まとめ」画面用の一言メモの記入/編集を出す
+  const summaryNoteItem: MenuItem | null =
+    menuBlock && menuBlock.isStarred
+      ? {
+          key: "summaryNote",
+          label: menuBlock.summaryNote?.trim() ? "一言メモを編集" : "一言メモを書く",
+          icon: "create-outline",
+          color: "#d98c00",
+          onPress: () => startInlineField(menuBlock, "summaryNote"),
+        }
+      : null;
+
+  // ★が付いたブロックだけ、「まとめ」画面でノートをまたいで束ねるグループの設定を出す
+  const groupItem: MenuItem | null =
+    menuBlock && menuBlock.isStarred
+      ? {
+          key: "group",
+          label: menuBlock.importantGroup?.trim()
+            ? `グループ: ${menuBlock.importantGroup}`
+            : "グループを設定",
+          icon: "albums-outline",
+          color: "#d98c00",
+          onPress: () => startInlineField(menuBlock, "group"),
         }
       : null;
 
   const actionItems: MenuItem[] = menuBlock
     ? [
         ...(answerItem ? [answerItem] : []),
+        ...(summaryNoteItem ? [summaryNoteItem] : []),
+        ...(groupItem ? [groupItem] : []),
         {
           key: "edit",
           label: "テキスト編集",
@@ -1138,49 +1264,424 @@ export default function NoteDetailScreen() {
       }
     : null;
 
-  // Modalの暗いオーバーレイは画面全体の上に重なるため、対象ブロックの実際の背景色を
-  // 変えるだけでは暗幕越しに見えてしまいハイライトに見えない。そこで、実測した位置・
-  // サイズぴったりに「明るい複製」をオーバーレイの上に重ねて表示し、ブロック自体が
-  // 浮き上がって見えるようにする(プレビュー用に余分な余白は足さない)
   const MENU_ROW_HEIGHT = 44;
   const MENU_ATTR_ROW_HEIGHT = 48;
   // ゴーストカードが少し傾いているため、その分だけ余分に隙間を空けてメニューと被らないようにする
   const MENU_GAP = 28;
   const MENU_WIDTH = 230;
   const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
+  const MENU_PAGINATION_BAR_HEIGHT = 40;
+
+  // 項目数が多いメニューを、スクロールではなくページ送りで見せるための行リスト。
+  // 「属性(★/✓/❓横並び)」「結合(横並び2つ)」はまとめて1行として扱う
+  type MenuRow = { key: string; height: number; render: (showDivider: boolean) => React.ReactNode };
+  const menuRows: MenuRow[] = [];
+  if (menuBlock) {
+    menuRows.push({
+      key: "attr",
+      height: MENU_ATTR_ROW_HEIGHT,
+      render: () => (
+        <View style={styles.menuAttrRow}>
+          {attributeButtons.map((attr, index) => (
+            <TouchableOpacity
+              key={attr.key}
+              style={[
+                styles.menuAttrButton,
+                index > 0 && styles.menuAttrButtonDivider,
+                { backgroundColor: attr.active ? attr.activeColor : attr.inactiveBg },
+              ]}
+              onPress={attr.onPress}
+            >
+              <Ionicons name={attr.icon} size={18} color={attr.active ? "#fff" : attr.activeColor} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      ),
+    });
+  }
+  if (todoDoneItem) {
+    const item = todoDoneItem;
+    menuRows.push({
+      key: item.key,
+      height: MENU_ROW_HEIGHT,
+      render: (showDivider) => (
+        <TouchableOpacity
+          style={[styles.menuItem, showDivider && styles.menuItemDivider]}
+          onPress={item.onPress}
+        >
+          <Text style={styles.menuItemText}>{item.label}</Text>
+          <Ionicons name={item.icon} size={18} color={item.color} />
+        </TouchableOpacity>
+      ),
+    });
+  }
+  actionItems.forEach((item) => {
+    menuRows.push({
+      key: item.key,
+      height: MENU_ROW_HEIGHT,
+      render: (showDivider) => (
+        <TouchableOpacity
+          style={[styles.menuItem, showDivider && styles.menuItemDivider]}
+          onPress={item.onPress}
+        >
+          <Text style={styles.menuItemText}>{item.label}</Text>
+          <Ionicons name={item.icon} size={18} color={item.color} />
+        </TouchableOpacity>
+      ),
+    });
+  });
+  if (mergeButtons.length > 0) {
+    menuRows.push({
+      key: "merge",
+      height: MENU_ROW_HEIGHT,
+      render: (showDivider) => (
+        <View style={[styles.menuMergeRow, showDivider && styles.menuItemDivider]}>
+          {mergeButtons.map((item, index) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[styles.menuMergeButton, index > 0 && styles.menuAttrButtonDivider]}
+              onPress={item.onPress}
+            >
+              <Ionicons name={item.icon} size={16} color={item.color} />
+              <Text style={styles.menuMergeButtonText}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ),
+    });
+  }
+  if (splitItem) {
+    const item = splitItem;
+    menuRows.push({
+      key: item.key,
+      height: MENU_ROW_HEIGHT,
+      render: (showDivider) => (
+        <TouchableOpacity
+          style={[styles.menuItem, showDivider && styles.menuItemDivider]}
+          onPress={item.onPress}
+        >
+          <Text style={styles.menuItemText}>{item.label}</Text>
+          <Ionicons name={item.icon} size={18} color={item.color} />
+        </TouchableOpacity>
+      ),
+    });
+  }
+  if (deleteItem) {
+    const item = deleteItem;
+    menuRows.push({
+      key: item.key,
+      height: MENU_ROW_HEIGHT,
+      render: (showDivider) => (
+        <TouchableOpacity
+          style={[styles.menuItem, showDivider && styles.menuItemDivider]}
+          onPress={item.onPress}
+        >
+          <Text style={[styles.menuItemText, { color: item.color }]}>{item.label}</Text>
+          <Ionicons name={item.icon} size={18} color={item.color} />
+        </TouchableOpacity>
+      ),
+    });
+  }
+
+  // 与えられた高さ予算に収まるよう、行を貪欲にページへ詰めていく
+  const paginateMenuRows = (rows: MenuRow[], budget: number): MenuRow[][] => {
+    const pages: MenuRow[][] = [];
+    let current: MenuRow[] = [];
+    let currentHeight = 0;
+    for (const row of rows) {
+      if (current.length > 0 && currentHeight + row.height > budget) {
+        pages.push(current);
+        current = [];
+        currentHeight = 0;
+      }
+      current.push(row);
+      currentHeight += row.height;
+    }
+    if (current.length > 0) pages.push(current);
+    return pages.length > 0 ? pages : [[]];
+  };
+
   let menuListTop = 0;
   let menuLeft = 0;
   // ハイライトの複製も、対象ブロックが画面の下端近く(ホームインジケータ付近)にあると
   // そのまま実測値を使ってしまい端に張り付いて見える。メニューと同じ余白ルールで
   // 縦位置をクランプし、画面外にはみ出さないようにする
   let highlightTop = 0;
+  let menuPages: MenuRow[][] = [menuRows];
+  let menuPageIndex = 0;
   if (menuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
-    const menuHeight =
-      (menuBlock ? MENU_ATTR_ROW_HEIGHT : 0) +
-      (todoDoneItem ? MENU_ROW_HEIGHT : 0) +
-      actionItems.length * MENU_ROW_HEIGHT +
-      (mergeButtons.length > 0 ? MENU_ROW_HEIGHT : 0) +
-      (splitItem ? MENU_ROW_HEIGHT : 0) +
-      (deleteItem ? MENU_ROW_HEIGHT : 0);
-    // 項目数によってメニューの高さが変わるため、上下どちらに実際に収まる余白が
-    // あるかで表示方向を決め、それでも収まりきらない場合は画面内に収まるよう位置を補正する
-    const spaceBelow = windowHeight - (menuAnchor.y + menuAnchor.height) - MENU_GAP;
-    const spaceAbove = menuAnchor.y - MENU_GAP;
-    const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
-    menuListTop = showBelow
-      ? menuAnchor.y + menuAnchor.height + MENU_GAP
-      : menuAnchor.y - MENU_GAP - menuHeight;
-    const minTop = MENU_SCREEN_MARGIN;
-    const maxTop = windowHeight - menuHeight - MENU_SCREEN_MARGIN;
-    menuListTop = Math.max(minTop, Math.min(menuListTop, maxTop));
-    menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
+    // ゴーストカードの実際の表示位置(画面端でのクランプ込み)を先に決める。ここを
+    // 分けて別々にクランプすると、ブロックが画面端に近いときに「メニューは元のanchor.y
+    // 基準で下に出したつもりが、ゴースト側は端でクランプされて実際はもっと下にいた」
+    // というズレが起きて被ってしまうため、以降の計算は必ずこの位置を基準にする
     highlightTop = Math.max(
       MENU_SCREEN_MARGIN,
       Math.min(menuAnchor.y, windowHeight - menuAnchor.height - MENU_SCREEN_MARGIN)
     );
+    const ghostBottom = highlightTop + menuAnchor.height;
+    const spaceBelow = windowHeight - ghostBottom - MENU_GAP;
+    const spaceAbove = highlightTop - MENU_GAP;
+    // メニューの上限は「ゴーストと重ならずに置ける方(空きが多い側)の余白」そのものにする。
+    // 画面全体の余白だけで上限を決めると、空きが少ない側に無理やり収めようとして
+    // ゴーストに被ってしまう。1ページに収まらない場合は、スクロールではなくページ送りにする
+    const menuMaxHeight = Math.max(spaceBelow, spaceAbove, MENU_ROW_HEIGHT * 2);
+    menuPages = paginateMenuRows(menuRows, menuMaxHeight);
+    if (menuPages.length > 1) {
+      menuPages = paginateMenuRows(menuRows, menuMaxHeight - MENU_PAGINATION_BAR_HEIGHT);
+    }
+    menuPageIndex = Math.min(menuPage, menuPages.length - 1);
+    const currentPageHeight = menuPages[menuPageIndex].reduce((sum, r) => sum + r.height, 0);
+    const cappedMenuHeight =
+      currentPageHeight + (menuPages.length > 1 ? MENU_PAGINATION_BAR_HEIGHT : 0);
+    const showBelow = spaceBelow >= spaceAbove;
+    menuListTop = showBelow
+      ? ghostBottom + MENU_GAP
+      : highlightTop - MENU_GAP - cappedMenuHeight;
+    const minTop = MENU_SCREEN_MARGIN;
+    const maxTop = windowHeight - cappedMenuHeight - MENU_SCREEN_MARGIN;
+    menuListTop = Math.max(minTop, Math.min(menuListTop, maxTop));
+    menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
   }
+
+  // 「まとめ」タブ用の区分データ。1件のブロックが複数の条件(例: ★かつ❓)に該当する場合は
+  // 各区分に重複して表示する(区分ごとに意味が異なる軸なので、代表1区分に絞ると情報が
+  // 欠落してしまうため)。区分をまたいで付いている他のマークは、行内の小さなバッジで示す
+  const SUMMARY_SECTIONS: {
+    key: SummarySectionKey;
+    label: string;
+    icon: IconName;
+    bg: string;
+    tint: string;
+    items: Block[];
+  }[] = [
+    { key: "star", label: "重要", icon: "star", bg: "#fdf0dc", tint: "#d98c00", items: blocks.filter((b) => b.isStarred) },
+    { key: "question", label: "質問", icon: "help-circle", bg: "#f2e8fc", tint: "#7c4dff", items: blocks.filter((b) => b.isQuestion) },
+    { key: "todo", label: "Todo", icon: "checkmark-circle", bg: "#e0f7e6", tint: "#1f9254", items: blocks.filter((b) => b.isTodo) },
+    { key: "photo", label: "写真", icon: "camera", bg: "#eef1f4", tint: "#57575c", items: blocks.filter((b) => b.kind === "photo") },
+    { key: "note", label: "メモ", icon: "document-text", bg: "#f5ecdd", tint: "#8a6d3b", items: blocks.filter((b) => b.kind === "note") },
+  ];
+
+  const renderSummaryRow = (sectionKey: SummarySectionKey, block: Block) => {
+    // 現在の区分自体のマークは行内に重複表示しないよう除く
+    const crossBadges = activeBadges(block).filter((b) => b.key !== sectionKey);
+    const answer = block.questionTerm?.trim();
+    // blockRowRefs(タイムライン用)には登録されていないため、長押しメニューの位置測定用に
+    // このカード自体の参照をローカルに保持し、openBlockMenuへ直接渡す
+    let rowNode: View | null = null;
+    return (
+      <TouchableOpacity
+        key={`${sectionKey}-${block.id}`}
+        style={styles.summaryCard}
+        activeOpacity={0.7}
+        ref={(node) => {
+          rowNode = node;
+        }}
+        onPress={() => jumpToBlockInTimeline(block.id)}
+        onLongPress={() => openBlockMenu(block, rowNode)}
+      >
+        <View style={styles.summaryCardMetaRow}>
+          <Text style={styles.summaryCardTime}>{fmt(block.startMs)}</Text>
+          {crossBadges.length > 0 ? (
+            <View style={styles.timelineBadgeRow}>
+              {crossBadges.map((b) => (
+                <Ionicons key={b.key} name={b.icon} size={12} color={b.color} />
+              ))}
+            </View>
+          ) : null}
+        </View>
+        {sectionKey === "star" ? (
+          <Text style={styles.summaryText}>{`★ ${block.text ?? ""}`}</Text>
+        ) : sectionKey === "question" ? (
+          <>
+            <Text style={styles.summaryQuestionText}>{`Q. ${block.text ?? ""}`}</Text>
+            {answer ? (
+              <View style={styles.summaryAnswerBox}>
+                <Text style={styles.summaryAnswerText}>{`A. ${answer}`}</Text>
+              </View>
+            ) : null}
+          </>
+        ) : sectionKey === "todo" ? (
+          <View style={styles.summaryTodoRow}>
+            <Ionicons
+              name={block.todoDone ? "checkmark-circle" : "ellipse-outline"}
+              size={18}
+              color={block.todoDone ? "#34c759" : "#c7c7cc"}
+            />
+            <Text style={[styles.summaryText, block.todoDone && styles.summaryTextDone]}>
+              {block.text ?? ""}
+            </Text>
+          </View>
+        ) : sectionKey === "photo" ? (
+          <View style={styles.summaryPhotoRow}>
+            {block.photoUri ? (
+              <Image source={{ uri: block.photoUri }} style={styles.summaryThumb} />
+            ) : (
+              <View style={[styles.summaryThumb, styles.summaryThumbPlaceholder]}>
+                <Ionicons name="camera-outline" size={18} color="#c7c7cc" />
+              </View>
+            )}
+            <Text style={styles.summaryText} numberOfLines={2}>
+              {block.text || "写真"}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.summaryText}>{block.text ?? ""}</Text>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  // タイムライン行の中身(左の丸ドット+接続線、時刻・バッジ、本文/写真)。
+  // 長押しメニューのゴーストカードでも全く同じ関数を呼んで描画することで、
+  // 実際の行と見た目が食い違わないようにする(hasLineBelowはゴーストでは常にfalse)
+  const renderTimelineRowContent = (block: Block, hasLineBelow: boolean) => {
+    const badges = activeBadges(block);
+    const dotColor = badges[0]?.color ?? UNMARKED_DOT_COLOR;
+    return (
+      <>
+        <View style={styles.timelineDotCol}>
+          <View style={styles.timelineDotWrap}>
+            {badges.length > 1 ? (
+              <View style={styles.timelineDotStack}>
+                {badges.map((b) => (
+                  <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
+                ))}
+              </View>
+            ) : (
+              <View style={[styles.timelineDot, { backgroundColor: dotColor }]} />
+            )}
+          </View>
+          {hasLineBelow ? (
+            <View
+              style={[styles.timelineConnector, badges.length > 0 && { backgroundColor: dotColor }]}
+            />
+          ) : null}
+        </View>
+        <View style={styles.timelineBody}>
+          <View style={styles.timelineMetaRow}>
+            <Text style={styles.timelineTime}>
+              {fmt(block.startMs)}
+              {session ? (
+                <Text style={styles.timelineTimeWallClock}>
+                  {` ・ ${formatHHMM(session.startedAt + block.startMs)}`}
+                </Text>
+              ) : null}
+            </Text>
+            {badges.length > 0 ? (
+              <View style={styles.timelineBadgeRow}>
+                {badges.map((b) => (
+                  <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
+                ))}
+              </View>
+            ) : null}
+            {block.isEdited ? (
+              <View style={styles.editedBadge}>
+                <Ionicons name="pencil" size={10} color="#8e8e93" />
+                <Text style={styles.editedBadgeText}>編集済み</Text>
+              </View>
+            ) : null}
+          </View>
+          {block.kind === "photo" ? (
+            block.photoUri ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => openPhotoViewer(block)}
+                onLongPress={() => openBlockMenu(block)}
+              >
+                <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={styles.timelinePhotoPlaceholder}
+                onPress={() => attachPhotoToBlock(block)}
+                onLongPress={() => openBlockMenu(block)}
+              >
+                <Text style={styles.timelinePhotoLabel}>タップして写真を撮る</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
+          {splittingBlockId === block.id ? (
+            <View>
+              <Text style={styles.splitHintText}>分割したい位置をタップしてください</Text>
+              <TextInput
+                style={styles.timelineTextInput}
+                value={block.text ?? ""}
+                onChangeText={() => {}}
+                onSelectionChange={(e) => setSplitIndex(e.nativeEvent.selection.start)}
+                showSoftInputOnFocus={false}
+                autoFocus
+                multiline
+              />
+              <View style={styles.editActionsRow}>
+                <TouchableOpacity style={styles.editActionButton} onPress={cancelSplitting}>
+                  <Text style={styles.editActionButtonText}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
+                  onPress={confirmSplit}
+                >
+                  <Text style={styles.editActionButtonPrimaryText}>この位置で分割</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : editingBlockId === block.id ? (
+            <InlineEditCard
+              kind={blockPrimaryInlineKind(block)}
+              value={editDraft}
+              onChangeText={setEditDraft}
+              onCancel={cancelBlockEdit}
+              onConfirm={commitBlockEdit}
+            />
+          ) : inlineFieldBlockId === block.id && inlineFieldMode === "group" ? (
+            <GroupSettingForm
+              value={inlineFieldDraft}
+              onChangeText={setInlineFieldDraft}
+              existingGroups={inlineFieldGroupExisting}
+              onCancel={cancelInlineField}
+              onConfirm={confirmInlineField}
+            />
+          ) : inlineFieldBlockId === block.id && inlineFieldMode ? (
+            <InlineEditCard
+              kind={inlineFieldMode === "answer" ? "question" : "star"}
+              title={inlineFieldMode === "answer" ? "回答を記入" : "一言メモを編集"}
+              value={inlineFieldDraft}
+              onChangeText={setInlineFieldDraft}
+              placeholder={
+                inlineFieldMode === "answer"
+                  ? "わかったこと・聞いた答えなど"
+                  : "一言でまとめる(例: パスワードを使い回さない)"
+              }
+              caption={
+                inlineFieldMode === "answer"
+                  ? "任意・あとで記入してもOK"
+                  : "空にすると元の発言テキストがそのまま表示されます"
+              }
+              onCancel={cancelInlineField}
+              onConfirm={confirmInlineField}
+            />
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.6}
+              onPress={() =>
+                block.id === activeBlockId ? startEditingBlock(block) : handleBlockPress(block)
+              }
+              onLongPress={() => openBlockMenu(block)}
+            >
+              <Text style={block.text ? styles.timelineText : styles.timelineTextPlaceholder}>
+                {block.text || "タップしてメモを追加"}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {block.isQuestion && block.questionTerm ? (
+            <Text style={styles.questionTermText}>A: {block.questionTerm}</Text>
+          ) : null}
+        </View>
+      </>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1217,7 +1718,7 @@ export default function NoteDetailScreen() {
         )}
         {session ? (
           <Text style={styles.titleMeta}>
-            {formatHHMM(session.startedAt)} 開始
+            {formatDateSlash(session.startedAt)} ・ {formatHHMM(session.startedAt)} 開始
             {audioFiles.length > 0
               ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs)}`
               : ""}
@@ -1225,10 +1726,54 @@ export default function NoteDetailScreen() {
         ) : null}
       </View>
 
+      <View style={styles.viewModeRow}>
+        {VIEW_MODES.map((v) => (
+          <TouchableOpacity
+            key={v.key}
+            style={[styles.viewModeSegment, viewMode === v.key && styles.viewModeSegmentSelected]}
+            onPress={() => setViewMode(v.key)}
+          >
+            <Text
+              style={[
+                styles.viewModeSegmentText,
+                viewMode === v.key && styles.viewModeSegmentTextSelected,
+              ]}
+            >
+              {v.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <KeyboardAvoidingView
         style={styles.editKeyboardAvoider}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
+      {viewMode === "summary" ? (
+        <ScrollView style={styles.summaryScroll}>
+          {SUMMARY_SECTIONS.every((s) => s.items.length === 0) ? (
+            <Text style={styles.emptyText}>まとめられる項目がありません</Text>
+          ) : (
+            SUMMARY_SECTIONS.map((section) =>
+              section.items.length === 0 ? null : (
+                <View key={section.key}>
+                  <View style={styles.summarySectionHeader}>
+                    <View style={[styles.summaryPill, { backgroundColor: section.bg }]}>
+                      <Ionicons name={section.icon} size={13} color={section.tint} />
+                      <Text style={[styles.summaryPillText, { color: section.tint }]}>
+                        {section.label}
+                      </Text>
+                    </View>
+                    <Text style={styles.summarySectionCount}>{section.items.length}件</Text>
+                  </View>
+                  {section.items.map((block) => renderSummaryRow(section.key, block))}
+                </View>
+              )
+            )
+          )}
+        </ScrollView>
+      ) : (
+      <>
       <View style={styles.chipRow}>
         {FILTERS.map((f) => {
           const isSelected = filter === f.key;
@@ -1268,7 +1813,7 @@ export default function NoteDetailScreen() {
       </View>
 
       <View style={styles.timelineWrap}>
-      {scrollPaused && newArrivalCount > 0 ? (
+      {scrollPaused && newArrivalCount > 0 && !isActiveBlockVisible ? (
         <View style={styles.followBadgeContainer} pointerEvents="box-none">
           <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoFollow}>
             <Ionicons name="arrow-down" size={13} color="#fff" />
@@ -1276,9 +1821,45 @@ export default function NoteDetailScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
-      <ScrollView ref={timelineScrollRef} style={styles.timeline}>
+      <ScrollView
+        ref={timelineScrollRef}
+        style={styles.timeline}
+        onLayout={(e) => setTimelineViewportHeight(e.nativeEvent.layout.height)}
+        onScroll={(e) => setTimelineScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={32}
+      >
         {filtered.length === 0 ? (
-          <Text style={styles.emptyText}>表示できるブロックがありません</Text>
+          blocks.length === 0 ? (
+            <View style={styles.emptyStateBox}>
+              <Text style={styles.emptyText}>まだ何も記録されていません</Text>
+              {newBlockDraft && newBlockDraft.afterBlockId === null ? (
+                <InlineEditCard
+                  kind="neutral"
+                  title="メモを追加"
+                  value={newBlockDraft.text}
+                  onChangeText={(text) =>
+                    setNewBlockDraft((d) => (d ? { ...d, text } : d))
+                  }
+                  placeholder="メモを入力"
+                  onCancel={cancelMemoPrompt}
+                  onConfirm={confirmMemoPrompt}
+                />
+              ) : (
+                <View style={styles.emptyStateActions}>
+                  <TouchableOpacity style={styles.emptyStateButton} onPress={startMemoPromptForEmpty}>
+                    <Ionicons name="document-text-outline" size={18} color="#06c" />
+                    <Text style={styles.emptyStateButtonText}>メモを追加</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.emptyStateButton} onPress={() => addPhotoAfter(null)}>
+                    <Ionicons name="camera-outline" size={18} color="#06c" />
+                    <Text style={styles.emptyStateButtonText}>写真を追加</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : (
+            <Text style={styles.emptyText}>表示できるブロックがありません</Text>
+          )
         ) : (
           timelineGroups.map((group, groupIndex) => {
             const isCollapsed = collapsedSectionKeys.has(group.key);
@@ -1306,8 +1887,6 @@ export default function NoteDetailScreen() {
               {isCollapsed
                 ? null
                 : group.blocks.map((block, blockIndex) => {
-                const badges = activeBadges(block);
-                const dotColor = badges[0]?.color ?? UNMARKED_DOT_COLOR;
                 const hasLineBelow = blockIndex < group.blocks.length - 1;
                 return (
                   <Fragment key={block.id}>
@@ -1315,7 +1894,7 @@ export default function NoteDetailScreen() {
                     style={[
                       styles.timelineRow,
                       block.id === activeBlockId && styles.timelineRowActive,
-                      block.id === jumpToBlockId && styles.timelineRowJumped,
+                      block.id === effectiveJumpBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
                       block.id === splittingBlockId && styles.timelineRowEditing,
                       block.id === menuBlockId && styles.timelineRowMenuTarget,
@@ -1330,7 +1909,7 @@ export default function NoteDetailScreen() {
                     onLayout={(e) => {
                       blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
                       if (
-                        jumpToBlockId === block.id &&
+                        effectiveJumpBlockId === block.id &&
                         jumpedBlockIdRef.current !== block.id
                       ) {
                         jumpedBlockIdRef.current = block.id;
@@ -1342,139 +1921,21 @@ export default function NoteDetailScreen() {
                       }
                     }}
                   >
-                    <View style={styles.timelineDotCol}>
-                      <View style={styles.timelineDotWrap}>
-                        {badges.length > 1 ? (
-                          <View style={styles.timelineDotStack}>
-                            {badges.map((b) => (
-                              <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
-                            ))}
-                          </View>
-                        ) : (
-                          <View style={[styles.timelineDot, { backgroundColor: dotColor }]} />
-                        )}
-                      </View>
-                      {hasLineBelow ? (
-                        <View
-                          style={[
-                            styles.timelineConnector,
-                            badges.length > 0 && { backgroundColor: dotColor },
-                          ]}
-                        />
-                      ) : null}
-                    </View>
-                    <View style={styles.timelineBody}>
-                      <View style={styles.timelineMetaRow}>
-                        <Text style={styles.timelineTime}>
-                          {fmt(block.startMs)}
-                          {session ? (
-                            <Text style={styles.timelineTimeWallClock}>
-                              {` ・ ${formatHHMM(session.startedAt + block.startMs)}`}
-                            </Text>
-                          ) : null}
-                        </Text>
-                        {badges.length > 0 ? (
-                          <View style={styles.timelineBadgeRow}>
-                            {badges.map((b) => (
-                              <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
-                            ))}
-                          </View>
-                        ) : null}
-                        {block.isEdited ? (
-                          <View style={styles.editedBadge}>
-                            <Ionicons name="pencil" size={10} color="#8e8e93" />
-                            <Text style={styles.editedBadgeText}>編集済み</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      {block.kind === "photo" ? (
-                        block.photoUri ? (
-                          <TouchableOpacity
-                            activeOpacity={0.85}
-                            onPress={() => openPhotoViewer(block)}
-                            onLongPress={() => openBlockMenu(block)}
-                          >
-                            <Image source={{ uri: block.photoUri }} style={styles.timelinePhoto} />
-                          </TouchableOpacity>
-                        ) : (
-                          <TouchableOpacity
-                            activeOpacity={0.7}
-                            style={styles.timelinePhotoPlaceholder}
-                            onPress={() => attachPhotoToBlock(block)}
-                            onLongPress={() => openBlockMenu(block)}
-                          >
-                            <Text style={styles.timelinePhotoLabel}>タップして写真を撮る</Text>
-                          </TouchableOpacity>
-                        )
-                      ) : null}
-                      {splittingBlockId === block.id ? (
-                        <View>
-                          <Text style={styles.splitHintText}>分割したい位置をタップしてください</Text>
-                          <TextInput
-                            style={styles.timelineTextInput}
-                            value={block.text ?? ""}
-                            onChangeText={() => {}}
-                            onSelectionChange={(e) => setSplitIndex(e.nativeEvent.selection.start)}
-                            showSoftInputOnFocus={false}
-                            autoFocus
-                            multiline
-                          />
-                          <View style={styles.editActionsRow}>
-                            <TouchableOpacity style={styles.editActionButton} onPress={cancelSplitting}>
-                              <Text style={styles.editActionButtonText}>キャンセル</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.editActionButton, styles.editActionButtonPrimary]}
-                              onPress={confirmSplit}
-                            >
-                              <Text style={styles.editActionButtonPrimaryText}>この位置で分割</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ) : editingBlockId === block.id ? (
-                        <View>
-                          <TextInput
-                            style={styles.timelineTextInput}
-                            value={editDraft}
-                            onChangeText={setEditDraft}
-                            autoFocus
-                            multiline
-                          />
-                          <View style={styles.editActionsRow}>
-                            <TouchableOpacity
-                              style={styles.editActionButton}
-                              onPress={cancelBlockEdit}
-                            >
-                              <Text style={styles.editActionButtonText}>キャンセル</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.editActionButton, styles.editActionButtonPrimary]}
-                              onPress={commitBlockEdit}
-                            >
-                              <Text style={styles.editActionButtonPrimaryText}>完了</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      ) : (
-                        <TouchableOpacity
-                          activeOpacity={0.6}
-                          onPress={() =>
-                            block.id === activeBlockId
-                              ? startEditingBlock(block)
-                              : handleBlockPress(block)
-                          }
-                          onLongPress={() => openBlockMenu(block)}
-                        >
-                          <Text style={block.text ? styles.timelineText : styles.timelineTextPlaceholder}>
-                            {block.text || "タップしてメモを追加"}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                      {block.isQuestion && block.questionTerm ? (
-                        <Text style={styles.questionTermText}>A: {block.questionTerm}</Text>
-                      ) : null}
-                    </View>
+                    {renderTimelineRowContent(block, hasLineBelow)}
                   </TouchableOpacity>
+                  {newBlockDraft && newBlockDraft.afterBlockId === block.id ? (
+                    <InlineEditCard
+                      kind="neutral"
+                      title="メモを追加"
+                      value={newBlockDraft.text}
+                      onChangeText={(text) =>
+                        setNewBlockDraft((d) => (d ? { ...d, text } : d))
+                      }
+                      placeholder="メモを入力"
+                      onCancel={cancelMemoPrompt}
+                      onConfirm={confirmMemoPrompt}
+                    />
+                  ) : null}
                   </Fragment>
                 );
               })}
@@ -1504,6 +1965,8 @@ export default function NoteDetailScreen() {
           <Text style={styles.playerTime}>{fmt(totalDurationMs)}</Text>
         </View>
       ) : null}
+      </>
+      )}
       </KeyboardAvoidingView>
 
       <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
@@ -1519,218 +1982,52 @@ export default function NoteDetailScreen() {
                     left: menuAnchor.x,
                     width: menuAnchor.width,
                     minHeight: menuAnchor.height,
-                    transform: [
-                      { scale: menuHighlightScale },
-                      {
-                        rotate: menuHighlightTilt.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0deg", "-2.4deg"],
-                        }),
-                      },
-                    ],
+                    transform: [{ scale: menuHighlightScale }],
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.paperTape,
-                    {
-                      backgroundColor: menuBlock.isQuestion
-                        ? "rgba(175,82,222,0.55)"
-                        : "rgba(52,199,89,0.5)",
-                    },
-                  ]}
-                />
                 {menuBlock.isTodo ? <View style={styles.timelineAccentBar} /> : null}
-                <View style={styles.timelineBody}>
-                  <View style={styles.timelineMetaRow}>
-                    <Text style={styles.timelineTime}>
-                      {fmt(menuBlock.startMs)}
-                      {session ? (
-                        <Text style={styles.timelineTimeWallClock}>
-                          {` ・ ${formatHHMM(session.startedAt + menuBlock.startMs)}`}
-                        </Text>
-                      ) : null}
-                    </Text>
-                    {menuBlockBadges.length > 0 ? (
-                      <View style={styles.timelineBadgeRow}>
-                        {menuBlockBadges.map((b) => (
-                          <Ionicons key={b.key} name={b.icon} size={13} color={b.color} />
-                        ))}
-                      </View>
-                    ) : null}
-                    {menuBlock.isEdited ? (
-                      <View style={styles.editedBadge}>
-                        <Ionicons name="pencil" size={10} color="#8e8e93" />
-                        <Text style={styles.editedBadgeText}>編集済み</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  {menuBlock.kind === "photo" ? (
-                    menuBlock.photoUri ? (
-                      <Image source={{ uri: menuBlock.photoUri }} style={styles.timelinePhoto} />
-                    ) : (
-                      <View style={styles.timelinePhotoPlaceholder}>
-                        <Text style={styles.timelinePhotoLabel}>SLIDE</Text>
-                      </View>
-                    )
-                  ) : null}
-                  <Text style={styles.timelineText} numberOfLines={4}>
-                    {menuBlock.text || "タップしてメモを追加"}
-                  </Text>
-                  {menuBlock.isQuestion && menuBlock.questionTerm ? (
-                    <Text style={styles.questionTermText}>A: {menuBlock.questionTerm}</Text>
-                  ) : null}
+                <View style={styles.rowMenuHighlightTimelineRow}>
+                  {renderTimelineRowContent(menuBlock, menuBlockHasLineBelow)}
                 </View>
               </Animated.View>
               <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
-                <View style={styles.menuAttrRow}>
-                  {attributeButtons.map((attr, index) => (
-                    <TouchableOpacity
-                      key={attr.key}
-                      style={[
-                        styles.menuAttrButton,
-                        index > 0 && styles.menuAttrButtonDivider,
-                        { backgroundColor: attr.active ? attr.activeColor : attr.inactiveBg },
-                      ]}
-                      onPress={attr.onPress}
-                    >
-                      <Ionicons name={attr.icon} size={18} color={attr.active ? "#fff" : attr.activeColor} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {todoDoneItem ? (
-                  <TouchableOpacity
-                    style={[styles.menuItem, styles.menuItemDivider]}
-                    onPress={todoDoneItem.onPress}
-                  >
-                    <Text style={styles.menuItemText}>{todoDoneItem.label}</Text>
-                    <Ionicons name={todoDoneItem.icon} size={18} color={todoDoneItem.color} />
-                  </TouchableOpacity>
-                ) : null}
-                {actionItems.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.menuItem, (index > 0 || todoDoneItem) && styles.menuItemDivider]}
-                    onPress={item.onPress}
-                  >
-                    <Text style={styles.menuItemText}>{item.label}</Text>
-                    <Ionicons name={item.icon} size={18} color={item.color} />
-                  </TouchableOpacity>
+                {menuPages[menuPageIndex].map((row, index) => (
+                  <Fragment key={row.key}>{row.render(index > 0)}</Fragment>
                 ))}
-                {mergeButtons.length > 0 ? (
-                  <View style={[styles.menuMergeRow, styles.menuItemDivider]}>
-                    {mergeButtons.map((item, index) => (
-                      <TouchableOpacity
-                        key={item.key}
-                        style={[styles.menuMergeButton, index > 0 && styles.menuAttrButtonDivider]}
-                        onPress={item.onPress}
-                      >
-                        <Ionicons name={item.icon} size={16} color={item.color} />
-                        <Text style={styles.menuMergeButtonText}>{item.label}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : null}
-                {splitItem ? (
-                  <TouchableOpacity
-                    style={[styles.menuItem, mergeButtons.length === 0 && styles.menuItemDivider]}
-                    onPress={splitItem.onPress}
-                  >
-                    <Text style={styles.menuItemText}>{splitItem.label}</Text>
-                    <Ionicons name={splitItem.icon} size={18} color={splitItem.color} />
-                  </TouchableOpacity>
-                ) : null}
-                {deleteItem ? (
-                  <TouchableOpacity
-                    style={[styles.menuItem, styles.menuItemDivider]}
-                    onPress={deleteItem.onPress}
-                  >
-                    <Text style={[styles.menuItemText, { color: deleteItem.color }]}>
-                      {deleteItem.label}
+                {menuPages.length > 1 ? (
+                  <View style={styles.menuPaginationBar}>
+                    <TouchableOpacity
+                      hitSlop={8}
+                      disabled={menuPageIndex === 0}
+                      onPress={() => setMenuPage((p) => Math.max(0, p - 1))}
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={20}
+                        color={menuPageIndex === 0 ? "#d1d1d6" : "#3c3c43"}
+                      />
+                    </TouchableOpacity>
+                    <Text style={styles.menuPaginationText}>
+                      {menuPageIndex + 1} / {menuPages.length}
                     </Text>
-                    <Ionicons name={deleteItem.icon} size={18} color={deleteItem.color} />
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      hitSlop={8}
+                      disabled={menuPageIndex === menuPages.length - 1}
+                      onPress={() => setMenuPage((p) => Math.min(menuPages.length - 1, p + 1))}
+                    >
+                      <Ionicons
+                        name="chevron-forward"
+                        size={20}
+                        color={menuPageIndex === menuPages.length - 1 ? "#d1d1d6" : "#3c3c43"}
+                      />
+                    </TouchableOpacity>
+                  </View>
                 ) : null}
               </View>
             </>
           ) : null}
         </Pressable>
-      </Modal>
-
-      <Modal
-        visible={memoPromptAfterBlockId !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={cancelMemoPrompt}
-      >
-        <KeyboardAvoidingView
-          style={styles.promptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.memoPromptOverlay} onPress={cancelMemoPrompt}>
-            <Pressable style={styles.memoPromptPanel} onPress={(e) => e.stopPropagation()}>
-              <View style={[styles.paperTape, { backgroundColor: "rgba(52,199,89,0.5)" }]} />
-              <Text style={styles.promptTitle}>メモ</Text>
-              <TextInput
-                style={[styles.promptInput, styles.promptInputMultiline]}
-                value={memoPromptDraft}
-                onChangeText={setMemoPromptDraft}
-                placeholder="メモを入力"
-                multiline
-                autoFocus
-              />
-              <View style={styles.promptButtonRow}>
-                <TouchableOpacity style={styles.editActionButton} onPress={cancelMemoPrompt}>
-                  <Text style={styles.editActionButtonText}>キャンセル</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
-                  onPress={confirmMemoPrompt}
-                >
-                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
-        visible={answerPromptBlockId !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={cancelAnswerPrompt}
-      >
-        <KeyboardAvoidingView
-          style={styles.promptKeyboardAvoider}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.debugOverlay} onPress={cancelAnswerPrompt}>
-            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.promptTitle}>回答</Text>
-              <TextInput
-                style={[styles.promptInput, styles.promptInputMultiline]}
-                value={answerPromptDraft}
-                onChangeText={setAnswerPromptDraft}
-                placeholder="わかったこと・聞いた答えなどを書き足す"
-                multiline
-                autoFocus
-              />
-              <View style={styles.promptButtonRow}>
-                <TouchableOpacity style={styles.editActionButton} onPress={cancelAnswerPrompt}>
-                  <Text style={styles.editActionButtonText}>キャンセル</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.editActionButton, styles.editActionButtonPrimary]}
-                  onPress={confirmAnswerPrompt}
-                >
-                  <Text style={styles.editActionButtonPrimaryText}>保存</Text>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
       </Modal>
 
       <PhotoViewerModal
@@ -1909,6 +2206,87 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
   chipTextSelected: { color: "#fff", fontWeight: "600" },
 
+  // 「タイムライン/まとめ」の切り替えセグメント
+  viewModeRow: {
+    flexDirection: "row",
+    marginHorizontal: 20,
+    marginBottom: 8,
+    backgroundColor: "#e5e5ea",
+    borderRadius: 10,
+    padding: 2,
+  },
+  viewModeSegment: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  viewModeSegmentSelected: {
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  viewModeSegmentText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
+  viewModeSegmentTextSelected: { color: "#1c1c1e" },
+
+  // 「まとめ」タブ本体
+  summaryScroll: { flex: 1, marginTop: 4 },
+  summarySectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  summaryPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  summaryPillText: { fontSize: 13, fontWeight: "700" },
+  summarySectionCount: { fontSize: 12, color: "#8e8e93" },
+  summaryCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  summaryCardMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
+  summaryCardTime: { fontSize: 11, color: "#8e8e93" },
+  summaryText: { fontSize: 15, color: "#1c1c1e" },
+  summaryTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
+  summaryQuestionText: { fontSize: 15, color: "#1c1c1e", fontWeight: "600" },
+  summaryAnswerBox: {
+    backgroundColor: "#f2e8fc",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 6,
+  },
+  summaryAnswerText: { fontSize: 13, color: "#5a3d99" },
+  summaryTodoRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  summaryPhotoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  summaryThumb: { width: 44, height: 44, borderRadius: 8 },
+  summaryThumbPlaceholder: {
+    backgroundColor: "#eef1f4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   // セクション区切りの細かさスライダー
   gapSliderWrap: {},
   noteSettingsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -1934,7 +2312,7 @@ const styles = StyleSheet.create({
   gapSliderEndsRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
   gapSliderEndText: { fontSize: 11, color: "#c7c7cc" },
 
-  timelineWrap: { flex: 1 },
+  timelineWrap: { flex: 1, backgroundColor: "#fff" },
   // タイムラインの一番下(プレイヤーバーのすぐ上)に浮かせる。timelineWrap自体が
   // プレイヤーバーの手前で終わるコンテナのため、bottom基準でもプレイヤーバーとは重ならない
   followBadgeContainer: {
@@ -1996,6 +2374,9 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     paddingVertical: 8,
   },
+  // ゴーストカードの中でrenderTimelineRowContentを呼ぶ際、実際の行(timelineRow)と
+  // 同じ横並びレイアウトになるようにする(menuHighlight自体は向き指定を持たないため)
+  rowMenuHighlightTimelineRow: { flexDirection: "row", alignItems: "stretch" },
   // 発言間の「間」が1.5秒未満のブロックは、同じ段落として自然に繋がって見えるよう
   // 行間を詰める(見出しや余白は入れず、現状の行ベースの見た目を保ったまま間隔だけ縮める)
   timelineRowParagraph: { paddingVertical: 1 },
@@ -2009,19 +2390,6 @@ const styles = StyleSheet.create({
   timelineDot: { width: 6, height: 6, borderRadius: 3 },
   // ★/ToDo/❓が複数付いている場合、1色に代表させず全部の色を小さく積んで見せる
   timelineDotStack: { gap: 2, alignItems: "center" },
-  // 長押しメニュー表示中のゴーストカード(menuHighlight)専用。上端中央に貼った
-  // マスキングテープ。❓は紫、それ以外(通常メモ/ToDo)は緑
-  paperTape: {
-    position: "absolute",
-    top: -9,
-    left: "50%",
-    width: 56,
-    height: 18,
-    marginLeft: -28,
-    borderRadius: 2,
-    transform: [{ rotate: "-3deg" }],
-    zIndex: 2,
-  },
   // ToDoブロックだけ左端に付くアクセントバー
   timelineAccentBar: {
     position: "absolute",
@@ -2105,6 +2473,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  // 項目が多いメニュー用のページ送りバー(スクロールの代わり)
+  menuPaginationBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    height: 40,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#e5e5ea",
+  },
+  menuPaginationText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
   menuItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -2127,7 +2506,6 @@ const styles = StyleSheet.create({
   },
   menuMergeButtonText: { fontSize: 13, fontWeight: "600", color: "#8e8e93" },
 
-  promptKeyboardAvoider: { flex: 1 },
   promptPanel: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -2140,38 +2518,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   promptTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
-  promptInput: {
-    borderWidth: 1,
-    borderColor: "#e2e2e7",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: "#1c1c1e",
-  },
-  promptInputMultiline: { minHeight: 80, textAlignVertical: "top" },
-  promptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
-  // 「メモを追加」は他の入力フォーム(ToDo/質問追加)と揃え、画面中央に浮かせた
-  // 付箋(マスキングテープ)風カードにする
-  memoPromptOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  memoPromptPanel: {
-    backgroundColor: "#FDF9F0",
-    borderRadius: 16,
-    padding: 20,
-    width: "85%",
-    gap: 12,
-    transform: [{ rotate: "-1.6deg" }],
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
-  },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
   timelinePhotoPlaceholder: {
     width: "100%",
@@ -2194,6 +2540,20 @@ const styles = StyleSheet.create({
   },
   questionTermText: { fontSize: 12, color: "#7c4dff", marginTop: 4 },
   emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40 },
+  // 音声すら記録されず、ブロックが1つも無いセッション用。長押しで開く既存の
+  // 「メモを追加」「写真を追加」と同じ操作を、直接タップできるボタンとして用意する
+  emptyStateBox: { alignItems: "center", marginTop: 16 },
+  emptyStateActions: { flexDirection: "row", gap: 12, marginTop: 16 },
+  emptyStateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#eef1f4",
+  },
+  emptyStateButtonText: { fontSize: 14, fontWeight: "600", color: "#06c" },
 
   playerBar: {
     flexDirection: "row",

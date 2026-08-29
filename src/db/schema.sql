@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   section_gap_ms INTEGER NOT NULL DEFAULT 5000, -- タイムラインのセクション分け閾値(ms、migration v3)
-  is_quick     INTEGER NOT NULL DEFAULT 0 -- Todo/質問タブの「クイック追加」専用の非表示セッションか(migration v6)
+  is_quick     INTEGER NOT NULL DEFAULT 0, -- Todo/質問タブの「クイック追加」専用の非表示セッションか(migration v6)
+  is_pinned    INTEGER NOT NULL DEFAULT 0 -- (migration v8。参照するUI/機能は廃止済みだが、カラムは残している)
 );
 
 CREATE TABLE IF NOT EXISTS audio_files (
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS blocks (
   question_kind TEXT,                  -- 使用しない(旧「質問/用語」区分。migration v2、カラムのみ残存)
   is_edited     INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
+  summary_note  TEXT,                  -- 「まとめ」画面の★重要セクション用の一言メモ(migration v7)
+  is_deferred   INTEGER NOT NULL DEFAULT 0, -- ❓を「保留」にしたか(migration v9)。まとめ画面の未解決セクション・質問タブの保留グループで使う
+  important_group TEXT,                -- まとめ画面の★重要セクション用。ノートをまたいで束ねるための
+                                        -- ユーザー任意のグループ名(migration v10)。NULLなら未分類
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 

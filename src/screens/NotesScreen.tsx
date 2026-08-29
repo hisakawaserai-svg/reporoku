@@ -26,69 +26,15 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
-import { genId } from "../utils/id";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
-type DisplayMode = "list" | "calendar" | "todo" | "question";
+type DisplayMode = "list" | "calendar";
 
 const MODES: { key: DisplayMode; label: string }[] = [
   { key: "list", label: "リスト" },
   { key: "calendar", label: "カレンダー" },
-  { key: "todo", label: "ToDo" },
-  { key: "question", label: "質問" },
 ];
-
-// 検索クエリにマッチした部分を黄色マーカー風にハイライトする(ToDo/質問タブの検索結果用)。
-// クエリはtrigramトークナイザによる部分文字列一致で絞り込まれているため、単純なindexOfで
-// マッチ箇所を特定できる
-function HighlightedText({
-  text,
-  query,
-  style,
-  numberOfLines,
-}: {
-  text: string;
-  query?: string;
-  style?: any;
-  numberOfLines?: number;
-}) {
-  const trimmedQuery = query?.trim();
-  if (!trimmedQuery) {
-    return (
-      <Text style={style} numberOfLines={numberOfLines}>
-        {text}
-      </Text>
-    );
-  }
-  const lowerText = text.toLowerCase();
-  const lowerQuery = trimmedQuery.toLowerCase();
-  const parts: { text: string; matched: boolean }[] = [];
-  let cursor = 0;
-  while (cursor < text.length) {
-    const idx = lowerText.indexOf(lowerQuery, cursor);
-    if (idx === -1) {
-      parts.push({ text: text.slice(cursor), matched: false });
-      break;
-    }
-    if (idx > cursor) parts.push({ text: text.slice(cursor, idx), matched: false });
-    parts.push({ text: text.slice(idx, idx + trimmedQuery.length), matched: true });
-    cursor = idx + trimmedQuery.length;
-  }
-  return (
-    <Text style={style} numberOfLines={numberOfLines}>
-      {parts.map((part, i) =>
-        part.matched ? (
-          <Text key={i} style={styles.searchHighlight}>
-            {part.text}
-          </Text>
-        ) : (
-          part.text
-        )
-      )}
-    </Text>
-  );
-}
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -108,8 +54,6 @@ type DayGroup = {
 };
 
 type HourGroup = { hour: number; items: SessionSummary[] };
-
-type TodoGroups = { pending: BlockWithSession[]; done: BlockWithSession[] };
 
 type SessionGroup = {
   sessionId: string;
@@ -219,118 +163,6 @@ function noteDisplayTitle(session: Session): string {
   return session.title || `${formatDateSlash(session.startedAt)} の記録`;
 }
 
-// ToDo/質問タブの「追加」「編集」で共通のカード型モーダル。アイコンバッジ付きヘッダー+
-// 下線入力+丸型保存ボタンのレイアウトを、クイック追加・ToDo編集・質問編集の3箇所で使い回す
-type ItemFormModalProps = {
-  visible: boolean;
-  kind: "todo" | "question";
-  title: string;
-  subtitle: string;
-  mainValue: string;
-  onMainChange: (text: string) => void;
-  mainPlaceholder: string;
-  mainCaption: string;
-  showAnswer?: boolean;
-  answerValue?: string;
-  onAnswerChange?: (text: string) => void;
-  answerPlaceholder?: string;
-  answerCaption?: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-};
-
-function ItemFormModal({
-  visible,
-  kind,
-  title,
-  subtitle,
-  mainValue,
-  onMainChange,
-  mainPlaceholder,
-  mainCaption,
-  showAnswer,
-  answerValue,
-  onAnswerChange,
-  answerPlaceholder,
-  answerCaption,
-  onCancel,
-  onConfirm,
-}: ItemFormModalProps) {
-  return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onCancel}>
-      <KeyboardAvoidingView
-        style={styles.answerPromptKeyboardAvoider}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <Pressable style={styles.quickAddOverlay} onPress={onCancel}>
-          <Pressable style={styles.quickAddPanel} onPress={(e) => e.stopPropagation()}>
-            <View
-              style={[
-                styles.paperTape,
-                { backgroundColor: kind === "todo" ? "rgba(52,199,89,0.5)" : "rgba(175,82,222,0.55)" },
-              ]}
-            />
-            <View style={styles.quickAddHeader}>
-              <View
-                style={[
-                  styles.quickAddIconBadge,
-                  kind === "todo" ? styles.quickAddIconBadgeTodo : styles.quickAddIconBadgeQuestion,
-                ]}
-              >
-                <Ionicons
-                  name={kind === "todo" ? "checkmark" : "help"}
-                  size={22}
-                  color={kind === "todo" ? "#1f9254" : "#7c4dff"}
-                />
-              </View>
-              <View>
-                <Text style={styles.quickAddTitle}>{title}</Text>
-                <Text style={styles.quickAddSubtitle}>{subtitle}</Text>
-              </View>
-            </View>
-
-            <TextInput
-              style={styles.quickAddUnderlineInput}
-              value={mainValue}
-              onChangeText={onMainChange}
-              placeholder={mainPlaceholder}
-              autoFocus
-            />
-            <Text style={styles.quickAddFieldCaption}>{mainCaption}</Text>
-
-            {showAnswer ? (
-              <>
-                <TextInput
-                  style={styles.quickAddUnderlineInput}
-                  value={answerValue}
-                  onChangeText={onAnswerChange}
-                  placeholder={answerPlaceholder}
-                />
-                <Text style={styles.quickAddFieldCaption}>{answerCaption}</Text>
-              </>
-            ) : null}
-
-            <View style={styles.quickAddFooter}>
-              <TouchableOpacity onPress={onCancel}>
-                <Text style={styles.quickAddCancelText}>キャンセル</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.quickAddSaveButton,
-                  kind === "todo" ? styles.quickAddSaveButtonTodo : styles.quickAddSaveButtonQuestion,
-                ]}
-                onPress={onConfirm}
-              >
-                <Ionicons name="checkmark" size={22} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 export default function NotesScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -338,38 +170,9 @@ export default function NotesScreen() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [monthGroups, setMonthGroups] = useState<MonthGroup<SessionSummary>[]>([]);
-  const [todos, setTodos] = useState<TodoGroups>({ pending: [], done: [] });
-  // 「ToDo」タブの項目を長押しして開く、本文の編集(対象ブロックID)
-  const [todoEditBlockId, setTodoEditBlockId] = useState<string | null>(null);
-  const [todoEditDraft, setTodoEditDraft] = useState("");
-  // 編集モーダルのヘッダーに表示する、対象アイテムが属するノートの見出し
-  const [todoEditSubtitle, setTodoEditSubtitle] = useState("");
-  // ToDo/質問タブの「未対応/完了」「未解決/解決済み」区分の開閉状態
-  // (ノート詳細画面のセクション折りたたみと同じ考え方)
-  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
-  const toggleGroupCollapsed = (key: string) => {
-    setCollapsedGroupKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-  // ❓は「わからなかったこと全般」を記録する単一の機能。is_question=1の全件を持つ
-  const [questions, setQuestions] = useState<BlockWithSession[]>([]);
-  // 「質問」タブの各項目をタップして開く、Q(発言テキスト)とA(回答メモ)の編集(対象ブロックID)
-  const [answerPromptBlockId, setAnswerPromptBlockId] = useState<string | null>(null);
-  const [answerPromptQDraft, setAnswerPromptQDraft] = useState("");
-  const [answerPromptDraft, setAnswerPromptDraft] = useState("");
-  const [answerPromptSubtitle, setAnswerPromptSubtitle] = useState("");
-  // Todo/質問タブの「+」ボタンで開く、クイック追加(録音を伴わない項目)の入力。
-  // 質問タブのみ、Q(必須)に加えてA(回答、任意)も入力できる
-  const [quickAddKind, setQuickAddKind] = useState<"todo" | "question" | null>(null);
-  const [quickAddDraft, setQuickAddDraft] = useState("");
-  const [quickAddAnswerDraft, setQuickAddAnswerDraft] = useState("");
-  // ToDo/質問タブの行を長押しして開く選択肢メニュー。ノート詳細画面の長押しメニューと
-  // レイアウトを揃えるため、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
-  type RowMenuKind = "todo" | "question" | "session";
+  // リスト/カレンダーの行(セッションカード)を長押しして開く選択肢メニュー。ノート詳細画面の
+  // 長押しメニューとレイアウトを揃えるため、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
+  type RowMenuKind = "session";
   const [rowMenuAnchor, setRowMenuAnchor] = useState<{
     kind: RowMenuKind;
     block: BlockWithSession | SessionSummary;
@@ -379,10 +182,8 @@ export default function NotesScreen() {
     height: number;
   } | null>(null);
   const rowMenuRefs = useRef<Map<string, View>>(new Map());
-  // 長押しした行を、ノート詳細画面のopenBlockMenuと同じく付箋カード風のゴーストとして
-  // 少し拡大・傾けて表示するアニメーション
+  // 長押しした行を、ノート詳細画面のopenBlockMenuと同じく少し拡大したゴーストとして表示するアニメーション
   const rowMenuHighlightScale = useRef(new Animated.Value(1)).current;
-  const rowMenuHighlightTilt = useRef(new Animated.Value(0)).current;
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
@@ -417,62 +218,7 @@ export default function NotesScreen() {
     }
   }, []);
 
-  const loadTodos = useCallback(async () => {
-    try {
-      const groups = await blocksRepo.listAllTodos();
-      setTodos(groups);
-    } catch (e) {
-      console.warn("[DB] Todo一覧の取得に失敗しました", e);
-    }
-  }, []);
-
-  const loadQuestions = useCallback(async () => {
-    try {
-      const rows = await blocksRepo.listAllQuestions();
-      setQuestions(rows);
-    } catch (e) {
-      console.warn("[DB] 質問一覧の取得に失敗しました", e);
-    }
-  }, []);
-
-  // 「質問」タブの項目をタップして開く、Q(発言テキスト)とA(回答メモ)の編集。
-  // 既に内容があれば編集できるよう、その内容を初期値にする
-  const startAnswerPrompt = (block: BlockWithSession) => {
-    setAnswerPromptBlockId(block.id);
-    setAnswerPromptQDraft(block.text ?? "");
-    setAnswerPromptDraft(block.questionTerm ?? "");
-    setAnswerPromptSubtitle(
-      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
-    );
-  };
-
-  const cancelAnswerPrompt = () => {
-    setAnswerPromptBlockId(null);
-    setAnswerPromptQDraft("");
-    setAnswerPromptDraft("");
-    setAnswerPromptSubtitle("");
-  };
-
-  // Aを保存すると「解決済み」として扱われる(空にして保存すると未解決に戻る)。
-  // Qが空のままだと発言そのものが消えてしまうため、その場合はQの変更を破棄する
-  const confirmAnswerPrompt = async () => {
-    const id = answerPromptBlockId;
-    const question = answerPromptQDraft.trim();
-    const answer = answerPromptDraft;
-    setAnswerPromptBlockId(null);
-    setAnswerPromptQDraft("");
-    setAnswerPromptDraft("");
-    if (!id) return;
-    try {
-      if (question) await blocksRepo.update(id, question);
-      await blocksRepo.answerQuestion(id, answer);
-      loadQuestions();
-    } catch (e) {
-      console.warn("[DB] 質問の保存に失敗しました", e);
-    }
-  };
-
-  // ToDo/質問/リストタブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
+  // リスト/カレンダータブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
   // 同じく、対象行の画面上の実測座標を取得してその近くにメニューを表示する
   const openRowMenu = (kind: RowMenuKind, block: BlockWithSession | SessionSummary) => {
     const node = rowMenuRefs.current.get(block.id);
@@ -480,112 +226,27 @@ export default function NotesScreen() {
     node.measureInWindow((x, y, width, height) => {
       setRowMenuAnchor({ kind, block, x, y, width, height });
       rowMenuHighlightScale.setValue(1);
-      rowMenuHighlightTilt.setValue(0);
       Animated.spring(rowMenuHighlightScale, {
         toValue: 1.06,
         friction: 4,
         tension: 160,
         useNativeDriver: true,
       }).start();
-      Animated.spring(rowMenuHighlightTilt, {
-        toValue: 1,
-        friction: 4,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
     });
   };
 
-  // 閉じる時も、拡大・傾きを元に戻すアニメーションを再生してから消す
+  // 閉じる時も、拡大を元に戻すアニメーションを再生してから消す
   const closeRowMenu = (after?: () => void) => {
-    Animated.parallel([
-      Animated.timing(rowMenuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }),
-      Animated.timing(rowMenuHighlightTilt, { toValue: 0, duration: 140, useNativeDriver: true }),
-    ]).start(() => {
+    Animated.timing(rowMenuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }).start(() => {
       setRowMenuAnchor(null);
       after?.();
     });
   };
 
-  // ToDoタブの長押し編集。既存の本文を初期値にする
-  const startTodoEdit = (block: BlockWithSession) => {
-    setTodoEditBlockId(block.id);
-    setTodoEditDraft(block.text ?? "");
-    setTodoEditSubtitle(
-      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
-    );
-  };
-
-  const cancelTodoEdit = () => {
-    setTodoEditBlockId(null);
-    setTodoEditDraft("");
-    setTodoEditSubtitle("");
-  };
-
-  const confirmTodoEdit = async () => {
-    const id = todoEditBlockId;
-    const text = todoEditDraft.trim();
-    setTodoEditBlockId(null);
-    setTodoEditDraft("");
-    if (!id || !text) return;
-    try {
-      await blocksRepo.update(id, text);
-      loadTodos();
-    } catch (e) {
-      console.warn("[DB] ToDoの本文更新に失敗しました", e);
-    }
-  };
-
-  // Todo/質問タブの「+」ボタン。録音を伴わない項目のため、裏側の非表示セッション
-  // (is_quick=1、無ければ自動作成)にkind='note'のブロックとして追加する
-  const startQuickAdd = (kind: "todo" | "question") => {
-    setQuickAddKind(kind);
-    setQuickAddDraft("");
-    setQuickAddAnswerDraft("");
-  };
-
-  const cancelQuickAdd = () => {
-    setQuickAddKind(null);
-    setQuickAddDraft("");
-    setQuickAddAnswerDraft("");
-  };
-
-  const confirmQuickAdd = async () => {
-    const kind = quickAddKind;
-    const text = quickAddDraft.trim();
-    const answer = quickAddAnswerDraft.trim();
-    setQuickAddKind(null);
-    setQuickAddDraft("");
-    setQuickAddAnswerDraft("");
-    if (!kind || !text) return;
-    try {
-      const session = await sessionsRepo.getOrCreateQuickSession();
-      const id = genId();
-      await blocksRepo.create({
-        id,
-        sessionId: session.id,
-        kind: "note",
-        startMs: 0,
-        text,
-        isTodo: kind === "todo",
-        isQuestion: kind === "question",
-      });
-      if (kind === "question" && answer) {
-        await blocksRepo.answerQuestion(id, answer);
-      }
-      if (kind === "todo") loadTodos();
-      else loadQuestions();
-    } catch (e) {
-      console.warn("[DB] クイック追加の保存に失敗しました", e);
-    }
-  };
-
   useFocusEffect(
     useCallback(() => {
       loadNotes();
-      loadTodos();
-      loadQuestions();
-    }, [loadNotes, loadTodos, loadQuestions])
+    }, [loadNotes])
   );
 
   const trimmedQuery = query.trim();
@@ -684,34 +345,10 @@ export default function NotesScreen() {
   }, [selectedDayGroup]);
 
   const isSearching = trimmedQuery.length > 0;
-  // 「質問」タブ: 回答メモ(question_term)が付いているかどうかで未解決/解決済みに分ける
-  const unresolvedQuestions = questions.filter((q) => !q.questionTerm?.trim());
-  const resolvedQuestions = questions.filter((q) => !!q.questionTerm?.trim());
 
-  // タブごとの検索対象の絞り込み。ToDo/質問タブはそれぞれis_todo/is_questionの
-  // ブロックのみを対象にする(❓は質問文Qだけでなく回答Aもblocks_ftsの検索対象に
-  // 含まれているため、is_question=1の絞り込みだけで両方カバーできる)
-  const searchTodoResults = useMemo(
-    () => searchResults.filter((r) => r.isTodo),
-    [searchResults]
-  );
-  const searchQuestionResults = useMemo(
-    () => searchResults.filter((r) => r.isQuestion),
-    [searchResults]
-  );
-  const searchGroupsForMode = useMemo(() => {
-    if (mode === "todo") return groupBySession(searchTodoResults);
-    if (mode === "question") return groupBySession(searchQuestionResults);
-    return groupBySession(searchResults);
-  }, [mode, searchResults, searchTodoResults, searchQuestionResults]);
-  const searchResultCountForMode =
-    mode === "todo"
-      ? searchTodoResults.length
-      : mode === "question"
-      ? searchQuestionResults.length
-      : searchResults.length;
-  const searchPlaceholder =
-    mode === "todo" ? "ToDoを検索" : mode === "question" ? "質問・回答を検索" : "ノートを検索";
+  const searchGroupsForMode = useMemo(() => groupBySession(searchResults), [searchResults]);
+  const searchResultCountForMode = searchResults.length;
+  const searchPlaceholder = "ノートを検索";
 
   const goToNote = (noteId: string) => {
     navigation.navigate("NoteDetail", { noteId });
@@ -743,8 +380,6 @@ export default function NotesScreen() {
               ...audioFiles.map((f) => deleteStoredFile(f.fileUri)),
             ]);
             loadNotes();
-            loadTodos();
-            loadQuestions();
           } catch (e) {
             console.warn("[DB] ノートの削除に失敗しました", e);
           }
@@ -753,7 +388,9 @@ export default function NotesScreen() {
     ]);
   };
 
-  const renderCard = (session: SessionSummary, compact = false) => {
+  // カード本体の中身(タイトル・メタ・バッジ・サムネイル)。長押しメニューのゴーストカードでも
+  // 全く同じ関数を呼んで描画することで、実際のカードと見た目が食い違わないようにする
+  const renderCardContent = (session: SessionSummary) => {
     const thumbBadge =
       session.photoCount > 1
         ? `+${session.photoCount - 1}枚`
@@ -762,17 +399,7 @@ export default function NotesScreen() {
         : null;
 
     return (
-      <TouchableOpacity
-        key={session.id}
-        style={[styles.card, compact && styles.cardNoMargin]}
-        activeOpacity={0.7}
-        onPress={() => goToNote(session.id)}
-        onLongPress={() => openRowMenu("session", session)}
-        ref={(node) => {
-          if (node) rowMenuRefs.current.set(session.id, node);
-          else rowMenuRefs.current.delete(session.id);
-        }}
-      >
+      <>
         <View style={styles.cardBody}>
           <Text style={styles.cardTitle} numberOfLines={1}>
             {noteDisplayTitle(session)}
@@ -817,146 +444,31 @@ export default function NotesScreen() {
             </View>
           ) : null}
         </View>
-      </TouchableOpacity>
+      </>
     );
   };
 
-  const renderTodoRow = (block: BlockWithSession, highlightQuery?: string, showNoteMeta?: boolean) => (
+  const renderCard = (session: SessionSummary, compact = false) => (
     <TouchableOpacity
-      key={block.id}
-      style={styles.todoCard}
+      key={session.id}
+      style={[styles.card, compact && styles.cardNoMargin]}
       activeOpacity={0.7}
-      onPress={() => startTodoEdit(block)}
-      onLongPress={() => openRowMenu("todo", block)}
+      onPress={() => goToNote(session.id)}
+      onLongPress={() => openRowMenu("session", session)}
       ref={(node) => {
-        if (node) rowMenuRefs.current.set(block.id, node);
-        else rowMenuRefs.current.delete(block.id);
+        if (node) rowMenuRefs.current.set(session.id, node);
+        else rowMenuRefs.current.delete(session.id);
       }}
     >
-      <TouchableOpacity
-        hitSlop={8}
-        onPress={() => blocksRepo.toggleTodoDone(block.id).then(loadTodos)}
-      >
-        <Ionicons
-          name={block.todoDone ? "checkmark-circle" : "ellipse-outline"}
-          size={24}
-          color={block.todoDone ? "#34c759" : "#c7c7cc"}
-        />
-      </TouchableOpacity>
-      <View style={styles.questionTextCol}>
-        <HighlightedText
-          text={block.text ?? ""}
-          query={highlightQuery}
-          style={[styles.todoText, block.todoDone && styles.todoTextDone]}
-        />
-        {showNoteMeta ? (
-          <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
-        ) : null}
-      </View>
-      <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
-        <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
-      </TouchableOpacity>
+      {renderCardContent(session)}
     </TouchableOpacity>
   );
 
-  // 「質問」タブの行。ToDoタブと同じ「ノートごとの小見出し+カード」パターン。
-  // 行タップ=回答(A)の入力を開く(このタブの主目的)、右端の矢印タップ=該当ノートへ遷移
-  // (独立したタップ領域)、長押し=選択肢メニュー。回答が付けば「解決済み」。
-  // Q(発言テキスト)のみ/Q+A(question_termを回答として転用)の2パターンを表示する
-  const renderQuestionRow = (block: BlockWithSession, highlightQuery?: string, showNoteMeta?: boolean) => {
-    const answer = block.questionTerm?.trim();
-    const resolved = !!answer;
-    return (
-      <TouchableOpacity
-        key={block.id}
-        style={styles.todoCard}
-        activeOpacity={0.7}
-        onPress={() => startAnswerPrompt(block)}
-        onLongPress={() => openRowMenu("question", block)}
-        ref={(node) => {
-          if (node) rowMenuRefs.current.set(block.id, node);
-          else rowMenuRefs.current.delete(block.id);
-        }}
-      >
-        <View style={[styles.questionIconBadge, resolved ? styles.questionIconBadgeResolved : styles.questionIconBadgeOpen]}>
-          {resolved ? (
-            <Ionicons name="checkmark" size={16} color="#1f9254" />
-          ) : (
-            <Text style={styles.questionIconBadgeText}>?</Text>
-          )}
-        </View>
-        <View style={styles.questionTextCol}>
-          <Text style={styles.todoText}>
-            Q: <HighlightedText text={block.text ?? ""} query={highlightQuery} />
-          </Text>
-          {resolved ? (
-            <Text style={styles.questionAnswerPreview}>
-              A: <HighlightedText text={answer} query={highlightQuery} />
-            </Text>
-          ) : null}
-          {showNoteMeta ? (
-            <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
-          ) : null}
-        </View>
-        <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
-          <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
-        </TouchableOpacity>
-      </TouchableOpacity>
-    );
-  };
-
-  // ToDo/質問/リストタブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
+  // リスト/カレンダータブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
   // 横並び行)と同じ形にする
   type RowMenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
   const rowMenuItems: RowMenuItem[] = !rowMenuAnchor
     ? []
-    : rowMenuAnchor.kind === "todo"
-    ? (() => {
-        const block = rowMenuAnchor.block as BlockWithSession;
-        return [
-          {
-            key: "edit",
-            label: "編集",
-            icon: "create-outline" as IconName,
-            color: "#8e8e93",
-            onPress: () => closeRowMenu(() => startTodoEdit(block)),
-          },
-          {
-            key: "toggleDone",
-            label: block.todoDone ? "未対応に戻す" : "完了にする",
-            icon: "checkmark-done-outline" as IconName,
-            color: "#1f9254",
-            onPress: () => closeRowMenu(() => blocksRepo.toggleTodoDone(block.id).then(loadTodos)),
-          },
-          {
-            key: "open",
-            label: "ノートを開く",
-            icon: "open-outline" as IconName,
-            color: "#06c",
-            onPress: () => closeRowMenu(() => goToBlock(block)),
-          },
-        ];
-      })()
-    : rowMenuAnchor.kind === "question"
-    ? (() => {
-        const block = rowMenuAnchor.block as BlockWithSession;
-        return [
-          {
-            key: "answer",
-            label: block.questionTerm?.trim() ? "回答を編集" : "回答を記入",
-            icon: "chatbubble-ellipses-outline" as IconName,
-            color: "#7c4dff",
-            onPress: () => closeRowMenu(() => startAnswerPrompt(block)),
-          },
-          {
-            key: "open",
-            label: "ノートを開く",
-            icon: "open-outline" as IconName,
-            color: "#06c",
-            onPress: () => closeRowMenu(() => goToBlock(block)),
-          },
-        ];
-      })()
     : (() => {
         const session = rowMenuAnchor.block as SessionSummary;
         return [
@@ -1006,26 +518,6 @@ export default function NotesScreen() {
       Math.min(rowMenuAnchor.y, windowHeight - rowMenuAnchor.height - ROW_MENU_SCREEN_MARGIN)
     );
   }
-
-  // ToDo/質問タブの区分見出し。パステルのピル+件数で表示し、タップで開閉する
-  const renderStatusHeader = (
-    key: string,
-    label: string,
-    count: number,
-    pillStyle: object,
-    pillTextStyle: object
-  ) => (
-    <TouchableOpacity
-      style={styles.statusHeaderRow}
-      activeOpacity={0.6}
-      onPress={() => toggleGroupCollapsed(key)}
-    >
-      <View style={[styles.statusHeaderPill, pillStyle]}>
-        <Text style={[styles.statusHeaderPillText, pillTextStyle]}>{label}</Text>
-      </View>
-      <Text style={styles.statusHeaderCount}>{count}件</Text>
-    </TouchableOpacity>
-  );
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
@@ -1113,11 +605,7 @@ export default function NotesScreen() {
               searchGroupsForMode.map((group) => (
                 <View key={group.sessionId}>
                   {renderNoteGroupHeader(group)}
-                  {mode === "todo"
-                    ? (group.items as BlockWithSession[]).map((b) => renderTodoRow(b, trimmedQuery))
-                    : mode === "question"
-                    ? (group.items as BlockWithSession[]).map((b) => renderQuestionRow(b, trimmedQuery))
-                    : (group.items as SearchResult[]).map(renderSearchRow)}
+                  {(group.items as SearchResult[]).map(renderSearchRow)}
                 </View>
               ))
             )}
@@ -1254,126 +742,9 @@ export default function NotesScreen() {
               </View>
             )}
 
-            {mode === "todo" && (
-              <View>
-                {todos.pending.length === 0 && todos.done.length === 0 ? (
-                  <View style={styles.placeholder}>
-                    <Ionicons name="checkbox-outline" size={32} color="#c7c7cc" />
-                    <Text style={styles.placeholderText}>Todoはまだありません</Text>
-                  </View>
-                ) : (
-                  <>
-                    {renderStatusHeader(
-                      "todo-pending",
-                      "未対応",
-                      todos.pending.length,
-                      styles.statusPillTodo,
-                      styles.statusPillTextTodo
-                    )}
-                    {collapsedGroupKeys.has("todo-pending") ? null : todos.pending.length === 0 ? (
-                      <Text style={styles.emptyGroupText}>なし</Text>
-                    ) : (
-                      todos.pending.map((b) => renderTodoRow(b, undefined, true))
-                    )}
-                    {renderStatusHeader(
-                      "todo-done",
-                      "完了",
-                      todos.done.length,
-                      styles.statusPillDone,
-                      styles.statusPillTextDone
-                    )}
-                    {collapsedGroupKeys.has("todo-done") ? null : todos.done.length === 0 ? (
-                      <Text style={styles.emptyGroupText}>なし</Text>
-                    ) : (
-                      todos.done.map((b) => renderTodoRow(b, undefined, true))
-                    )}
-                  </>
-                )}
-              </View>
-            )}
-
-            {mode === "question" && (
-              <View>
-                {questions.length === 0 ? (
-                  <View style={styles.placeholder}>
-                    <Ionicons name="help-circle-outline" size={32} color="#c7c7cc" />
-                    <Text style={styles.placeholderText}>質問はまだありません</Text>
-                  </View>
-                ) : (
-                  <>
-                    {renderStatusHeader(
-                      "question-unresolved",
-                      "未解決",
-                      unresolvedQuestions.length,
-                      styles.statusPillQuestion,
-                      styles.statusPillTextQuestion
-                    )}
-                    {collapsedGroupKeys.has("question-unresolved") ? null : unresolvedQuestions.length ===
-                      0 ? (
-                      <Text style={styles.emptyGroupText}>なし</Text>
-                    ) : (
-                      unresolvedQuestions.map((b) => renderQuestionRow(b, undefined, true))
-                    )}
-                    {renderStatusHeader(
-                      "question-resolved",
-                      "解決済み",
-                      resolvedQuestions.length,
-                      styles.statusPillDone,
-                      styles.statusPillTextDone
-                    )}
-                    {collapsedGroupKeys.has("question-resolved") ? null : resolvedQuestions.length === 0 ? (
-                      <Text style={styles.emptyGroupText}>なし</Text>
-                    ) : (
-                      resolvedQuestions.map((b) => renderQuestionRow(b, undefined, true))
-                    )}
-                  </>
-                )}
-              </View>
-            )}
           </>
         )}
       </ScrollView>
-
-      {!isSearching && (mode === "todo" || mode === "question") ? (
-        <TouchableOpacity
-          style={styles.fab}
-          activeOpacity={0.8}
-          onPress={() => startQuickAdd(mode)}
-        >
-          <Ionicons name="add" size={28} color="#fff" />
-        </TouchableOpacity>
-      ) : null}
-
-      <ItemFormModal
-        visible={answerPromptBlockId !== null}
-        kind="question"
-        title="質問を編集"
-        subtitle={answerPromptSubtitle}
-        mainValue={answerPromptQDraft}
-        onMainChange={setAnswerPromptQDraft}
-        mainPlaceholder="質問の内容"
-        mainCaption="Q ・ 必須"
-        showAnswer
-        answerValue={answerPromptDraft}
-        onAnswerChange={setAnswerPromptDraft}
-        answerPlaceholder="わかったこと・聞いた答えなど"
-        answerCaption="A ・ 任意"
-        onCancel={cancelAnswerPrompt}
-        onConfirm={confirmAnswerPrompt}
-      />
-
-      <ItemFormModal
-        visible={todoEditBlockId !== null}
-        kind="todo"
-        title="ToDoを編集"
-        subtitle={todoEditSubtitle}
-        mainValue={todoEditDraft}
-        onMainChange={setTodoEditDraft}
-        mainPlaceholder="ToDoの内容"
-        mainCaption="必須"
-        onCancel={cancelTodoEdit}
-        onConfirm={confirmTodoEdit}
-      />
 
       <Modal
         visible={rowMenuAnchor !== null}
@@ -1393,76 +764,13 @@ export default function NotesScreen() {
                     left: rowMenuAnchor.x,
                     width: rowMenuAnchor.width,
                     minHeight: rowMenuAnchor.height,
-                    transform: [
-                      { scale: rowMenuHighlightScale },
-                      {
-                        rotate: rowMenuHighlightTilt.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0deg", "-2.4deg"],
-                        }),
-                      },
-                    ],
+                    transform: [{ scale: rowMenuHighlightScale }],
                   },
                 ]}
               >
-                <View
-                  style={[
-                    styles.paperTape,
-                    {
-                      backgroundColor:
-                        rowMenuAnchor.kind === "question"
-                          ? "rgba(175,82,222,0.55)"
-                          : "rgba(52,199,89,0.5)",
-                    },
-                  ]}
-                />
-                {rowMenuAnchor.kind === "todo" ? <View style={styles.rowMenuAccentBar} /> : null}
-                {rowMenuAnchor.kind === "session" ? (
-                  <View>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {noteDisplayTitle(rowMenuAnchor.block as SessionSummary)}
-                    </Text>
-                    <Text style={styles.cardMeta}>
-                      {formatTime((rowMenuAnchor.block as SessionSummary).startedAt)} 開始 ・{" "}
-                      {formatDuration((rowMenuAnchor.block as SessionSummary).durationMs)}
-                    </Text>
-                    <View style={styles.badgeRow}>
-                      <View style={[styles.badge, styles.badgeStar]}>
-                        <Text style={styles.badgeStarIcon}>★</Text>
-                        <Text style={styles.badgeStarText}>
-                          {(rowMenuAnchor.block as SessionSummary).starCount}
-                        </Text>
-                      </View>
-                      <View style={[styles.badge, styles.badgeTodo]}>
-                        <Text style={styles.badgeTodoIcon}>✓</Text>
-                        <Text style={styles.badgeTodoText}>
-                          {(rowMenuAnchor.block as SessionSummary).todoCount}
-                        </Text>
-                      </View>
-                      <View style={[styles.badge, styles.badgeQuestion]}>
-                        <Text style={styles.badgeQuestionIcon}>?</Text>
-                        <Text style={styles.badgeQuestionText}>
-                          {(rowMenuAnchor.block as SessionSummary).questionCount}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                ) : rowMenuAnchor.kind === "question" ? (
-                  <View>
-                    <Text style={styles.rowMenuHighlightText} numberOfLines={4}>
-                      Q: {(rowMenuAnchor.block as BlockWithSession).text}
-                    </Text>
-                    {(rowMenuAnchor.block as BlockWithSession).questionTerm?.trim() ? (
-                      <Text style={styles.questionAnswerPreview} numberOfLines={4}>
-                        A: {(rowMenuAnchor.block as BlockWithSession).questionTerm}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : (
-                  <Text style={styles.rowMenuHighlightText} numberOfLines={4}>
-                    {(rowMenuAnchor.block as BlockWithSession).text}
-                  </Text>
-                )}
+                <View style={styles.rowMenuHighlightCardRow}>
+                  {renderCardContent(rowMenuAnchor.block as SessionSummary)}
+                </View>
               </Animated.View>
               <View style={[styles.rowMenuList, { top: rowMenuTop, left: rowMenuLeft, width: ROW_MENU_WIDTH }]}>
                 {rowMenuItems.map((item, index) => (
@@ -1480,24 +788,6 @@ export default function NotesScreen() {
           ) : null}
         </Pressable>
       </Modal>
-
-      <ItemFormModal
-        visible={quickAddKind !== null}
-        kind={quickAddKind ?? "todo"}
-        title={quickAddKind === "todo" ? "ToDoを追加" : "質問を追加"}
-        subtitle="クイック追加"
-        mainValue={quickAddDraft}
-        onMainChange={setQuickAddDraft}
-        mainPlaceholder={quickAddKind === "todo" ? "ToDoの内容" : "質問の内容"}
-        mainCaption={quickAddKind === "todo" ? "必須" : "Q ・ 必須"}
-        showAnswer={quickAddKind === "question"}
-        answerValue={quickAddAnswerDraft}
-        onAnswerChange={setQuickAddAnswerDraft}
-        answerPlaceholder="わかったこと・聞いた答えなど"
-        answerCaption="A ・ 任意・あとで記入してもOK"
-        onCancel={cancelQuickAdd}
-        onConfirm={confirmQuickAdd}
-      />
 
       <Modal
         visible={monthPickerVisible}
@@ -1607,23 +897,7 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, color: "#3c3c43" },
   segmentTextSelected: { fontWeight: "600" },
-  fab: {
-    position: "absolute",
-    left: 20,
-    bottom: 24,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "#06c",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  // ToDo/質問タブの長押しメニュー。ノート詳細画面のmenuOverlay/menuList/menuItemと
+  // リスト/カレンダータブの長押しメニュー。ノート詳細画面のmenuOverlay/menuList/menuItemと
   // 同じ見た目(丸角カード+区切り線付きの行)に揃える
   rowMenuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
   // 長押しメニュー表示中のゴーストカード。iOS純正の白背景+テープ+わずかな傾きで
@@ -1641,15 +915,9 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   rowMenuHighlightText: { fontSize: 15, color: "#1c1c1e" },
-  rowMenuAccentBar: {
-    position: "absolute",
-    left: 0,
-    top: 12,
-    bottom: 12,
-    width: 4,
-    borderRadius: 2,
-    backgroundColor: "#34C759",
-  },
+  // ゴーストカードの中でrenderCardContentを呼ぶ際、実カード(styles.card)と同じ
+  // 横並びレイアウトになるようにする(rowMenuHighlight自体は向き指定を持たないため)
+  rowMenuHighlightCardRow: { flexDirection: "row", gap: 10 },
   rowMenuList: {
     position: "absolute",
     backgroundColor: "#fff",
@@ -1698,32 +966,6 @@ const styles = StyleSheet.create({
   },
   monthHeaderPillText: { fontSize: 13, fontWeight: "700", color: "#1c1c1e" },
   monthHeaderYear: { fontSize: 13, color: "#8e8e93" },
-  emptyGroupText: {
-    fontSize: 13,
-    color: "#c7c7cc",
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  // ToDo/質問タブの区分見出し(パステルピル+件数)
-  statusHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  statusHeaderPill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
-  statusHeaderPillText: { fontSize: 13, fontWeight: "700" },
-  statusHeaderCount: { fontSize: 13, color: "#8e8e93" },
-  statusPillTodo: { backgroundColor: "#e0f7e6" },
-  statusPillTextTodo: { color: "#1f9254" },
-  statusPillQuestion: { backgroundColor: "#f2e8fc" },
-  statusPillTextQuestion: { color: "#7c4dff" },
-  statusPillDone: { backgroundColor: "#e5e5ea" },
-  statusPillTextDone: { color: "#636366" },
-  // ToDo/質問カードの下に添える、所属ノートのタイトル
-  cardSubMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
 
   // ノートカード(リスト・カレンダー共通)
   card: {
@@ -1873,83 +1115,6 @@ const styles = StyleSheet.create({
     color: "#1c1c1e",
     marginBottom: 8,
   },
-  answerPromptKeyboardAvoider: { flex: 1, justifyContent: "flex-end" },
-
-  // クイック追加(ToDo/質問タブの「+」)のパネル。付箋(マスキングテープ)型で
-  // 画面中央にわずかに傾けて浮かせる。アイコンバッジ付きヘッダー+下線入力+丸型保存ボタン
-  quickAddOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  quickAddPanel: {
-    backgroundColor: "#FDF9F0",
-    borderRadius: 18,
-    width: "85%",
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 24,
-    transform: [{ rotate: "-1.8deg" }],
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  // カード上端中央に貼ったマスキングテープ(NoteDetailScreenの付箋カードと同じ見た目)
-  paperTape: {
-    position: "absolute",
-    top: -9,
-    left: "50%",
-    width: 56,
-    height: 18,
-    marginLeft: -28,
-    borderRadius: 2,
-    transform: [{ rotate: "-3deg" }],
-    zIndex: 2,
-  },
-  quickAddHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22 },
-  quickAddIconBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  quickAddIconBadgeTodo: { backgroundColor: "#e0f7e6" },
-  quickAddIconBadgeQuestion: { backgroundColor: "#f2e8fc" },
-  quickAddTitle: { fontSize: 18, fontWeight: "700", color: "#1c1c1e" },
-  quickAddSubtitle: { fontSize: 13, color: "#8e8e93", marginTop: 2 },
-  quickAddUnderlineInput: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#d1d1d6",
-    paddingVertical: 8,
-    fontSize: 16,
-    color: "#1c1c1e",
-  },
-  quickAddFieldCaption: { fontSize: 12, color: "#8e8e93", marginTop: 6, marginBottom: 18 },
-  quickAddFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  quickAddCancelText: { fontSize: 16, color: "#8e8e93" },
-  quickAddSaveButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  quickAddSaveButtonTodo: { backgroundColor: "#34c759" },
-  quickAddSaveButtonQuestion: { backgroundColor: "#7c4dff" },
   monthPickerYearNav: {
     flexDirection: "row",
     alignItems: "center",
@@ -1987,44 +1152,13 @@ const styles = StyleSheet.create({
   },
   monthPickerCloseText: { color: "#fff", fontSize: 15, fontWeight: "600" },
 
-  // ToDo表示(ノートごとの小見出し+カード形式の行)
+  // 検索結果のノートごとの小見出し
   noteGroupHeader: {
     fontSize: 12,
     color: "#8e8e93",
     marginHorizontal: 16,
     marginBottom: 6,
   },
-  todoCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  todoText: { flex: 1, fontSize: 15, color: "#1c1c1e" },
-  todoTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
-  questionTextCol: { flex: 1 },
-  questionAnswerPreview: { fontSize: 12, color: "#34c759", marginTop: 3 },
-  // 質問タブの丸バッジアイコン(未解決=紫の?、解決済み=緑のチェック)
-  questionIconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  questionIconBadgeOpen: { backgroundColor: "#f2e8fc" },
-  questionIconBadgeResolved: { backgroundColor: "#e0f7e6" },
-  questionIconBadgeText: { fontSize: 15, fontWeight: "700", color: "#7c4dff" },
 
   // 検索結果
   searchRow: {

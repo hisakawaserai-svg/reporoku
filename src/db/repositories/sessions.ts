@@ -11,6 +11,7 @@ interface SessionRow {
   updated_at: number;
   section_gap_ms: number;
   is_quick: number;
+  is_pinned: number;
 }
 
 function mapRow(row: SessionRow): Session {
@@ -23,6 +24,7 @@ function mapRow(row: SessionRow): Session {
     updatedAt: row.updated_at,
     sectionGapMs: row.section_gap_ms,
     isQuick: row.is_quick === 1,
+    isPinned: row.is_pinned === 1,
   };
 }
 
@@ -65,6 +67,7 @@ export async function create(input: CreateSessionInput): Promise<Session> {
     updatedAt: now,
     sectionGapMs,
     isQuick,
+    isPinned: false,
   };
 }
 

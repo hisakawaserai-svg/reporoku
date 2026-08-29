@@ -214,11 +214,20 @@ export default function RecordScreen() {
       .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
   };
 
-  // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)
+  // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)。
+  // ★・📝・❓が1件も無ければ、確認するまでもないため遷移自体をスキップする
   const goToRecordComplete = () => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    navigation.navigate("RecordComplete", { noteId: sessionId });
+    blocksRepo
+      .listBySessionId(sessionId)
+      .then((blocks) => {
+        const hasAnyMark = blocks.some((b) => b.isStarred || b.isTodo || b.isQuestion);
+        if (hasAnyMark) {
+          navigation.navigate("RecordComplete", { noteId: sessionId });
+        }
+      })
+      .catch((e) => console.warn("[DB] 録音完了ポップアップの判定に失敗しました", e));
   };
 
   // 終了後、次の録音に備えて画面をまっさらな状態に戻す(保存結果は録音完了画面で確認できるため)
@@ -1323,7 +1332,7 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
                 />
               ))}
             </View>
-            <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="tail">
+            <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="head">
               {text}
             </Text>
           </View>

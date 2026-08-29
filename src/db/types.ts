@@ -10,6 +10,7 @@ export interface Session {
   updatedAt: number;
   sectionGapMs: number;
   isQuick: boolean;
+  isPinned: boolean;
 }
 
 export interface AudioFile {
@@ -39,6 +40,9 @@ export interface Block {
   questionKind: QuestionKind | null;
   isEdited: boolean;
   createdAt: number;
+  summaryNote: string | null;
+  isDeferred: boolean;
+  importantGroup: string | null;
 }
 
 export interface BlockWithSession extends Block {

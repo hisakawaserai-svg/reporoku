@@ -18,6 +18,9 @@ interface BlockRow {
   question_kind: string | null;
   is_edited: number;
   created_at: number;
+  summary_note: string | null;
+  is_deferred: number;
+  important_group: string | null;
 }
 
 interface BlockWithSessionRow extends BlockRow {
@@ -46,6 +49,9 @@ function mapRow(row: BlockRow): Block {
     questionKind: row.question_kind as QuestionKind | null,
     isEdited: row.is_edited === 1,
     createdAt: row.created_at,
+    summaryNote: row.summary_note,
+    isDeferred: row.is_deferred === 1,
+    importantGroup: row.important_group,
   };
 }
 
@@ -124,6 +130,9 @@ export async function create(input: CreateBlockInput): Promise<Block> {
     questionKind,
     isEdited: false,
     createdAt: now,
+    summaryNote: null,
+    isDeferred: false,
+    importantGroup: null,
   };
 }
 
@@ -293,6 +302,66 @@ export async function answerQuestion(id: string, answer: string): Promise<void> 
   await db.runAsync('UPDATE blocks SET question_term = ? WHERE id = ?;', [trimmed || null, id]);
 }
 
+// 「まとめ」画面の★重要セクション用。★のブロックを横断して集め、
+// 発話時刻(セッション開始時刻+start_ms)の新しい順に返す
+export async function listStarredBlocks(): Promise<BlockWithSession[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<BlockWithSessionRow>(
+    `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
+     FROM blocks
+     JOIN sessions ON sessions.id = blocks.session_id
+     WHERE blocks.is_starred = 1
+     ORDER BY (sessions.started_at + blocks.start_ms) DESC;`
+  );
+  return rows.map(mapWithSessionRow);
+}
+
+// 「質問」タブの「保留にする/保留を解除する」。まとめ画面の未解決セクションからは
+// 保留中の間だけ外れる(is_question/question_termはそのまま)
+export async function setDeferred(id: string, deferred: boolean): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE blocks SET is_deferred = ? WHERE id = ?;', [deferred ? 1 : 0, id]);
+}
+
+// 「まとめ」画面の★重要セクション、およびノート詳細画面での一言メモ。
+// ❓の回答メモ(answerQuestion)と同じパターンで、空文字ならNULLに戻す
+// (未記入=元の発言をそのまま表示、に戻せるようにする)
+export async function setSummaryNote(id: string, note: string): Promise<void> {
+  const db = await getDb();
+  const trimmed = note.trim();
+  await db.runAsync('UPDATE blocks SET summary_note = ? WHERE id = ?;', [trimmed || null, id]);
+}
+
+// 「まとめ」画面の★重要セクション用。★ブロックを、ノートをまたいで束ねるグループ名の
+// 設定/解除(空文字ならNULLに戻す=未分類)
+export async function setImportantGroup(id: string, group: string | null): Promise<void> {
+  const db = await getDb();
+  const trimmed = group?.trim() ?? '';
+  await db.runAsync('UPDATE blocks SET important_group = ? WHERE id = ?;', [trimmed || null, id]);
+}
+
+// グループ割り当てのクイック選択用に、既存のグループ名の一覧(重複無し、最近使われた順)を返す
+export async function listImportantGroupNames(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ important_group: string }>(
+    `SELECT important_group, MAX(created_at) AS latest
+     FROM blocks
+     WHERE important_group IS NOT NULL AND TRIM(important_group) != ''
+     GROUP BY important_group
+     ORDER BY latest DESC;`
+  );
+  return rows.map((r) => r.important_group);
+}
+
+// タイトル一致行のスニペット用に、マッチ箇所をblocks_ftsのsnippet()と同じ'[' ']'記法で囲む
+function highlightTitle(title: string, query: string): string {
+  const idx = title.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return title;
+  return `${title.slice(0, idx)}[${title.slice(idx, idx + query.length)}]${title.slice(
+    idx + query.length
+  )}`;
+}
+
 export async function search(query: string): Promise<SearchResult[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -300,22 +369,51 @@ export async function search(query: string): Promise<SearchResult[]> {
   const db = await getDb();
   // trigramトークナイザは引用符で囲むと部分文字列検索として扱われる
   const ftsQuery = `"${trimmed.replace(/"/g, '""')}"`;
+  const likeQuery = `%${trimmed.replace(/[\\%_]/g, '\\$&')}%`;
 
-  const rows = await db.getAllAsync<SearchResultRow>(
-    // 列番号を-1にすると、text/question_term(❓への回答)のうち実際にマッチした方から
-    // スニペットを作る
-    `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at,
-            snippet(blocks_fts, -1, '[', ']', '...', 12) AS snippet
-     FROM blocks_fts
-     JOIN blocks ON blocks.rowid = blocks_fts.rowid
-     JOIN sessions ON sessions.id = blocks.session_id
-     WHERE blocks_fts MATCH ?
-     ORDER BY rank;`,
-    [ftsQuery]
-  );
+  const [textRows, titleRows] = await Promise.all([
+    db.getAllAsync<SearchResultRow>(
+      // 列番号を-1にすると、text/question_term(❓への回答)のうち実際にマッチした方から
+      // スニペットを作る
+      `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at,
+              snippet(blocks_fts, -1, '[', ']', '...', 12) AS snippet
+       FROM blocks_fts
+       JOIN blocks ON blocks.rowid = blocks_fts.rowid
+       JOIN sessions ON sessions.id = blocks.session_id
+       WHERE blocks_fts MATCH ?
+       ORDER BY rank;`,
+      [ftsQuery]
+    ),
+    // ノートのタイトル一致。ノート本文がヒットしていないセッションについて、そのノートの
+    // 先頭ブロックを代表行として1件だけ返す(タイトルはblocks_ftsの対象外のため別クエリ)
+    db.getAllAsync<BlockWithSessionRow>(
+      `SELECT blocks.*, sessions.title AS session_title, sessions.started_at AS session_started_at
+       FROM sessions
+       JOIN blocks ON blocks.session_id = sessions.id
+       WHERE sessions.title LIKE ? ESCAPE '\\'
+         AND blocks.id = (
+           SELECT b2.id FROM blocks b2
+           WHERE b2.session_id = sessions.id
+           ORDER BY b2.start_ms ASC, b2.created_at ASC
+           LIMIT 1
+         );`,
+      [likeQuery]
+    ),
+  ]);
 
-  return rows.map((row) => ({
+  const matchedSessionIds = new Set(textRows.map((row) => row.session_id));
+
+  const titleResults = titleRows
+    .filter((row) => !matchedSessionIds.has(row.session_id))
+    .map((row) => ({
+      ...mapWithSessionRow(row),
+      snippet: highlightTitle(row.session_title, trimmed),
+    }));
+
+  const textResults = textRows.map((row) => ({
     ...mapWithSessionRow(row),
     snippet: row.snippet,
   }));
+
+  return [...titleResults, ...textResults];
 }

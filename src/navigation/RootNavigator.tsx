@@ -5,14 +5,16 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import NotesScreen from "../screens/NotesScreen";
 import RecordScreen from "../screens/RecordScreen";
+import SummaryScreen from "../screens/SummaryScreen";
 import SettingsScreen from "../screens/SettingsScreen";
 import NoteDetailScreen from "../screens/NoteDetailScreen";
 import ReportScreen from "../screens/ReportScreen";
 import RecordCompleteScreen from "../screens/RecordCompleteScreen";
 
 export type MainTabParamList = {
-  Notes: undefined;
   Record: undefined;
+  Notes: undefined;
+  Summary: undefined;
   Settings: undefined;
 };
 
@@ -29,11 +31,22 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 function MainTabs() {
   return (
     <Tab.Navigator
+      initialRouteName="Record"
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: true,
       }}
     >
+      <Tab.Screen
+        name="Record"
+        component={RecordScreen}
+        options={{
+          title: "収録",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "mic" : "mic-outline"} size={size} color={color} />
+          ),
+        }}
+      />
       <Tab.Screen
         name="Notes"
         component={NotesScreen}
@@ -45,12 +58,12 @@ function MainTabs() {
         }}
       />
       <Tab.Screen
-        name="Record"
-        component={RecordScreen}
+        name="Summary"
+        component={SummaryScreen}
         options={{
-          title: "録音",
+          title: "まとめ",
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "mic" : "mic-outline"} size={size} color={color} />
+            <Ionicons name={focused ? "bookmark" : "bookmark-outline"} size={size} color={color} />
           ),
         }}
       />

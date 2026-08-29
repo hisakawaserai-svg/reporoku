@@ -31,7 +31,7 @@ export default function RecordCompleteScreen() {
   const [startedAt, setStartedAt] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const [title, setTitle] = useState("");
-  const [counts, setCounts] = useState({ star: 0, todo: 0, question: 0, photo: 0 });
+  const [counts, setCounts] = useState({ star: 0, todo: 0, question: 0 });
 
   useEffect(() => {
     (async () => {
@@ -47,7 +47,6 @@ export default function RecordCompleteScreen() {
           star: blocks.filter((b) => b.isStarred).length,
           todo: blocks.filter((b) => b.isTodo).length,
           question: blocks.filter((b) => b.isQuestion).length,
-          photo: blocks.filter((b) => b.kind === "photo").length,
         });
       } catch (e) {
         console.warn("[DB] 録音完了画面の読み込みに失敗しました", e);
@@ -79,7 +78,7 @@ export default function RecordCompleteScreen() {
         <View style={styles.checkCircle}>
           <Ionicons name="checkmark" size={36} color="#2fa84f" />
         </View>
-        <Text style={styles.heading}>録音を保存しました</Text>
+        <Text style={styles.heading}>記録が完了しました</Text>
         <Text style={styles.subheading}>
           {startedAt ? `${formatTime(startedAt)} 開始 ・ ${formatDuration(durationMs)}` : ""}
         </Text>
@@ -95,31 +94,33 @@ export default function RecordCompleteScreen() {
         />
 
         <View style={styles.countsRow}>
-          <View style={styles.countItem}>
-            <Ionicons name="star" size={16} color="#c98a00" />
-            <Text style={styles.countText}>{counts.star}</Text>
-          </View>
-          <View style={styles.countItem}>
-            <Ionicons name="checkmark-circle" size={16} color="#2fa84f" />
-            <Text style={styles.countText}>{counts.todo}</Text>
-          </View>
-          <View style={styles.countItem}>
-            <Ionicons name="help-circle" size={16} color="#7c4dff" />
-            <Text style={styles.countText}>{counts.question}</Text>
-          </View>
-          <View style={styles.countItem}>
-            <Ionicons name="camera" size={16} color="#57575c" />
-            <Text style={styles.countText}>{counts.photo}</Text>
-          </View>
+          {counts.star > 0 ? (
+            <View style={styles.countItem}>
+              <Ionicons name="star" size={16} color="#c98a00" />
+              <Text style={styles.countText}>{counts.star}</Text>
+            </View>
+          ) : null}
+          {counts.todo > 0 ? (
+            <View style={styles.countItem}>
+              <Ionicons name="checkmark-circle" size={16} color="#2fa84f" />
+              <Text style={styles.countText}>{counts.todo}</Text>
+            </View>
+          ) : null}
+          {counts.question > 0 ? (
+            <View style={styles.countItem}>
+              <Ionicons name="help-circle" size={16} color="#7c4dff" />
+              <Text style={styles.countText}>{counts.question}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
       <View style={styles.footer}>
         <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={handleViewNote}>
-          <Text style={styles.primaryButtonText}>ノートを見る</Text>
+          <Text style={styles.primaryButtonText}>今すぐ確認</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.7} onPress={handleClose}>
-          <Text style={styles.secondaryButtonText}>閉じる</Text>
+          <Text style={styles.secondaryButtonText}>あとで</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
