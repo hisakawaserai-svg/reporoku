@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Dimensions,
   Image,
   KeyboardAvoidingView,
@@ -37,6 +38,57 @@ const MODES: { key: DisplayMode; label: string }[] = [
   { key: "todo", label: "ToDo" },
   { key: "question", label: "質問" },
 ];
+
+// 検索クエリにマッチした部分を黄色マーカー風にハイライトする(ToDo/質問タブの検索結果用)。
+// クエリはtrigramトークナイザによる部分文字列一致で絞り込まれているため、単純なindexOfで
+// マッチ箇所を特定できる
+function HighlightedText({
+  text,
+  query,
+  style,
+  numberOfLines,
+}: {
+  text: string;
+  query?: string;
+  style?: any;
+  numberOfLines?: number;
+}) {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery) {
+    return (
+      <Text style={style} numberOfLines={numberOfLines}>
+        {text}
+      </Text>
+    );
+  }
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmedQuery.toLowerCase();
+  const parts: { text: string; matched: boolean }[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const idx = lowerText.indexOf(lowerQuery, cursor);
+    if (idx === -1) {
+      parts.push({ text: text.slice(cursor), matched: false });
+      break;
+    }
+    if (idx > cursor) parts.push({ text: text.slice(cursor, idx), matched: false });
+    parts.push({ text: text.slice(idx, idx + trimmedQuery.length), matched: true });
+    cursor = idx + trimmedQuery.length;
+  }
+  return (
+    <Text style={style} numberOfLines={numberOfLines}>
+      {parts.map((part, i) =>
+        part.matched ? (
+          <Text key={i} style={styles.searchHighlight}>
+            {part.text}
+          </Text>
+        ) : (
+          part.text
+        )
+      )}
+    </Text>
+  );
+}
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -210,8 +262,14 @@ function ItemFormModal({
         style={styles.answerPromptKeyboardAvoider}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Pressable style={styles.monthPickerOverlay} onPress={onCancel}>
+        <Pressable style={styles.quickAddOverlay} onPress={onCancel}>
           <Pressable style={styles.quickAddPanel} onPress={(e) => e.stopPropagation()}>
+            <View
+              style={[
+                styles.paperTape,
+                { backgroundColor: kind === "todo" ? "rgba(52,199,89,0.5)" : "rgba(175,82,222,0.55)" },
+              ]}
+            />
             <View style={styles.quickAddHeader}>
               <View
                 style={[
@@ -311,16 +369,20 @@ export default function NotesScreen() {
   const [quickAddAnswerDraft, setQuickAddAnswerDraft] = useState("");
   // ToDo/質問タブの行を長押しして開く選択肢メニュー。ノート詳細画面の長押しメニューと
   // レイアウトを揃えるため、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
-  type RowMenuKind = "todo" | "question";
+  type RowMenuKind = "todo" | "question" | "session";
   const [rowMenuAnchor, setRowMenuAnchor] = useState<{
     kind: RowMenuKind;
-    block: BlockWithSession;
+    block: BlockWithSession | SessionSummary;
     x: number;
     y: number;
     width: number;
     height: number;
   } | null>(null);
   const rowMenuRefs = useRef<Map<string, View>>(new Map());
+  // 長押しした行を、ノート詳細画面のopenBlockMenuと同じく付箋カード風のゴーストとして
+  // 少し拡大・傾けて表示するアニメーション
+  const rowMenuHighlightScale = useRef(new Animated.Value(1)).current;
+  const rowMenuHighlightTilt = useRef(new Animated.Value(0)).current;
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
@@ -410,17 +472,40 @@ export default function NotesScreen() {
     }
   };
 
-  // ToDo/質問タブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
+  // ToDo/質問/リストタブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
   // 同じく、対象行の画面上の実測座標を取得してその近くにメニューを表示する
-  const openRowMenu = (kind: RowMenuKind, block: BlockWithSession) => {
+  const openRowMenu = (kind: RowMenuKind, block: BlockWithSession | SessionSummary) => {
     const node = rowMenuRefs.current.get(block.id);
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
       setRowMenuAnchor({ kind, block, x, y, width, height });
+      rowMenuHighlightScale.setValue(1);
+      rowMenuHighlightTilt.setValue(0);
+      Animated.spring(rowMenuHighlightScale, {
+        toValue: 1.06,
+        friction: 4,
+        tension: 160,
+        useNativeDriver: true,
+      }).start();
+      Animated.spring(rowMenuHighlightTilt, {
+        toValue: 1,
+        friction: 4,
+        tension: 160,
+        useNativeDriver: true,
+      }).start();
     });
   };
 
-  const closeRowMenu = () => setRowMenuAnchor(null);
+  // 閉じる時も、拡大・傾きを元に戻すアニメーションを再生してから消す
+  const closeRowMenu = (after?: () => void) => {
+    Animated.parallel([
+      Animated.timing(rowMenuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }),
+      Animated.timing(rowMenuHighlightTilt, { toValue: 0, duration: 140, useNativeDriver: true }),
+    ]).start(() => {
+      setRowMenuAnchor(null);
+      after?.();
+    });
+  };
 
   // ToDoタブの長押し編集。既存の本文を初期値にする
   const startTodoEdit = (block: BlockWithSession) => {
@@ -682,7 +767,11 @@ export default function NotesScreen() {
         style={[styles.card, compact && styles.cardNoMargin]}
         activeOpacity={0.7}
         onPress={() => goToNote(session.id)}
-        onLongPress={() => confirmDeleteSession(session)}
+        onLongPress={() => openRowMenu("session", session)}
+        ref={(node) => {
+          if (node) rowMenuRefs.current.set(session.id, node);
+          else rowMenuRefs.current.delete(session.id);
+        }}
       >
         <View style={styles.cardBody}>
           <Text style={styles.cardTitle} numberOfLines={1}>
@@ -691,20 +780,28 @@ export default function NotesScreen() {
           <Text style={styles.cardMeta}>
             {formatTime(session.startedAt)} 開始 ・ {formatDuration(session.durationMs)}
           </Text>
-          <View style={styles.badgeRow}>
-            <View style={[styles.badge, styles.badgeStar]}>
-              <Text style={styles.badgeStarIcon}>★</Text>
-              <Text style={styles.badgeStarText}>{session.starCount}</Text>
+          {session.starCount > 0 || session.todoCount > 0 || session.questionCount > 0 ? (
+            <View style={styles.badgeRow}>
+              {session.starCount > 0 ? (
+                <View style={[styles.badge, styles.badgeStar]}>
+                  <Text style={styles.badgeStarIcon}>★</Text>
+                  <Text style={styles.badgeStarText}>{session.starCount}</Text>
+                </View>
+              ) : null}
+              {session.todoCount > 0 ? (
+                <View style={[styles.badge, styles.badgeTodo]}>
+                  <Text style={styles.badgeTodoIcon}>✓</Text>
+                  <Text style={styles.badgeTodoText}>{session.todoCount}</Text>
+                </View>
+              ) : null}
+              {session.questionCount > 0 ? (
+                <View style={[styles.badge, styles.badgeQuestion]}>
+                  <Text style={styles.badgeQuestionIcon}>?</Text>
+                  <Text style={styles.badgeQuestionText}>{session.questionCount}</Text>
+                </View>
+              ) : null}
             </View>
-            <View style={[styles.badge, styles.badgeTodo]}>
-              <Text style={styles.badgeTodoIcon}>✓</Text>
-              <Text style={styles.badgeTodoText}>{session.todoCount}</Text>
-            </View>
-            <View style={[styles.badge, styles.badgeQuestion]}>
-              <Text style={styles.badgeQuestionIcon}>?</Text>
-              <Text style={styles.badgeQuestionText}>{session.questionCount}</Text>
-            </View>
-          </View>
+          ) : null}
         </View>
         <View style={styles.thumbWrap}>
           {session.photoUri ? (
@@ -724,7 +821,7 @@ export default function NotesScreen() {
     );
   };
 
-  const renderTodoRow = (block: BlockWithSession) => (
+  const renderTodoRow = (block: BlockWithSession, highlightQuery?: string, showNoteMeta?: boolean) => (
     <TouchableOpacity
       key={block.id}
       style={styles.todoCard}
@@ -746,12 +843,16 @@ export default function NotesScreen() {
           color={block.todoDone ? "#34c759" : "#c7c7cc"}
         />
       </TouchableOpacity>
-      <Text
-        style={[styles.todoText, block.todoDone && styles.todoTextDone]}
-        numberOfLines={2}
-      >
-        {block.text}
-      </Text>
+      <View style={styles.questionTextCol}>
+        <HighlightedText
+          text={block.text ?? ""}
+          query={highlightQuery}
+          style={[styles.todoText, block.todoDone && styles.todoTextDone]}
+        />
+        {showNoteMeta ? (
+          <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
+        ) : null}
+      </View>
       <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
         <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
       </TouchableOpacity>
@@ -762,7 +863,7 @@ export default function NotesScreen() {
   // 行タップ=回答(A)の入力を開く(このタブの主目的)、右端の矢印タップ=該当ノートへ遷移
   // (独立したタップ領域)、長押し=選択肢メニュー。回答が付けば「解決済み」。
   // Q(発言テキスト)のみ/Q+A(question_termを回答として転用)の2パターンを表示する
-  const renderQuestionRow = (block: BlockWithSession) => {
+  const renderQuestionRow = (block: BlockWithSession, highlightQuery?: string, showNoteMeta?: boolean) => {
     const answer = block.questionTerm?.trim();
     const resolved = !!answer;
     return (
@@ -777,19 +878,24 @@ export default function NotesScreen() {
           else rowMenuRefs.current.delete(block.id);
         }}
       >
-        <Ionicons
-          name={resolved ? "checkmark-circle" : "help-circle-outline"}
-          size={22}
-          color={resolved ? "#34c759" : "#7c4dff"}
-        />
+        <View style={[styles.questionIconBadge, resolved ? styles.questionIconBadgeResolved : styles.questionIconBadgeOpen]}>
+          {resolved ? (
+            <Ionicons name="checkmark" size={16} color="#1f9254" />
+          ) : (
+            <Text style={styles.questionIconBadgeText}>?</Text>
+          )}
+        </View>
         <View style={styles.questionTextCol}>
-          <Text style={styles.todoText} numberOfLines={2}>
-            Q: {block.text}
+          <Text style={styles.todoText}>
+            Q: <HighlightedText text={block.text ?? ""} query={highlightQuery} />
           </Text>
           {resolved ? (
-            <Text style={styles.questionAnswerPreview} numberOfLines={2}>
-              A: {answer}
+            <Text style={styles.questionAnswerPreview}>
+              A: <HighlightedText text={answer} query={highlightQuery} />
             </Text>
+          ) : null}
+          {showNoteMeta ? (
+            <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
           ) : null}
         </View>
         <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
@@ -799,75 +905,88 @@ export default function NotesScreen() {
     );
   };
 
-  // ToDo/質問タブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
+  // ToDo/質問/リストタブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
   // 横並び行)と同じ形にする
   type RowMenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
   const rowMenuItems: RowMenuItem[] = !rowMenuAnchor
     ? []
     : rowMenuAnchor.kind === "todo"
-    ? [
-        {
-          key: "edit",
-          label: "編集",
-          icon: "create-outline",
-          color: "#8e8e93",
-          onPress: () => {
-            closeRowMenu();
-            startTodoEdit(rowMenuAnchor.block);
+    ? (() => {
+        const block = rowMenuAnchor.block as BlockWithSession;
+        return [
+          {
+            key: "edit",
+            label: "編集",
+            icon: "create-outline" as IconName,
+            color: "#8e8e93",
+            onPress: () => closeRowMenu(() => startTodoEdit(block)),
           },
-        },
-        {
-          key: "toggleDone",
-          label: rowMenuAnchor.block.todoDone ? "未対応に戻す" : "完了にする",
-          icon: "checkmark-done-outline",
-          color: "#1f9254",
-          onPress: () => {
-            closeRowMenu();
-            blocksRepo.toggleTodoDone(rowMenuAnchor.block.id).then(loadTodos);
+          {
+            key: "toggleDone",
+            label: block.todoDone ? "未対応に戻す" : "完了にする",
+            icon: "checkmark-done-outline" as IconName,
+            color: "#1f9254",
+            onPress: () => closeRowMenu(() => blocksRepo.toggleTodoDone(block.id).then(loadTodos)),
           },
-        },
-        {
-          key: "open",
-          label: "ノートを開く",
-          icon: "open-outline",
-          color: "#06c",
-          onPress: () => {
-            closeRowMenu();
-            goToBlock(rowMenuAnchor.block);
+          {
+            key: "open",
+            label: "ノートを開く",
+            icon: "open-outline" as IconName,
+            color: "#06c",
+            onPress: () => closeRowMenu(() => goToBlock(block)),
           },
-        },
-      ]
-    : [
-        {
-          key: "answer",
-          label: rowMenuAnchor.block.questionTerm?.trim() ? "回答を編集" : "回答を記入",
-          icon: "chatbubble-ellipses-outline",
-          color: "#7c4dff",
-          onPress: () => {
-            closeRowMenu();
-            startAnswerPrompt(rowMenuAnchor.block);
+        ];
+      })()
+    : rowMenuAnchor.kind === "question"
+    ? (() => {
+        const block = rowMenuAnchor.block as BlockWithSession;
+        return [
+          {
+            key: "answer",
+            label: block.questionTerm?.trim() ? "回答を編集" : "回答を記入",
+            icon: "chatbubble-ellipses-outline" as IconName,
+            color: "#7c4dff",
+            onPress: () => closeRowMenu(() => startAnswerPrompt(block)),
           },
-        },
-        {
-          key: "open",
-          label: "ノートを開く",
-          icon: "open-outline",
-          color: "#06c",
-          onPress: () => {
-            closeRowMenu();
-            goToBlock(rowMenuAnchor.block);
+          {
+            key: "open",
+            label: "ノートを開く",
+            icon: "open-outline" as IconName,
+            color: "#06c",
+            onPress: () => closeRowMenu(() => goToBlock(block)),
           },
-        },
-      ];
+        ];
+      })()
+    : (() => {
+        const session = rowMenuAnchor.block as SessionSummary;
+        return [
+          {
+            key: "open",
+            label: "ノートを開く",
+            icon: "open-outline" as IconName,
+            color: "#06c",
+            onPress: () => closeRowMenu(() => goToNote(session.id)),
+          },
+          {
+            key: "delete",
+            label: "削除",
+            icon: "trash-outline" as IconName,
+            color: "#ff3b30",
+            onPress: () => closeRowMenu(() => confirmDeleteSession(session)),
+          },
+        ];
+      })();
 
   // メニューの位置決め。ノート詳細画面のmenuList位置計算と同じロジック
   // (吹き出しが画面外にはみ出さないよう、上下どちらに表示するかを空きスペースで判定する)
   const ROW_MENU_ITEM_HEIGHT = 44;
-  const ROW_MENU_GAP = 8;
+  // ゴーストカードが少し傾いているため、その分だけ余分に隙間を空けてメニューと被らないようにする
+  const ROW_MENU_GAP = 13;
   const ROW_MENU_WIDTH = 220;
   const ROW_MENU_SCREEN_MARGIN = 40;
   let rowMenuTop = 0;
   let rowMenuLeft = 0;
+  let rowMenuHighlightTop = 0;
   if (rowMenuAnchor) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
@@ -882,7 +1001,31 @@ export default function NotesScreen() {
     const maxTop = windowHeight - menuHeight - ROW_MENU_SCREEN_MARGIN;
     rowMenuTop = Math.max(minTop, Math.min(rowMenuTop, maxTop));
     rowMenuLeft = Math.max(16, Math.min(rowMenuAnchor.x, windowWidth - ROW_MENU_WIDTH - 16));
+    rowMenuHighlightTop = Math.max(
+      ROW_MENU_SCREEN_MARGIN,
+      Math.min(rowMenuAnchor.y, windowHeight - rowMenuAnchor.height - ROW_MENU_SCREEN_MARGIN)
+    );
   }
+
+  // ToDo/質問タブの区分見出し。パステルのピル+件数で表示し、タップで開閉する
+  const renderStatusHeader = (
+    key: string,
+    label: string,
+    count: number,
+    pillStyle: object,
+    pillTextStyle: object
+  ) => (
+    <TouchableOpacity
+      style={styles.statusHeaderRow}
+      activeOpacity={0.6}
+      onPress={() => toggleGroupCollapsed(key)}
+    >
+      <View style={[styles.statusHeaderPill, pillStyle]}>
+        <Text style={[styles.statusHeaderPillText, pillTextStyle]}>{label}</Text>
+      </View>
+      <Text style={styles.statusHeaderCount}>{count}件</Text>
+    </TouchableOpacity>
+  );
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
@@ -892,6 +1035,19 @@ export default function NotesScreen() {
 
   // リスト/カレンダータブの検索結果行。ヒットしたセッション単位でまとめて表示するため
   // (renderNoteGroupHeaderが見出しを出す)、ここでは行ごとのスニペットのみを表示する
+  // blocks.tsのsearch()がsnippet(blocks_fts, -1, '[', ']', ...)でマッチ箇所を'['']'で
+  // 囲んで返してくるので、それを解析してToDo/質問タブと同じ黄色マーカー型ハイライトで表示する
+  const renderSnippet = (snippet: string) =>
+    snippet.split(/(\[[^\]]*\])/g).map((part, i) =>
+      part.startsWith("[") && part.endsWith("]") ? (
+        <Text key={i} style={styles.searchHighlight}>
+          {part.slice(1, -1)}
+        </Text>
+      ) : (
+        part
+      )
+    );
+
   const renderSearchRow = (result: SearchResult) => (
     <TouchableOpacity
       key={result.id}
@@ -899,7 +1055,7 @@ export default function NotesScreen() {
       activeOpacity={0.7}
       onPress={() => goToBlock(result)}
     >
-      <Text style={styles.searchSnippet}>{result.snippet}</Text>
+      <Text style={styles.searchSnippet}>{renderSnippet(result.snippet)}</Text>
     </TouchableOpacity>
   );
 
@@ -958,9 +1114,9 @@ export default function NotesScreen() {
                 <View key={group.sessionId}>
                   {renderNoteGroupHeader(group)}
                   {mode === "todo"
-                    ? (group.items as BlockWithSession[]).map(renderTodoRow)
+                    ? (group.items as BlockWithSession[]).map((b) => renderTodoRow(b, trimmedQuery))
                     : mode === "question"
-                    ? (group.items as BlockWithSession[]).map(renderQuestionRow)
+                    ? (group.items as BlockWithSession[]).map((b) => renderQuestionRow(b, trimmedQuery))
                     : (group.items as SearchResult[]).map(renderSearchRow)}
                 </View>
               ))
@@ -976,12 +1132,20 @@ export default function NotesScreen() {
                     <Text style={styles.placeholderText}>まだ記録がありません</Text>
                   </View>
                 ) : (
-                  monthGroups.map((group) => (
-                    <View key={group.monthKey}>
-                      <Text style={styles.sectionHeader}>{formatMonthKey(group.monthKey)}</Text>
-                      {group.items.map((session) => renderCard(session))}
-                    </View>
-                  ))
+                  monthGroups.map((group) => {
+                    const [year, month] = group.monthKey.split("-");
+                    return (
+                      <View key={group.monthKey}>
+                        <View style={styles.monthHeaderRow}>
+                          <View style={styles.monthHeaderPill}>
+                            <Text style={styles.monthHeaderPillText}>{Number(month)}月</Text>
+                          </View>
+                          <Text style={styles.monthHeaderYear}>{year}年</Text>
+                        </View>
+                        {group.items.map((session) => renderCard(session))}
+                      </View>
+                    );
+                  })
                 )}
               </View>
             )}
@@ -1050,13 +1214,20 @@ export default function NotesScreen() {
                 </View>
 
                 <View style={styles.calSelectedSection}>
-                  <Text style={styles.sectionHeader}>
-                    {selectedDateKey
-                      ? `${Number(selectedDateKey.split("-")[1])}月${Number(
-                          selectedDateKey.split("-")[2]
-                        )}日(${formatWeekdayLabel(selectedDateKey)})`
-                      : "日付を選択してください"}
-                  </Text>
+                  {selectedDateKey ? (
+                    <View style={styles.dayHeaderRow}>
+                      <View style={styles.dayHeaderPill}>
+                        <Text style={styles.dayHeaderPillText}>
+                          {Number(selectedDateKey.split("-")[2])}日
+                        </Text>
+                      </View>
+                      <Text style={styles.dayHeaderWeekday}>
+                        {formatWeekdayLabel(selectedDateKey)}曜日
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.sectionHeader}>日付を選択してください</Text>
+                  )}
                   {selectedDateKey && !selectedDayGroup ? (
                     <View style={styles.placeholder}>
                       <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
@@ -1092,43 +1263,29 @@ export default function NotesScreen() {
                   </View>
                 ) : (
                   <>
-                    <TouchableOpacity
-                      style={styles.sectionHeaderRow}
-                      activeOpacity={0.6}
-                      onPress={() => toggleGroupCollapsed("todo-pending")}
-                    >
-                      <Text style={styles.sectionHeader}>
-                        {collapsedGroupKeys.has("todo-pending") ? "▶" : "▼"} 未対応 ・ {todos.pending.length}件
-                      </Text>
-                    </TouchableOpacity>
+                    {renderStatusHeader(
+                      "todo-pending",
+                      "未対応",
+                      todos.pending.length,
+                      styles.statusPillTodo,
+                      styles.statusPillTextTodo
+                    )}
                     {collapsedGroupKeys.has("todo-pending") ? null : todos.pending.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      groupBySession(todos.pending).map((group) => (
-                        <View key={group.sessionId}>
-                          {renderNoteGroupHeader(group)}
-                          {group.items.map(renderTodoRow)}
-                        </View>
-                      ))
+                      todos.pending.map((b) => renderTodoRow(b, undefined, true))
                     )}
-                    <TouchableOpacity
-                      style={styles.sectionHeaderRow}
-                      activeOpacity={0.6}
-                      onPress={() => toggleGroupCollapsed("todo-done")}
-                    >
-                      <Text style={styles.sectionHeader}>
-                        {collapsedGroupKeys.has("todo-done") ? "▶" : "▼"} 完了 ・ {todos.done.length}件
-                      </Text>
-                    </TouchableOpacity>
+                    {renderStatusHeader(
+                      "todo-done",
+                      "完了",
+                      todos.done.length,
+                      styles.statusPillDone,
+                      styles.statusPillTextDone
+                    )}
                     {collapsedGroupKeys.has("todo-done") ? null : todos.done.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      groupBySession(todos.done).map((group) => (
-                        <View key={group.sessionId}>
-                          {renderNoteGroupHeader(group)}
-                          {group.items.map(renderTodoRow)}
-                        </View>
-                      ))
+                      todos.done.map((b) => renderTodoRow(b, undefined, true))
                     )}
                   </>
                 )}
@@ -1144,46 +1301,30 @@ export default function NotesScreen() {
                   </View>
                 ) : (
                   <>
-                    <TouchableOpacity
-                      style={styles.sectionHeaderRow}
-                      activeOpacity={0.6}
-                      onPress={() => toggleGroupCollapsed("question-unresolved")}
-                    >
-                      <Text style={styles.sectionHeader}>
-                        {collapsedGroupKeys.has("question-unresolved") ? "▶" : "▼"} 未解決 ・{" "}
-                        {unresolvedQuestions.length}件
-                      </Text>
-                    </TouchableOpacity>
+                    {renderStatusHeader(
+                      "question-unresolved",
+                      "未解決",
+                      unresolvedQuestions.length,
+                      styles.statusPillQuestion,
+                      styles.statusPillTextQuestion
+                    )}
                     {collapsedGroupKeys.has("question-unresolved") ? null : unresolvedQuestions.length ===
                       0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      groupBySession(unresolvedQuestions).map((group) => (
-                        <View key={group.sessionId}>
-                          {renderNoteGroupHeader(group)}
-                          {group.items.map(renderQuestionRow)}
-                        </View>
-                      ))
+                      unresolvedQuestions.map((b) => renderQuestionRow(b, undefined, true))
                     )}
-                    <TouchableOpacity
-                      style={styles.sectionHeaderRow}
-                      activeOpacity={0.6}
-                      onPress={() => toggleGroupCollapsed("question-resolved")}
-                    >
-                      <Text style={styles.sectionHeader}>
-                        {collapsedGroupKeys.has("question-resolved") ? "▶" : "▼"} 解決済み ・{" "}
-                        {resolvedQuestions.length}件
-                      </Text>
-                    </TouchableOpacity>
+                    {renderStatusHeader(
+                      "question-resolved",
+                      "解決済み",
+                      resolvedQuestions.length,
+                      styles.statusPillDone,
+                      styles.statusPillTextDone
+                    )}
                     {collapsedGroupKeys.has("question-resolved") ? null : resolvedQuestions.length === 0 ? (
                       <Text style={styles.emptyGroupText}>なし</Text>
                     ) : (
-                      groupBySession(resolvedQuestions).map((group) => (
-                        <View key={group.sessionId}>
-                          {renderNoteGroupHeader(group)}
-                          {group.items.map(renderQuestionRow)}
-                        </View>
-                      ))
+                      resolvedQuestions.map((b) => renderQuestionRow(b, undefined, true))
                     )}
                   </>
                 )}
@@ -1234,21 +1375,108 @@ export default function NotesScreen() {
         onConfirm={confirmTodoEdit}
       />
 
-      <Modal visible={rowMenuAnchor !== null} animationType="fade" transparent onRequestClose={closeRowMenu}>
-        <Pressable style={styles.rowMenuOverlay} onPress={closeRowMenu}>
+      <Modal
+        visible={rowMenuAnchor !== null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => closeRowMenu()}
+      >
+        <Pressable style={styles.rowMenuOverlay} onPress={() => closeRowMenu()}>
           {rowMenuAnchor ? (
-            <View style={[styles.rowMenuList, { top: rowMenuTop, left: rowMenuLeft, width: ROW_MENU_WIDTH }]}>
-              {rowMenuItems.map((item, index) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.rowMenuItem, index > 0 && styles.rowMenuItemDivider]}
-                  onPress={item.onPress}
-                >
-                  <Text style={styles.rowMenuItemText}>{item.label}</Text>
-                  <Ionicons name={item.icon} size={18} color={item.color} />
-                </TouchableOpacity>
-              ))}
-            </View>
+            <>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.rowMenuHighlight,
+                  {
+                    top: rowMenuHighlightTop,
+                    left: rowMenuAnchor.x,
+                    width: rowMenuAnchor.width,
+                    minHeight: rowMenuAnchor.height,
+                    transform: [
+                      { scale: rowMenuHighlightScale },
+                      {
+                        rotate: rowMenuHighlightTilt.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0deg", "-2.4deg"],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.paperTape,
+                    {
+                      backgroundColor:
+                        rowMenuAnchor.kind === "question"
+                          ? "rgba(175,82,222,0.55)"
+                          : "rgba(52,199,89,0.5)",
+                    },
+                  ]}
+                />
+                {rowMenuAnchor.kind === "todo" ? <View style={styles.rowMenuAccentBar} /> : null}
+                {rowMenuAnchor.kind === "session" ? (
+                  <View>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {noteDisplayTitle(rowMenuAnchor.block as SessionSummary)}
+                    </Text>
+                    <Text style={styles.cardMeta}>
+                      {formatTime((rowMenuAnchor.block as SessionSummary).startedAt)} 開始 ・{" "}
+                      {formatDuration((rowMenuAnchor.block as SessionSummary).durationMs)}
+                    </Text>
+                    <View style={styles.badgeRow}>
+                      <View style={[styles.badge, styles.badgeStar]}>
+                        <Text style={styles.badgeStarIcon}>★</Text>
+                        <Text style={styles.badgeStarText}>
+                          {(rowMenuAnchor.block as SessionSummary).starCount}
+                        </Text>
+                      </View>
+                      <View style={[styles.badge, styles.badgeTodo]}>
+                        <Text style={styles.badgeTodoIcon}>✓</Text>
+                        <Text style={styles.badgeTodoText}>
+                          {(rowMenuAnchor.block as SessionSummary).todoCount}
+                        </Text>
+                      </View>
+                      <View style={[styles.badge, styles.badgeQuestion]}>
+                        <Text style={styles.badgeQuestionIcon}>?</Text>
+                        <Text style={styles.badgeQuestionText}>
+                          {(rowMenuAnchor.block as SessionSummary).questionCount}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : rowMenuAnchor.kind === "question" ? (
+                  <View>
+                    <Text style={styles.rowMenuHighlightText} numberOfLines={4}>
+                      Q: {(rowMenuAnchor.block as BlockWithSession).text}
+                    </Text>
+                    {(rowMenuAnchor.block as BlockWithSession).questionTerm?.trim() ? (
+                      <Text style={styles.questionAnswerPreview} numberOfLines={4}>
+                        A: {(rowMenuAnchor.block as BlockWithSession).questionTerm}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <Text style={styles.rowMenuHighlightText} numberOfLines={4}>
+                    {(rowMenuAnchor.block as BlockWithSession).text}
+                  </Text>
+                )}
+              </Animated.View>
+              <View style={[styles.rowMenuList, { top: rowMenuTop, left: rowMenuLeft, width: ROW_MENU_WIDTH }]}>
+                {rowMenuItems.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.rowMenuItem, index > 0 && styles.rowMenuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <Text style={styles.rowMenuItemText}>{item.label}</Text>
+                    <Ionicons name={item.icon} size={18} color={item.color} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
           ) : null}
         </Pressable>
       </Modal>
@@ -1398,6 +1626,30 @@ const styles = StyleSheet.create({
   // ToDo/質問タブの長押しメニュー。ノート詳細画面のmenuOverlay/menuList/menuItemと
   // 同じ見た目(丸角カード+区切り線付きの行)に揃える
   rowMenuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
+  // 長押しメニュー表示中のゴーストカード。iOS純正の白背景+テープ+わずかな傾きで
+  // 「持ち上げた」感を出す
+  rowMenuHighlight: {
+    position: "absolute",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  rowMenuHighlightText: { fontSize: 15, color: "#1c1c1e" },
+  rowMenuAccentBar: {
+    position: "absolute",
+    left: 0,
+    top: 12,
+    bottom: 12,
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: "#34C759",
+  },
   rowMenuList: {
     position: "absolute",
     backgroundColor: "#fff",
@@ -1427,12 +1679,51 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginTop: 16,
   },
+  // リストタブの月見出し(マステ風): 月をパステルのピルで強調し、年は控えめに添える
+  monthHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  // マスキングテープ風に、角の丸みを抑えて少し傾ける
+  monthHeaderPill: {
+    backgroundColor: "#dcebfd",
+    borderRadius: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    transform: [{ rotate: "-3deg" }],
+  },
+  monthHeaderPillText: { fontSize: 13, fontWeight: "700", color: "#1c1c1e" },
+  monthHeaderYear: { fontSize: 13, color: "#8e8e93" },
   emptyGroupText: {
     fontSize: 13,
     color: "#c7c7cc",
     marginHorizontal: 16,
     marginBottom: 8,
   },
+  // ToDo/質問タブの区分見出し(パステルピル+件数)
+  statusHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  statusHeaderPill: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  statusHeaderPillText: { fontSize: 13, fontWeight: "700" },
+  statusHeaderCount: { fontSize: 13, color: "#8e8e93" },
+  statusPillTodo: { backgroundColor: "#e0f7e6" },
+  statusPillTextTodo: { color: "#1f9254" },
+  statusPillQuestion: { backgroundColor: "#f2e8fc" },
+  statusPillTextQuestion: { color: "#7c4dff" },
+  statusPillDone: { backgroundColor: "#e5e5ea" },
+  statusPillTextDone: { color: "#636366" },
+  // ToDo/質問カードの下に添える、所属ノートのタイトル
+  cardSubMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
 
   // ノートカード(リスト・カレンダー共通)
   card: {
@@ -1452,24 +1743,25 @@ const styles = StyleSheet.create({
   cardBody: { flex: 1, justifyContent: "center" },
   cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
   cardMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
-  badgeRow: { flexDirection: "row", gap: 6, marginTop: 8 },
+  badgeRow: { flexDirection: "row", gap: 7, marginTop: 8 },
+  // ぷっくりパステルバッジ: 完全な丸みと余裕のあるパディングで「ぷっくり」感を出す
   badge: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     gap: 3,
   },
   badgeStar: { backgroundColor: "#fdf0dc" },
-  badgeStarIcon: { fontSize: 11, color: "#d98c00" },
-  badgeStarText: { fontSize: 11, color: "#d98c00", fontWeight: "600" },
+  badgeStarIcon: { fontSize: 12, color: "#d98c00" },
+  badgeStarText: { fontSize: 12, color: "#d98c00", fontWeight: "700" },
   badgeTodo: { backgroundColor: "#e0f7e6" },
-  badgeTodoIcon: { fontSize: 11, color: "#1f9254" },
-  badgeTodoText: { fontSize: 11, color: "#1f9254", fontWeight: "600" },
+  badgeTodoIcon: { fontSize: 12, color: "#1f9254" },
+  badgeTodoText: { fontSize: 12, color: "#1f9254", fontWeight: "700" },
   badgeQuestion: { backgroundColor: "#f2e8fc" },
-  badgeQuestionIcon: { fontSize: 11, color: "#7c4dff", fontWeight: "700" },
-  badgeQuestionText: { fontSize: 11, color: "#7c4dff", fontWeight: "600" },
+  badgeQuestionIcon: { fontSize: 12, color: "#7c4dff", fontWeight: "700" },
+  badgeQuestionText: { fontSize: 12, color: "#7c4dff", fontWeight: "700" },
 
   cardNoMargin: { marginHorizontal: 0 },
 
@@ -1520,6 +1812,24 @@ const styles = StyleSheet.create({
   calCellDot: { width: 4, height: 4, borderRadius: 2, marginTop: 3, backgroundColor: "transparent" },
   calCellDotVisible: { backgroundColor: "#06c" },
   calSelectedSection: { marginTop: 4 },
+  // 選択日の見出し。日付はマスキングテープ風に少し傾けたピルで強調し、曜日は控えめに添える
+  dayHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  dayHeaderPill: {
+    backgroundColor: "#dcebfd",
+    borderRadius: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    transform: [{ rotate: "-3deg" }],
+  },
+  dayHeaderPillText: { fontSize: 13, fontWeight: "700", color: "#1c1c1e" },
+  dayHeaderWeekday: { fontSize: 13, color: "#8e8e93" },
 
   // 選択日の時間軸アジェンダ(時刻バッジ+縦の連結線)
   timeRow: { flexDirection: "row", marginHorizontal: 16, marginBottom: 10 },
@@ -1565,15 +1875,39 @@ const styles = StyleSheet.create({
   },
   answerPromptKeyboardAvoider: { flex: 1, justifyContent: "flex-end" },
 
-  // クイック追加(ToDo/質問タブの「+」)のパネル。アイコンバッジ付きヘッダー+
-  // 下線入力+丸型保存ボタンのカード型レイアウト
+  // クイック追加(ToDo/質問タブの「+」)のパネル。付箋(マスキングテープ)型で
+  // 画面中央にわずかに傾けて浮かせる。アイコンバッジ付きヘッダー+下線入力+丸型保存ボタン
+  quickAddOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   quickAddPanel: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: "#FDF9F0",
+    borderRadius: 18,
+    width: "85%",
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 28,
+    paddingTop: 24,
+    paddingBottom: 24,
+    transform: [{ rotate: "-1.8deg" }],
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  // カード上端中央に貼ったマスキングテープ(NoteDetailScreenの付箋カードと同じ見た目)
+  paperTape: {
+    position: "absolute",
+    top: -9,
+    left: "50%",
+    width: 56,
+    height: 18,
+    marginLeft: -28,
+    borderRadius: 2,
+    transform: [{ rotate: "-3deg" }],
+    zIndex: 2,
   },
   quickAddHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22 },
   quickAddIconBadge: {
@@ -1680,6 +2014,17 @@ const styles = StyleSheet.create({
   todoTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
   questionTextCol: { flex: 1 },
   questionAnswerPreview: { fontSize: 12, color: "#34c759", marginTop: 3 },
+  // 質問タブの丸バッジアイコン(未解決=紫の?、解決済み=緑のチェック)
+  questionIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  questionIconBadgeOpen: { backgroundColor: "#f2e8fc" },
+  questionIconBadgeResolved: { backgroundColor: "#e0f7e6" },
+  questionIconBadgeText: { fontSize: 15, fontWeight: "700", color: "#7c4dff" },
 
   // 検索結果
   searchRow: {
@@ -1689,6 +2034,17 @@ const styles = StyleSheet.create({
     borderBottomColor: "#e5e5ea",
   },
   searchSnippet: { fontSize: 15, color: "#1c1c1e", marginTop: 3 },
+  // 黄色マーカー型ハイライト(背景色でハイライト)
+  // 手書きマーカー型ハイライト。RNのTextはclip-pathに対応しないため、平行四辺形の
+  // 代わりにborderRadiusを非対称にして「なぞった線」らしい不揃いさを出す
+  searchHighlight: {
+    backgroundColor: "#FFD873",
+    borderTopLeftRadius: 1,
+    borderBottomRightRadius: 1,
+    borderTopRightRadius: 6,
+    borderBottomLeftRadius: 6,
+    paddingHorizontal: 1,
+  },
 
   placeholder: {
     alignItems: "center",

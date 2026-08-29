@@ -231,6 +231,7 @@ export default function NoteDetailScreen() {
   // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
   // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
   const menuHighlightScale = useRef(new Animated.Value(1)).current;
+  const menuHighlightTilt = useRef(new Animated.Value(0)).current;
   const jumpedBlockIdRef = useRef<string | null>(null);
   // ブロックをタップして再生開始した直後は、そのブロックは既に画面内に見えている
   // (タップできたのだから)ため、自動追従スクロールで無駄に画面をそのブロックの
@@ -437,8 +438,15 @@ export default function NoteDetailScreen() {
     node.measureInWindow((x, y, width, height) => {
       setMenuAnchor({ blockId: block.id, x, y, width, height });
       menuHighlightScale.setValue(1);
+      menuHighlightTilt.setValue(0);
       Animated.spring(menuHighlightScale, {
         toValue: 1.08,
+        friction: 4,
+        tension: 160,
+        useNativeDriver: true,
+      }).start();
+      Animated.spring(menuHighlightTilt, {
+        toValue: 1,
         friction: 4,
         tension: 160,
         useNativeDriver: true,
@@ -446,7 +454,13 @@ export default function NoteDetailScreen() {
     });
   };
 
-  const closeBlockMenu = () => setMenuAnchor(null);
+  // 閉じる時も、拡大・傾きを元に戻すアニメーションを再生してから消す
+  const closeBlockMenu = () => {
+    Animated.parallel([
+      Animated.timing(menuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }),
+      Animated.timing(menuHighlightTilt, { toValue: 0, duration: 140, useNativeDriver: true }),
+    ]).start(() => setMenuAnchor(null));
+  };
 
   // 「↓ 新着N件」バッジをタップしたときの再開。自動追従を再開するだけで、実際のスクロールは
   // activeBlockId/scrollPausedを見ているuseEffect(下記)がまとめて行う
@@ -1130,7 +1144,8 @@ export default function NoteDetailScreen() {
   // 浮き上がって見えるようにする(プレビュー用に余分な余白は足さない)
   const MENU_ROW_HEIGHT = 44;
   const MENU_ATTR_ROW_HEIGHT = 48;
-  const MENU_GAP = 10;
+  // ゴーストカードが少し傾いているため、その分だけ余分に隙間を空けてメニューと被らないようにする
+  const MENU_GAP = 28;
   const MENU_WIDTH = 230;
   const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
   let menuListTop = 0;
@@ -1280,9 +1295,12 @@ export default function NoteDetailScreen() {
                   activeOpacity={0.6}
                   onPress={() => toggleSectionCollapsed(group.key)}
                 >
-                  <Text style={styles.sectionHeader}>
-                    {isCollapsed ? "▶" : "▼"} セクション{groupIndex + 1} ({formatSectionRange(group.blocks, session)})
-                  </Text>
+                  <View style={styles.sectionHeaderPillRow}>
+                    <View style={styles.sectionHeaderPill}>
+                      <Text style={styles.sectionHeaderPillText}>セクション{groupIndex + 1}</Text>
+                    </View>
+                    <Text style={styles.sectionHeaderMeta}>{formatSectionRange(group.blocks, session)}</Text>
+                  </View>
                 </TouchableOpacity>
               ) : null}
               {isCollapsed
@@ -1290,22 +1308,12 @@ export default function NoteDetailScreen() {
                 : group.blocks.map((block, blockIndex) => {
                 const badges = activeBadges(block);
                 const dotColor = badges[0]?.color ?? UNMARKED_DOT_COLOR;
-                // ブロック同士を縦線でつなぐ。この線は同じセクション(グループ)内でのみ
-                // つながり、セクションの先頭/末尾では途切れる。将来、発言間の秒数に応じて
-                // セクション(グループ)をさらに細かく分ける予定のため、線の有無は
-                // 常にこのグループ境界(groupByGapの結果)に追従させる
                 const hasLineBelow = blockIndex < group.blocks.length - 1;
-                // 「間」が短いほど、同じ段落として行間を詰めて自然に繋げて見せる
-                // (セクション分けをオフにしている時は、フラットな時系列リストにするため計算しない)
-                const spacing = sectionGroupingEnabled
-                  ? rowSpacingFor(group.blocks[blockIndex - 1], block)
-                  : "line";
                 return (
                   <Fragment key={block.id}>
                   <TouchableOpacity
                     style={[
                       styles.timelineRow,
-                      spacing === "paragraph" && styles.timelineRowParagraph,
                       block.id === activeBlockId && styles.timelineRowActive,
                       block.id === jumpToBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
@@ -1511,28 +1519,29 @@ export default function NoteDetailScreen() {
                     left: menuAnchor.x,
                     width: menuAnchor.width,
                     minHeight: menuAnchor.height,
-                    transform: [{ scale: menuHighlightScale }],
+                    transform: [
+                      { scale: menuHighlightScale },
+                      {
+                        rotate: menuHighlightTilt.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0deg", "-2.4deg"],
+                        }),
+                      },
+                    ],
                   },
                 ]}
               >
-                <View style={styles.timelineDotCol}>
-                  <View style={styles.timelineDotWrap}>
-                    {menuBlockBadges.length > 1 ? (
-                      <View style={styles.timelineDotStack}>
-                        {menuBlockBadges.map((b) => (
-                          <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
-                        ))}
-                      </View>
-                    ) : (
-                      <View
-                        style={[
-                          styles.timelineDot,
-                          { backgroundColor: menuBlockBadges[0]?.color ?? UNMARKED_DOT_COLOR },
-                        ]}
-                      />
-                    )}
-                  </View>
-                </View>
+                <View
+                  style={[
+                    styles.paperTape,
+                    {
+                      backgroundColor: menuBlock.isQuestion
+                        ? "rgba(175,82,222,0.55)"
+                        : "rgba(52,199,89,0.5)",
+                    },
+                  ]}
+                />
+                {menuBlock.isTodo ? <View style={styles.timelineAccentBar} /> : null}
                 <View style={styles.timelineBody}>
                   <View style={styles.timelineMetaRow}>
                     <Text style={styles.timelineTime}>
@@ -1659,8 +1668,9 @@ export default function NoteDetailScreen() {
           style={styles.promptKeyboardAvoider}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable style={styles.debugOverlay} onPress={cancelMemoPrompt}>
-            <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={styles.memoPromptOverlay} onPress={cancelMemoPrompt}>
+            <Pressable style={styles.memoPromptPanel} onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.paperTape, { backgroundColor: "rgba(52,199,89,0.5)" }]} />
               <Text style={styles.promptTitle}>メモ</Text>
               <TextInput
                 style={[styles.promptInput, styles.promptInputMultiline]}
@@ -1851,7 +1861,8 @@ function SectionGapSlider({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff" },
+  // 無印の吹き出し(白背景)が浮いて見えるよう、画面全体はNotesScreenと同じ薄いグレーにする
+  container: { flex: 1, backgroundColor: "#f2f2f7" },
 
   topBar: {
     flexDirection: "row",
@@ -1964,6 +1975,22 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 6,
   },
+  // セクション見出し(縦軸ライン型): 番号をパステルピルで強調し、時間範囲は控えめに添える
+  sectionHeaderPillRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  sectionHeaderPill: {
+    backgroundColor: "#dcebfd",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  sectionHeaderPillText: { fontSize: 13, fontWeight: "700", color: "#1c1c1e" },
+  sectionHeaderMeta: { fontSize: 13, color: "#8e8e93" },
   timelineRow: {
     flexDirection: "row",
     alignItems: "stretch",
@@ -1982,6 +2009,29 @@ const styles = StyleSheet.create({
   timelineDot: { width: 6, height: 6, borderRadius: 3 },
   // ★/ToDo/❓が複数付いている場合、1色に代表させず全部の色を小さく積んで見せる
   timelineDotStack: { gap: 2, alignItems: "center" },
+  // 長押しメニュー表示中のゴーストカード(menuHighlight)専用。上端中央に貼った
+  // マスキングテープ。❓は紫、それ以外(通常メモ/ToDo)は緑
+  paperTape: {
+    position: "absolute",
+    top: -9,
+    left: "50%",
+    width: 56,
+    height: 18,
+    marginLeft: -28,
+    borderRadius: 2,
+    transform: [{ rotate: "-3deg" }],
+    zIndex: 2,
+  },
+  // ToDoブロックだけ左端に付くアクセントバー
+  timelineAccentBar: {
+    position: "absolute",
+    left: 0,
+    top: 12,
+    bottom: 12,
+    width: 4,
+    borderRadius: 2,
+    backgroundColor: "#34C759",
+  },
   timelineBody: { flex: 1 },
   timelineMetaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 },
   timelineTime: { fontSize: 12, fontWeight: "600", color: "#8e8e93" },
@@ -2034,12 +2084,10 @@ const styles = StyleSheet.create({
   menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
   menuHighlight: {
     position: "absolute",
-    flexDirection: "row",
-    alignItems: "stretch",
     backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
@@ -2103,6 +2151,27 @@ const styles = StyleSheet.create({
   },
   promptInputMultiline: { minHeight: 80, textAlignVertical: "top" },
   promptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
+  // 「メモを追加」は他の入力フォーム(ToDo/質問追加)と揃え、画面中央に浮かせた
+  // 付箋(マスキングテープ)風カードにする
+  memoPromptOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  memoPromptPanel: {
+    backgroundColor: "#FDF9F0",
+    borderRadius: 16,
+    padding: 20,
+    width: "85%",
+    gap: 12,
+    transform: [{ rotate: "-1.6deg" }],
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 8,
+  },
   timelinePhoto: { width: "100%", height: 180, borderRadius: 8, marginTop: 4, backgroundColor: "#f2f2f7" },
   timelinePhotoPlaceholder: {
     width: "100%",
