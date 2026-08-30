@@ -270,8 +270,12 @@ export default function RecordScreen() {
     if (!sessionId) return;
     // 「実際に録音された音声の長さ」を保存する(一時停止・再起動・クラッシュ〜再開の
     // 空白時間は含まれない)。壁時計時間(Date.now() - 開始時刻)だと、再開までの空白が
-    // 長いセッションで実態とかけ離れた値になってしまうため、常にこちらを使う
-    const durationMs = contentMsRef.current;
+    // 長いセッションで実態とかけ離れた値になってしまうため、常にこちらを使う。
+    // ただし、強制終了によってセグメントの途中でaudioendが発火しないまま終わった場合、
+    // その最後のセグメント分の時間がcontentMsRefに一切加算されない(録音時間が実際より
+    // 短く記録される)ことがある。直近の発言の終了時刻(prevEnd)を下限にすることで、
+    // 少なくとも「最後のログの時刻」より短い長さが保存されてしまう事態を防ぐ
+    const durationMs = Math.max(contentMsRef.current, prevEnd.current);
     sessionsRepo
       .updateDuration(sessionId, durationMs)
       .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
@@ -686,6 +690,8 @@ export default function RecordScreen() {
     lastBlockIdRef.current = null;
     audioSeqRef.current = 0;
     contentMsRef.current = 0;
+    prevEnd.current = 0; // 前のセッションの値が新しいセッションに引き継がれてしまわないようにする
+    segStart.current = null;
     sectionGapMsRef.current = getDefaultSectionGapMs();
     sessionsRepo
       .create({
