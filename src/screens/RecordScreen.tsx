@@ -315,19 +315,13 @@ export default function RecordScreen() {
   };
 
   // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)。
-  // ★・📝・❓が1件も無ければ、確認するまでもないため遷移自体をスキップする
+  // 呼び出し元(finalizeOrDiscardEmptySession)で「中身が完全に空」の場合は既に除外済みのため、
+  // ここでは★・📝・❓の有無にかかわらず常に遷移する(マークが無いだけで何の画面遷移も無いのは
+  // 「ちゃんと保存されたのか分からない」という不親切さにつながるため)
   const goToRecordComplete = () => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    blocksRepo
-      .listBySessionId(sessionId)
-      .then((blocks) => {
-        const hasAnyMark = blocks.some((b) => b.isStarred || b.isTodo || b.isQuestion);
-        if (hasAnyMark) {
-          navigation.navigate("RecordComplete", { noteId: sessionId });
-        }
-      })
-      .catch((e) => console.warn("[DB] 録音完了ポップアップの判定に失敗しました", e));
+    navigation.navigate("RecordComplete", { noteId: sessionId });
   };
 
   // 終了後、次の録音に備えて画面をまっさらな状態に戻す(保存結果は録音完了画面で確認できるため)
