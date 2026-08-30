@@ -263,6 +263,8 @@ export default function NoteDetailScreen() {
   const status = useAudioPlayerStatus(player);
   const pendingActionRef = useRef<{ seconds: number; autoplay: boolean } | null>(null);
   const wasPlayingBeforeDragRef = useRef(false);
+  // セグメント自動連続再生用: どのファイルの再生終了(didJustFinish)まで処理済みかを覚えておく
+  const finishHandledForFileIdRef = useRef<string | null>(null);
   const timelineScrollRef = useRef<ScrollView>(null);
   // ブロックの本文行のonLayoutは「直接の親(セクションのView)」基準のyしか返さないため、
   // このMapだけではスクロール先の絶対位置(ScrollView全体基準)を求められない。
@@ -413,6 +415,25 @@ export default function NoteDetailScreen() {
       else player.pause();
     }
   }, [status.isLoaded, player]);
+
+  // 1つのセグメントの再生が終わっても、録音は元々連続していたものなので、
+  // 次のセグメントがあればファイルを切り替えてそのまま再生を続ける(体感上「1本の音声」にする)。
+  // didJustFinishは同じ再生完了に対して複数回trueのまま再描画されうるため、
+  // 「このファイルの終端はもう処理した」をfinishHandledForFileIdRefで覚えておく
+  useEffect(() => {
+    if (!status.didJustFinish || !currentFileId) return;
+    if (finishHandledForFileIdRef.current === currentFileId) return;
+    finishHandledForFileIdRef.current = currentFileId;
+
+    const sorted = [...audioFiles].sort((a, b) => a.offsetMs - b.offsetMs);
+    const currentIndex = sorted.findIndex((f) => f.id === currentFileId);
+    const next = currentIndex >= 0 ? sorted[currentIndex + 1] : undefined;
+    if (!next) return; // 最後のセグメントなら、そのまま再生終了にする
+
+    setCurrentFileId(next.id);
+    pendingActionRef.current = { seconds: 0, autoplay: true };
+    player.replace({ uri: next.fileUri });
+  }, [status.didJustFinish, currentFileId, audioFiles, player]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
