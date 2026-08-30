@@ -167,6 +167,11 @@ export default function RecordScreen() {
   const resumeHandledSessionIdRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
+  // クラッシュ復旧の「録音を再開する」直後、タイムライン復元は終わっているが、マイク権限確認や
+  // 孤児音声ファイルの取り込みがまだ終わっておらずbegin()前の状態。この間は「待機中」に見えて
+  // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
+  // 作られてしまわないよう操作を止めておく
+  const [restoring, setRestoring] = useState(false);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
   // 「end」イベントが何らかの理由で二重に発火した場合、finalize/clearScreenStateを
   // 2回走らせない(=既に確定済みのタイムラインを巻き戻さない)ためのガード
@@ -649,11 +654,15 @@ export default function RecordScreen() {
   // start()と違い、新規セッションは作らず、DB上の最後の状態から各種refを再構築してからbegin()を呼ぶ
   // (continuousモードの自動再起動・手動pause→resumeと同じ「既存のrefのままbegin()し直す」仕組みを踏襲)
   const resumeExisting = async (sessionId: string) => {
+    setRestoring(true);
     const [session, existingBlocks] = await Promise.all([
       sessionsRepo.getById(sessionId),
       blocksRepo.listBySessionId(sessionId),
     ]);
-    if (!session) return;
+    if (!session) {
+      setRestoring(false);
+      return;
+    }
 
     // まず「これまでの記録」をすぐに画面に出す。孤児音声ファイルの取り込み(実尺取得のため
     // ファイルを読み込む必要があり、壊れたファイルだと数秒〜10秒ほどかかることがある)を
@@ -694,6 +703,7 @@ export default function RecordScreen() {
     const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
     if (!mic.granted) {
       push("[マイク権限が拒否されました]", "sys");
+      setRestoring(false);
       return;
     }
 
@@ -718,6 +728,7 @@ export default function RecordScreen() {
     shouldRun.current = true;
     finalizedRef.current = false;
     setRunning(true);
+    setRestoring(false);
 
     begin();
   };
@@ -1028,7 +1039,7 @@ export default function RecordScreen() {
         <View style={styles.statusRow}>
           <View style={[styles.recordingDot, !(running && !paused) && styles.recordingDotIdle]} />
           <Text style={styles.statusLabel}>
-            {paused ? "一時停止中" : running ? "収録中" : "待機中"}
+            {restoring ? "復元中…" : paused ? "一時停止中" : running ? "収録中" : "待機中"}
           </Text>
           <Text style={styles.statusTimer}>{fmt(elapsedMs)}</Text>
         </View>
@@ -1197,13 +1208,14 @@ export default function RecordScreen() {
 
           <View style={styles.controlRow}>
             <TouchableOpacity
-              style={styles.controlButtonPause}
+              style={[styles.controlButtonPause, restoring && styles.controlButtonDisabled]}
               onPress={paused ? resume : running ? pause : start}
+              disabled={restoring}
               activeOpacity={0.75}
             >
               <Ionicons name={running && !paused ? "pause" : "play"} size={18} color="#1c1c1e" />
               <Text style={styles.controlButtonPauseText}>
-                {paused ? "再開" : running ? "一時停止" : "開始"}
+                {restoring ? "復元中…" : paused ? "再開" : running ? "一時停止" : "開始"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
