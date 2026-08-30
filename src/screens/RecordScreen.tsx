@@ -34,7 +34,7 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
-import { adoptOrphanAudioFiles } from "../utils/audioRecovery";
+import { adoptOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecovery";
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
@@ -268,6 +268,33 @@ export default function RecordScreen() {
     mergeSessionAudioSegments(sessionId).catch((e) =>
       console.warn("[FS] 音声セグメントの結合に失敗しました", e)
     );
+  };
+
+  // テキスト・メモ・写真(blocks)が1件も無く、音声(登録済み・孤児ファイルとも)も一切無い
+  // 空のセッションなら、保存する意味が無いのでレコードごと削除する。削除したらtrueを返す
+  const deleteSessionIfEmpty = async (sessionId: string): Promise<boolean> => {
+    const [session, blocks] = await Promise.all([
+      sessionsRepo.getById(sessionId),
+      blocksRepo.listBySessionId(sessionId),
+    ]);
+    if (!session || blocks.length > 0) return false;
+    const hasAudio = await hasRecoverableAudio(session).catch(() => true); // 判定失敗時は安全側(残す)
+    if (hasAudio) return false;
+    await sessionsRepo.deleteById(sessionId).catch((e) => console.warn("[DB] 空セッションの削除に失敗しました", e));
+    return true;
+  };
+
+  // 終了処理の共通口。空セッションなら黙って削除し、そうでなければ通常通り確定させる
+  const finalizeOrDiscardEmptySession = async (options: { showComplete: boolean; clearAfter: boolean }) => {
+    const sessionId = sessionIdRef.current;
+    if (sessionId) {
+      const deleted = await deleteSessionIfEmpty(sessionId);
+      if (!deleted) {
+        finalizeSessionDuration();
+        if (options.showComplete) goToRecordComplete();
+      }
+    }
+    if (options.clearAfter) clearScreenState();
   };
 
   // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)。
@@ -562,9 +589,7 @@ export default function RecordScreen() {
       // 録音用のオーディオセッション(playAndRecord)を解放し、再生時にBluetoothが切れないようにする
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       setRunning(false);
-      finalizeSessionDuration();
-      goToRecordComplete();
-      clearScreenState();
+      finalizeOrDiscardEmptySession({ showComplete: true, clearAfter: true });
       return;
     }
     if (appStateRef.current !== "active") {
@@ -581,7 +606,7 @@ export default function RecordScreen() {
       push("⚠️ 音声認識が繰り返し失敗したため録音を中断しました。マイクの状態を確認し、もう一度「開始」を押してください", "sys");
       shouldRun.current = false;
       setRunning(false);
-      finalizeSessionDuration();
+      finalizeOrDiscardEmptySession({ showComplete: false, clearAfter: false });
       return;
     }
     setRestarts((n) => n + 1);
@@ -794,9 +819,7 @@ export default function RecordScreen() {
       shouldRun.current = false;
       setPaused(false);
       setRunning(false);
-      finalizeSessionDuration();
-      goToRecordComplete();
-      clearScreenState();
+      finalizeOrDiscardEmptySession({ showComplete: true, clearAfter: true });
       return;
     }
     stop();

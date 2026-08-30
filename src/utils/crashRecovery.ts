@@ -34,6 +34,16 @@ async function discardCrashedSession(session: Session): Promise<void> {
   ]);
 }
 
+// blocksが1件も無く、音声(登録済み・孤児ファイルとも)も一切無い、中身が完全に空の
+// セッションかどうか。この場合はユーザーに確認するまでもないため、ダイアログなしで
+// 黙って削除する対象になる
+async function isSessionEmpty(session: Session): Promise<boolean> {
+  const blocks = await blocksRepo.listBySessionId(session.id);
+  if (blocks.length > 0) return false;
+  const hasAudio = await hasRecoverableAudio(session);
+  return !hasAudio;
+}
+
 function confirmDiscard(session: Session, onDone: () => void): void {
   Alert.alert(
     'このセッションを破棄しますか?',
@@ -128,6 +138,13 @@ export async function runCrashRecoveryCheck(
 ): Promise<void> {
   const crashedSessions = await sessionsRepo.listCrashed();
   for (const session of crashedSessions) {
+    if (await isSessionEmpty(session).catch(() => false)) {
+      // 判定に失敗した場合は安全側(ダイアログを出す)に倒し、確実に空だと分かった時だけ黙って消す
+      await sessionsRepo.deleteById(session.id).catch((e) =>
+        console.warn('[DB] 空のクラッシュセッションの削除に失敗しました', e)
+      );
+      continue;
+    }
     await new Promise<void>((resolve) => promptForSession(session, navigationRef, resolve));
   }
 }
