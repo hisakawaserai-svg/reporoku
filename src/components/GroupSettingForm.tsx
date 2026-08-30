@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
 
@@ -33,9 +33,6 @@ export default function GroupSettingForm({
   return (
     <View style={styles.card}>
       <Text style={styles.title}>グループを設定</Text>
-      <Text style={styles.description}>
-        同じような★をノートをまたいで束ねられます。空にすると未分類に戻ります。
-      </Text>
 
       <TextInput
         style={styles.input}
@@ -62,32 +59,38 @@ export default function GroupSettingForm({
           {filteredGroups.length === 0 ? (
             <Text style={styles.emptyText}>一致するグループがありません</Text>
           ) : (
-            filteredGroups.map((group) => {
-              const selected = value === group.name;
-              return (
-                <TouchableOpacity
-                  key={group.name}
-                  style={[styles.radioRow, selected && styles.radioRowSelected]}
-                  activeOpacity={0.7}
-                  onPress={() => onChangeText(group.name)}
-                >
-                  <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
-                    {selected ? <View style={styles.radioInner} /> : null}
-                  </View>
-                  <View style={styles.radioTextArea}>
-                    <View style={styles.radioTitleRow}>
-                      <Text style={styles.radioLabel}>{group.name}</Text>
-                      <Text style={styles.radioCount}>{group.count}件</Text>
+            <ScrollView
+              style={styles.radioList}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {filteredGroups.map((group) => {
+                const selected = value === group.name;
+                return (
+                  <TouchableOpacity
+                    key={group.name}
+                    style={[styles.radioRow, selected && styles.radioRowSelected]}
+                    activeOpacity={0.7}
+                    onPress={() => onChangeText(group.name)}
+                  >
+                    <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+                      {selected ? <View style={styles.radioInner} /> : null}
                     </View>
-                    {group.latestSample ? (
-                      <Text style={styles.radioPreview} numberOfLines={1}>
-                        {group.latestSample}
-                      </Text>
-                    ) : null}
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+                    <View style={styles.radioTextArea}>
+                      <View style={styles.radioTitleRow}>
+                        <Text style={styles.radioLabel}>{group.name}</Text>
+                        <Text style={styles.radioCount}>{group.count}件</Text>
+                      </View>
+                      {group.latestSample ? (
+                        <Text style={styles.radioPreview} numberOfLines={1}>
+                          {group.latestSample}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           )}
         </>
       ) : null}
@@ -116,8 +119,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  title: { fontSize: 22, fontWeight: "700", color: "#1c1c1e", marginBottom: 8 },
-  description: { fontSize: 13, color: "#8e8e93", lineHeight: 18, marginBottom: 16 },
+  title: { fontSize: 17, fontWeight: "700", color: "#1c1c1e", marginBottom: 10 },
   input: {
     borderWidth: 1.5,
     borderColor: "#d98c00",
@@ -142,6 +144,9 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: "#1c1c1e", padding: 0 },
   emptyText: { fontSize: 13, color: "#c7c7cc", marginBottom: 8 },
+  // キーボード表示時は画面の見える高さ自体が大きく縮むため、グループ一覧はここだけで
+  // スクロールさせ、カード全体が画面外へ押し出されないようにする
+  radioList: { maxHeight: 180 },
   radioRow: {
     flexDirection: "row",
     alignItems: "center",

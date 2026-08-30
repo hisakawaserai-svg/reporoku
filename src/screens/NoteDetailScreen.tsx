@@ -5,7 +5,9 @@ import {
   Dimensions,
   GestureResponderEvent,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   LayoutChangeEvent,
   Modal,
   PanResponder,
@@ -17,8 +19,13 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -1085,6 +1092,55 @@ export default function NoteDetailScreen() {
     ? groupByGap(filtered, sectionGapMs)
     : [{ key: "flat", blocks: filtered }];
 
+  // キーボードの実際の開閉を監視する。ヘッダーの折りたたみアニメーション・
+  // タイムライン末尾の余白確保・行内カードへの自動スクロールが、いずれも
+  // 「編集中かどうか」ではなく実際のキーボード表示に連動する
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardVisible(true);
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardVisible(false);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // 行内展開カード(回答/一言メモ/グループ設定/テキスト編集/メモ追加)を開くと、
+  // キーボードが上がってScrollViewの見える範囲がぐっと狭くなる。何もしないとカードが
+  // 画面下の狭い隙間に押し込まれて窮屈になるため、開いた行をその狭い可視範囲の
+  // 上寄りへスクロールしてやる。対象は inlineFieldMode(回答/一言メモ/グループ)だけでなく
+  // editingBlockId(テキスト編集)・newBlockDraft(メモ追加)も含める
+  const editingTargetBlockId = inlineFieldMode
+    ? inlineFieldBlockId
+    : editingBlockId ?? newBlockDraft?.afterBlockId ?? null;
+  useEffect(() => {
+    if (!editingTargetBlockId) return;
+    // キーボードが実際に開くまで待つ。末尾付近のブロックはキーボード表示時に足される
+    // 下部スペーサー(timelineBottomSpacer)がレイアウトに反映されて初めて最後まで
+    // スクロールできるようになるため、キーボード表示前にscrollToしても届かないことがある
+    if (!keyboardVisible) return;
+    const blockId = editingTargetBlockId;
+    const timer = setTimeout(() => {
+      const sectionKey = findSectionKeyForBlock(timelineGroups, blockId);
+      const sectionY = sectionKey ? sectionLayoutYRef.current.get(sectionKey) ?? 0 : 0;
+      const rowY = blockLayoutYRef.current.get(blockId);
+      if (rowY === undefined) return;
+      timelineScrollRef.current?.scrollTo({ y: Math.max(0, sectionY + rowY - 12), animated: true });
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingTargetBlockId, keyboardVisible]);
+
   // 再生中のブロックが、今まさに(スクロールを止めたまま)画面内に見えているかどうか。
   // 見えているならバッジで案内する必要が無いどころか、表示中の内容に被って邪魔になる
   let isActiveBlockVisible = false;
@@ -1299,6 +1355,12 @@ export default function NoteDetailScreen() {
   const MENU_WIDTH = 230;
   const MENU_SCREEN_MARGIN = 40; // ステータスバー/ホームインジケータに被らないための余白
   const MENU_PAGINATION_BAR_HEIGHT = 40;
+  // 発言が長くて行数が多いブロックほどmeasureInWindowの実測heightが大きくなり、
+  // それをそのまま位置計算に使うと「上下どちらの空きもメニュー最低高さ(2行分)未満」
+  // という状況が起きて、メニューがゴーストに重なって見えなくなることがある。
+  // 位置計算(上下の空き・クランプ)にはこの上限で頭打ちにした値を使い、
+  // ゴースト自体の見た目(minHeight)には実測値をそのまま使う
+  const MENU_ANCHOR_LAYOUT_MAX_HEIGHT = 160;
 
   // 項目数が多いメニューを、スクロールではなくページ送りで見せるための行リスト。
   // 「属性(★/✓/❓横並び)」「結合(横並び2つ)」はまとめて1行として扱う
@@ -1435,6 +1497,10 @@ export default function NoteDetailScreen() {
   // そのまま実測値を使ってしまい端に張り付いて見える。メニューと同じ余白ルールで
   // 縦位置をクランプし、画面外にはみ出さないようにする
   let highlightTop = 0;
+  // ゴースト自体の表示にもこの上限を使い、overflow: hiddenで切り詰める。位置計算だけ
+  // 上限を設けても、ゴーストの見た目が実測の高さのまま伸びるとメニューの領域まで
+  // はみ出して重なってしまうため、両方を同じ上限に揃える
+  let anchorLayoutHeight = 0;
   let menuPages: MenuRow[][] = [menuRows];
   let menuPageIndex = 0;
   if (menuAnchor) {
@@ -1444,11 +1510,12 @@ export default function NoteDetailScreen() {
     // 分けて別々にクランプすると、ブロックが画面端に近いときに「メニューは元のanchor.y
     // 基準で下に出したつもりが、ゴースト側は端でクランプされて実際はもっと下にいた」
     // というズレが起きて被ってしまうため、以降の計算は必ずこの位置を基準にする
+    anchorLayoutHeight = Math.min(menuAnchor.height, MENU_ANCHOR_LAYOUT_MAX_HEIGHT);
     highlightTop = Math.max(
       MENU_SCREEN_MARGIN,
-      Math.min(menuAnchor.y, windowHeight - menuAnchor.height - MENU_SCREEN_MARGIN)
+      Math.min(menuAnchor.y, windowHeight - anchorLayoutHeight - MENU_SCREEN_MARGIN)
     );
-    const ghostBottom = highlightTop + menuAnchor.height;
+    const ghostBottom = highlightTop + anchorLayoutHeight;
     const spaceBelow = windowHeight - ghostBottom - MENU_GAP;
     const spaceAbove = highlightTop - MENU_GAP;
     // メニューの上限は「ゴーストと重ならずに置ける方(空きが多い側)の余白」そのものにする。
@@ -1675,6 +1742,7 @@ export default function NoteDetailScreen() {
             <InlineEditCard
               kind={inlineFieldMode === "answer" ? "question" : "star"}
               title={inlineFieldMode === "answer" ? "回答を記入" : "一言メモを編集"}
+              subtitle={inlineFieldMode === "answer" ? block.text ?? undefined : undefined}
               value={inlineFieldDraft}
               onChangeText={setInlineFieldDraft}
               placeholder={
@@ -1711,76 +1779,100 @@ export default function NoteDetailScreen() {
     );
   };
 
+  // 行内編集カード(回答/一言メモ/グループ設定)を開いてキーボードが出ている間は、
+  // 見える範囲がただでさえ狭くなっているので、編集に直接関係しないヘッダー部分
+  // (タイトル詳細・表示切替・フィルター)を畳んで編集フォームに高さを譲る。
+  // 「編集中かどうか」ではなく実際のキーボード表示に連動させることで、
+  // キーボードを閉じれば(編集を確定/キャンセルしなくても)アニメーション付きで
+  // 元のヘッダーに戻る
+  const isInlineEditing = inlineFieldMode !== null || editingBlockId !== null;
+  const isHeaderCollapsed = isInlineEditing && keyboardVisible;
+  // 編集中のブロックがタイムラインの末尾付近にあると、ScrollViewは「コンテンツの下に
+  // 余白ができる」スクロールを許さないため、そのブロックを可視範囲の上寄りまで
+  // 送ろうとしてもクランプされて動かないことがある。編集中はキーボードの高さ分だけ
+  // 下に余白を足しておき、末尾のブロックでも確実にスクロールできるようにする
+  const timelineBottomSpacer = isInlineEditing && keyboardVisible ? keyboardHeight : 0;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.topBarButton} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={26} color="#06c" />
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.topBarButton}
-          onPress={() => navigation.navigate("Report", { noteId: sessionId })}
-        >
-          <Ionicons name="download-outline" size={22} color="#06c" />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.titleSection}>
-        {isEditingTitle ? (
-          <TextInput
-            style={styles.titleInput}
-            value={titleDraft}
-            onChangeText={setTitleDraft}
-            autoFocus
-            onBlur={commitTitle}
-            onSubmitEditing={commitTitle}
-            returnKeyType="done"
-          />
+        {isHeaderCollapsed ? (
+          <Text style={styles.topBarCompactTitle} numberOfLines={1}>
+            {session ? session.title || defaultTitle(session) : ""}
+          </Text>
         ) : (
-          <TouchableOpacity style={styles.titleRow} activeOpacity={0.6} onPress={startEditingTitle}>
-            <Text style={styles.titleText} numberOfLines={1}>
-              {session ? session.title || defaultTitle(session) : ""}
-            </Text>
-            <Ionicons name="create-outline" size={16} color="#c7c7cc" />
+          <TouchableOpacity
+            style={styles.topBarButton}
+            onPress={() => navigation.navigate("Report", { noteId: sessionId })}
+          >
+            <Ionicons name="download-outline" size={22} color="#06c" />
           </TouchableOpacity>
         )}
-        {session ? (
-          <Text style={styles.titleMeta}>
-            {formatDateSlash(session.startedAt)} ・ {formatHHMM(session.startedAt)} 開始
-            {audioFiles.length > 0
-              ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs)}`
-              : ""}
-          </Text>
-        ) : null}
       </View>
 
-      <View style={styles.viewModeRow}>
-        {VIEW_MODES.map((v) => (
-          <TouchableOpacity
-            key={v.key}
-            style={[styles.viewModeSegment, viewMode === v.key && styles.viewModeSegmentSelected]}
-            onPress={() => setViewMode(v.key)}
-          >
-            <Text
-              style={[
-                styles.viewModeSegmentText,
-                viewMode === v.key && styles.viewModeSegmentTextSelected,
-              ]}
-            >
-              {v.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {isHeaderCollapsed ? null : (
+        <>
+          <View style={styles.titleSection}>
+            {isEditingTitle ? (
+              <TextInput
+                style={styles.titleInput}
+                value={titleDraft}
+                onChangeText={setTitleDraft}
+                autoFocus
+                onBlur={commitTitle}
+                onSubmitEditing={commitTitle}
+                returnKeyType="done"
+              />
+            ) : (
+              <TouchableOpacity style={styles.titleRow} activeOpacity={0.6} onPress={startEditingTitle}>
+                <Text style={styles.titleText} numberOfLines={1}>
+                  {session ? session.title || defaultTitle(session) : ""}
+                </Text>
+                <Ionicons name="create-outline" size={16} color="#c7c7cc" />
+              </TouchableOpacity>
+            )}
+            {session ? (
+              <Text style={styles.titleMeta}>
+                {formatDateSlash(session.startedAt)} ・ {formatHHMM(session.startedAt)} 開始
+                {audioFiles.length > 0
+                  ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs)}`
+                  : ""}
+              </Text>
+            ) : null}
+          </View>
 
-      {audioMissingNotice ? (
-        <View style={styles.audioNoticeBar}>
-          <Ionicons name="alert-circle-outline" size={18} color="#c98a00" style={styles.audioNoticeIcon} />
-          <Text style={styles.audioNoticeText}>
-            このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。
-          </Text>
-        </View>
-      ) : null}
+          <View style={styles.viewModeRow}>
+            {VIEW_MODES.map((v) => (
+              <TouchableOpacity
+                key={v.key}
+                style={[styles.viewModeSegment, viewMode === v.key && styles.viewModeSegmentSelected]}
+                onPress={() => setViewMode(v.key)}
+              >
+                <Text
+                  style={[
+                    styles.viewModeSegmentText,
+                    viewMode === v.key && styles.viewModeSegmentTextSelected,
+                  ]}
+                >
+                  {v.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {audioMissingNotice ? (
+            <View style={styles.audioNoticeBar}>
+              <Ionicons name="alert-circle-outline" size={18} color="#c98a00" style={styles.audioNoticeIcon} />
+              <Text style={styles.audioNoticeText}>
+                このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。
+              </Text>
+            </View>
+          ) : null}
+        </>
+      )}
 
       <KeyboardAvoidingView
         style={styles.editKeyboardAvoider}
@@ -1811,6 +1903,7 @@ export default function NoteDetailScreen() {
         </ScrollView>
       ) : (
       <>
+      {isHeaderCollapsed ? null : (
       <View style={styles.chipRow}>
         {FILTERS.map((f) => {
           const isSelected = filter === f.key;
@@ -1848,6 +1941,7 @@ export default function NoteDetailScreen() {
           <Ionicons name="options-outline" size={16} color="#3c3c43" />
         </TouchableOpacity>
       </View>
+      )}
 
       <View style={styles.timelineWrap}>
       {scrollPaused && newArrivalCount > 0 && !isActiveBlockVisible ? (
@@ -1980,6 +2074,7 @@ export default function NoteDetailScreen() {
             );
           })
         )}
+        {timelineBottomSpacer > 0 ? <View style={{ height: timelineBottomSpacer }} /> : null}
       </ScrollView>
       </View>
 
@@ -2018,7 +2113,8 @@ export default function NoteDetailScreen() {
                     top: highlightTop,
                     left: menuAnchor.x,
                     width: menuAnchor.width,
-                    minHeight: menuAnchor.height,
+                    height: anchorLayoutHeight,
+                    overflow: "hidden",
                     transform: [{ scale: menuHighlightScale }],
                   },
                 ]}
@@ -2210,6 +2306,15 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
+  },
+  // 行内編集中はタイトル欄一式を畳む代わりに、迷子にならない程度の最小限の
+  // タイトル表示だけをトップバーに残す
+  topBarCompactTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#3c3c43",
+    marginLeft: 4,
   },
 
   titleSection: { paddingHorizontal: 20, paddingTop: 2, paddingBottom: 12 },
