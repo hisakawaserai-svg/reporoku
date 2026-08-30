@@ -168,6 +168,9 @@ export default function RecordScreen() {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
+  // 「end」イベントが何らかの理由で二重に発火した場合、finalize/clearScreenStateを
+  // 2回走らせない(=既に確定済みのタイムラインを巻き戻さない)ためのガード
+  const finalizedRef = useRef(false);
   const contentMsRef = useRef(0);           // 実際に録音された音声の累積時間(セッション全体のタイムライン基準はこれ。再起動・一時停止による空白時間は含まない)
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [interim, setInterim] = useState("");
@@ -536,6 +539,10 @@ export default function RecordScreen() {
       return;
     }
     if (!shouldRun.current) {
+      // endイベントが何らかの理由で二重に発火しても、確定済みのタイムラインを
+      // 2回clearScreenStateで巻き戻したり、finalizeSessionDurationを2回走らせたりしない
+      if (finalizedRef.current) return;
+      finalizedRef.current = true;
       // 録音用のオーディオセッション(playAndRecord)を解放し、再生時にBluetoothが切れないようにする
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       setRunning(false);
@@ -552,6 +559,8 @@ export default function RecordScreen() {
     }
     failStreak.current += 1;
     if (failStreak.current > 8) {
+      if (finalizedRef.current) return;
+      finalizedRef.current = true;
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       push("⚠️ 音声認識が繰り返し失敗したため録音を中断しました。マイクの状態を確認し、もう一度「開始」を押してください", "sys");
       shouldRun.current = false;
@@ -568,6 +577,15 @@ export default function RecordScreen() {
   const useExternalicMic = false; // 外部マイクを使う場合は true にする
 
   const begin = () => {
+    // audiostartイベントはネイティブ側の非同期処理を経て発火するため、begin()を呼んでから
+    // 実際にisRecognizingRef.current=trueになるまでにわずかなギャップがある。その間に
+    // (バックグラウンドの音声取り込み完了によるresumeExisting()側のbegin()や、AppStateの
+    // 復帰イベントなど)別経路からもbegin()が呼ばれると、ネイティブの音声認識セッションが
+    // 二重に立ち上がってしまい、「一時停止しても片方は止まらない」といった不具合につながる。
+    // ここで同期的にフラグを立てることで、そのすり抜けを防ぐ
+    if (isRecognizingRef.current) return;
+    isRecognizingRef.current = true;
+
     // cache配下(既定値)だとOSに自動削除される恐れがあるため、documentDirectory配下を明示する
     let audioOutputDirectory: string | undefined;
     try {
@@ -603,6 +621,7 @@ export default function RecordScreen() {
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
+    finalizedRef.current = false;
     setBlocks([]);
     setAudioUris([]);
     setRestarts(0);
@@ -697,6 +716,7 @@ export default function RecordScreen() {
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
+    finalizedRef.current = false;
     setRunning(true);
 
     begin();
