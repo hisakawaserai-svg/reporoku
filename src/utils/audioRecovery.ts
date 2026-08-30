@@ -30,6 +30,11 @@ export async function findOrphanAudioFiles(
     .sort((a, b) => a.lastModified - b.lastModified);
 }
 
+// 正常なファイルはほぼ即座に(体感1秒未満で)durationが確定するため、タイムアウトは
+// 「壊れたファイルを諦めるまでの上限」として短めに設定する。長くしても正常なファイルの
+// 速さには影響せず、壊れたファイルの「待たされる時間」が伸びるだけなので短い方が良い
+const DURATION_PROBE_TIMEOUT_MS = 3000;
+
 // 「タップした位置から正確に再生する」ため、ファイル名やmtimeからの概算ではなく、
 // 実際に音声ファイルを一度ロードして正確な長さを取得する
 async function getAudioDurationMs(fileUri: string): Promise<number> {
@@ -39,7 +44,7 @@ async function getAudioDurationMs(fileUri: string): Promise<number> {
       const timeout = setTimeout(() => {
         sub.remove();
         reject(new Error('音声の長さ取得がタイムアウトしました'));
-      }, 10000);
+      }, DURATION_PROBE_TIMEOUT_MS);
       const sub = player.addListener('playbackStatusUpdate', (status) => {
         if (status.isLoaded && status.duration > 0) {
           clearTimeout(timeout);
@@ -80,13 +85,27 @@ export async function adoptOrphanAudioFiles(session: Session): Promise<AdoptOrph
     findOrphanAudioFiles(session),
   ]);
 
+  // 実尺の取得(壊れたファイルだと最大DURATION_PROBE_TIMEOUT_MSかかる)を1件ずつ順番に
+  // 待つと、ファイル数だけ待ち時間が積み上がってしまう。ここは並行に取得し、seq/offsetMsの
+  // 割り当てだけはorphans(mtime昇順)の並び順に沿って後から確定させる
+  const durations = await Promise.all(
+    orphans.map((orphan) =>
+      getAudioDurationMs(orphan.uri)
+        .then((durationMs) => ({ orphan, durationMs, ok: true as const }))
+        .catch((e) => {
+          console.warn('[FS] 孤児音声ファイルの取り込みに失敗しました', orphan.uri, e);
+          return { orphan, durationMs: 0, ok: false as const };
+        })
+    )
+  );
+
   let seq = existing.reduce((max, f) => Math.max(max, f.seq), -1) + 1;
   let offsetMs = existing.reduce((sum, f) => sum + f.durationMs, 0);
   let adoptedCount = 0;
 
-  for (const orphan of orphans) {
+  for (const { orphan, durationMs, ok } of durations) {
+    if (!ok) continue;
     try {
-      const durationMs = await getAudioDurationMs(orphan.uri);
       await audioFilesRepo.create({
         id: genId(),
         sessionId: session.id,
@@ -99,7 +118,7 @@ export async function adoptOrphanAudioFiles(session: Session): Promise<AdoptOrph
       offsetMs += durationMs;
       adoptedCount += 1;
     } catch (e) {
-      console.warn('[FS] 孤児音声ファイルの取り込みに失敗しました', orphan.uri, e);
+      console.warn('[DB] 孤児音声ファイルの登録に失敗しました', orphan.uri, e);
     }
   }
 
