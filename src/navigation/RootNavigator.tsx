@@ -17,6 +17,7 @@ import NoteDetailScreen from "../screens/NoteDetailScreen";
 import ReportScreen from "../screens/ReportScreen";
 import RecordCompleteScreen from "../screens/RecordCompleteScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
+import StorageManagementScreen from "../screens/StorageManagementScreen";
 import { getOnboardingCompleted } from "../utils/settings";
 import { runCrashRecoveryCheck } from "../utils/crashRecovery";
 
@@ -36,6 +37,7 @@ export type RootStackParamList = {
   Report: { noteId: string };
   RecordComplete: { noteId: string };
   Onboarding: undefined;
+  StorageManagement: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -141,6 +143,11 @@ export default function RootNavigator() {
           name="Onboarding"
           component={OnboardingScreen}
           options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="StorageManagement"
+          component={StorageManagementScreen}
+          options={{ title: "ストレージ管理" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

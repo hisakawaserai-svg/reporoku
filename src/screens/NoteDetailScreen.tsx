@@ -211,7 +211,7 @@ export default function NoteDetailScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
   const sessionId = route.params.noteId;
   const jumpToBlockId = route.params.jumpToBlockId;
-  const audioMissingNotice = route.params.audioNotice === "missing";
+  const audioMissingByCrash = route.params.audioNotice === "missing";
   // 「まとめ」タブの行をタップした際のジャンプ先。route側のjumpToBlockIdとは独立に、
   // 画面内での遷移(まとめ→タイムライン)にも同じハイライト・自動スクロール機構を使い回す
   const [manualJumpBlockId, setManualJumpBlockId] = useState<string | null>(null);
@@ -224,6 +224,10 @@ export default function NoteDetailScreen() {
   // スライダー操作中はDB保存を待たずに即座にここを更新してタイムラインへ反映する
   const [sectionGapMs, setSectionGapMs] = useState(SECTION_GAP_FALLBACK_MS);
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
+  // クラッシュ復旧由来の通知に加え、ストレージ管理画面で音声のみ削除された場合も
+  // 同じバナーを表示する(session読み込み前のちらつきを避けるため、取得済みになってから判定する)
+  const audioMissingGeneric = !audioMissingByCrash && session !== null && audioFiles.length === 0;
+  const audioMissingNotice = audioMissingByCrash || audioMissingGeneric;
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
@@ -1867,7 +1871,9 @@ export default function NoteDetailScreen() {
             <View style={styles.audioNoticeBar}>
               <Ionicons name="alert-circle-outline" size={18} color="#c98a00" style={styles.audioNoticeIcon} />
               <Text style={styles.audioNoticeText}>
-                このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。
+                {audioMissingByCrash
+                  ? "このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。"
+                  : "このノートには音声がありません。テキストの記録は残っています。"}
               </Text>
             </View>
           ) : null}

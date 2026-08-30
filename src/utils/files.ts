@@ -21,14 +21,23 @@ export interface AudioDirectoryEntry {
   lastModified: number;
 }
 
-// audio/ ディレクトリ直下のファイル一覧を、更新日時つきで返す(クラッシュ復旧時に
-// DB未登録のファイルを探すために使う。サブディレクトリは対象外)
-export function listAudioDirectoryEntries(): AudioDirectoryEntry[] {
-  const dir = ensureDirectory(audioDirectory);
-  return dir
+function listFileEntries(dir: Directory): AudioDirectoryEntry[] {
+  return ensureDirectory(dir)
     .list()
     .filter((entry): entry is File => entry instanceof File)
     .map((file) => ({ uri: file.uri, lastModified: file.lastModified ?? 0 }));
+}
+
+// audio/ ディレクトリ直下のファイル一覧を、更新日時つきで返す(クラッシュ復旧時に
+// DB未登録のファイルを探すために使う。サブディレクトリは対象外)
+export function listAudioDirectoryEntries(): AudioDirectoryEntry[] {
+  return listFileEntries(audioDirectory);
+}
+
+// photos/ ディレクトリ直下のファイル一覧を、更新日時つきで返す(ストレージ管理画面の
+// 孤児ファイル検出に使う。サブディレクトリは対象外)
+export function listPhotosDirectoryEntries(): AudioDirectoryEntry[] {
+  return listFileEntries(photosDirectory);
 }
 
 // documentDirectory の絶対パス(iOSではコンテナのUUIDを含む)は、アプリの再インストール・

@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { MIGRATIONS } from './migrations';
 
-const DATABASE_NAME = 'reporoku.db';
+export const DATABASE_NAME = 'reporoku.db';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 

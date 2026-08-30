@@ -145,6 +145,16 @@ export async function listBySessionId(sessionId: string): Promise<Block[]> {
   return rows.map(mapRow);
 }
 
+// バックアップ書き出し用。写真ブロックが参照している実ファイルのURIのみを、
+// セッションをまたいで一括取得する(Documents/photos/配下の孤児ファイルは含めない)
+export async function listAllPhotoUris(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ photo_uri: string }>(
+    "SELECT photo_uri FROM blocks WHERE kind = 'photo' AND photo_uri IS NOT NULL;"
+  );
+  return rows.map((r) => toAbsoluteUri(r.photo_uri));
+}
+
 export async function update(id: string, text: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE blocks SET text = ?, is_edited = 1 WHERE id = ?;', [text, id]);

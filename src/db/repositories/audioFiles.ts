@@ -52,6 +52,26 @@ export async function listBySessionId(sessionId: string): Promise<AudioFile[]> {
   return rows.map(mapRow);
 }
 
+// ストレージ管理画面向け。全セッション分のaudio_filesを一括で返す
+export async function listAll(): Promise<AudioFile[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<AudioFileRow>('SELECT * FROM audio_files ORDER BY session_id, seq ASC;');
+  return rows.map(mapRow);
+}
+
+// ストレージ管理画面の「音声のみ削除」。blocksのテキスト記録は残したまま、
+// そのノートのaudio_filesレコードだけを削除する(実ファイルの削除は呼び出し側で行う)
+export async function deleteBySessionId(sessionId: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM audio_files WHERE session_id = ?;', [sessionId]);
+}
+
+// ストレージ管理画面の「音声データを一括削除」用
+export async function deleteAll(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM audio_files;');
+}
+
 // クラッシュ復旧時、ディスク上のどのファイルが未登録(孤児)かを判定するために、
 // 全セッション分の登録済みfile_uriだけを軽量に取得する
 export async function listAllFileUris(): Promise<Set<string>> {
