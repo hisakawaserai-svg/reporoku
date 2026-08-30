@@ -4,94 +4,13 @@ import * as audioFilesRepo from '../db/repositories/audioFiles';
 import type { AudioFile } from '../db/types';
 import { deleteStoredFile, getAudioDirectoryUri } from './files';
 import { genId } from './id';
+import { effectiveDataSize, readWavHeader, sameWavFormat, type WavFormatInfo, type WavHeaderInfo } from './wavFile';
 
 // continuousモードの自動再起動により、1回の収録は複数の音声セグメント(.wav)に分かれて
 // 保存される。録音終了後、これらを1本のWAVファイルへ結合し、DB上もaudio_filesを1件に
-// まとめる。実機で実際に生成されたWAVを調べたところ、iOS側は「32-bit float PCM」
-// (ExtAudioFileが書き出す形式)で、fmtチャンクの後に4096byte境界へ揃えるための
-// "FLLR"パディングチャンクが挟まり、その後にdataチャンクが続く非標準的な構造だったため、
-// 固定オフセット(よくある44byteヘッダ決め打ち)ではなく、チャンクをたどって解析する
+// まとめる。WAVヘッダの解析はwavFile.tsの共通処理を使う
 
-const HEADER_PEEK_BYTES = 8192; // fmt/dataチャンクを見つけるのに十分な先頭バイト数
 const COPY_CHUNK_BYTES = 1024 * 1024; // 大きなファイルを一度にメモリへ載せないためのコピー単位
-
-interface WavFormatInfo {
-  audioFormat: number;
-  numChannels: number;
-  sampleRate: number;
-  bitsPerSample: number;
-  blockAlign: number;
-}
-
-interface WavHeaderInfo extends WavFormatInfo {
-  dataOffset: number;
-  dataSize: number;
-}
-
-function readUInt32LE(bytes: Uint8Array, offset: number): number {
-  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
-}
-
-function readUInt16LE(bytes: Uint8Array, offset: number): number {
-  return bytes[offset] | (bytes[offset + 1] << 8);
-}
-
-function bytesToAscii(bytes: Uint8Array, start: number, length: number): string {
-  let s = '';
-  for (let i = 0; i < length; i++) s += String.fromCharCode(bytes[start + i]);
-  return s;
-}
-
-// RIFFのサブチャンクを先頭から辿り、目的のチャンクidのバイト位置(id自体の開始位置)を探す。
-// 各チャンクは "id(4) + size(4) + payload(size, 奇数なら1byteパディング)" の並び
-function findChunkOffset(bytes: Uint8Array, id: string): number | null {
-  let offset = 12; // "RIFF"+size(4)+"WAVE" の直後から
-  while (offset + 8 <= bytes.length) {
-    const chunkId = bytesToAscii(bytes, offset, 4);
-    const size = readUInt32LE(bytes, offset + 4);
-    if (chunkId === id) return offset;
-    offset += 8 + size + (size % 2);
-  }
-  return null;
-}
-
-function parseWavHeader(headerBytes: Uint8Array): WavHeaderInfo | null {
-  if (headerBytes.length < 12) return null;
-  if (bytesToAscii(headerBytes, 0, 4) !== 'RIFF' || bytesToAscii(headerBytes, 8, 4) !== 'WAVE') return null;
-
-  const fmtOffset = findChunkOffset(headerBytes, 'fmt ');
-  if (fmtOffset === null) return null;
-  const fmtStart = fmtOffset + 8;
-  const audioFormat = readUInt16LE(headerBytes, fmtStart);
-  const numChannels = readUInt16LE(headerBytes, fmtStart + 2);
-  const sampleRate = readUInt32LE(headerBytes, fmtStart + 4);
-  const blockAlign = readUInt16LE(headerBytes, fmtStart + 12);
-  const bitsPerSample = readUInt16LE(headerBytes, fmtStart + 14);
-
-  const dataOffset = findChunkOffset(headerBytes, 'data');
-  if (dataOffset === null) return null;
-  const dataSize = readUInt32LE(headerBytes, dataOffset + 4);
-
-  return {
-    audioFormat,
-    numChannels,
-    sampleRate,
-    bitsPerSample,
-    blockAlign,
-    dataOffset: dataOffset + 8,
-    dataSize,
-  };
-}
-
-function sameFormat(a: WavFormatInfo, b: WavFormatInfo): boolean {
-  return (
-    a.audioFormat === b.audioFormat &&
-    a.numChannels === b.numChannels &&
-    a.sampleRate === b.sampleRate &&
-    a.bitsPerSample === b.bitsPerSample &&
-    a.blockAlign === b.blockAlign
-  );
-}
 
 // 結合後の出力ファイルは、余計なパディングチャンクを持たない標準的な44byteヘッダで書き出す
 // (読み込み側は既にこの形式で問題なく解析できている)
@@ -138,22 +57,13 @@ export async function mergeAudioSegments(segments: AudioFile[]): Promise<MergeAu
 
   const parsed: { seg: AudioFile; info: WavHeaderInfo }[] = [];
   for (const seg of sorted) {
-    const srcFile = new File(seg.fileUri);
-    if (!srcFile.exists) return null;
-    const handle = srcFile.open(FileMode.ReadOnly);
-    try {
-      const peekLen = Math.min(HEADER_PEEK_BYTES, handle.size ?? HEADER_PEEK_BYTES);
-      handle.offset = 0;
-      const info = parseWavHeader(handle.readBytes(peekLen));
-      if (!info) return null;
-      parsed.push({ seg, info });
-    } finally {
-      handle.close();
-    }
+    const info = readWavHeader(seg.fileUri);
+    if (!info) return null;
+    parsed.push({ seg, info });
   }
 
   const baseFormat = parsed[0].info;
-  if (!parsed.every(({ info }) => sameFormat(info, baseFormat))) {
+  if (!parsed.every(({ info }) => sameWavFormat(info, baseFormat))) {
     console.warn('[audioMerge] セグメント間で音声フォーマットが一致しないため結合を中止しました');
     return null;
   }
@@ -181,7 +91,9 @@ export async function mergeAudioSegments(segments: AudioFile[]): Promise<MergeAu
       const srcHandle = srcFile.open(FileMode.ReadOnly);
       try {
         srcHandle.offset = info.dataOffset;
-        let remaining = info.dataSize;
+        // ヘッダの宣言サイズをそのまま信じない(強制終了で書き込みが完了していないと
+        // 実際のバイト数と食い違い、実尺取得(computeWavDurationMs)側と結果がズレてしまう)
+        let remaining = effectiveDataSize(info, srcFile.size ?? 0);
         while (remaining > 0) {
           const chunkLen = Math.min(COPY_CHUNK_BYTES, remaining);
           const chunk = srcHandle.readBytes(chunkLen);
