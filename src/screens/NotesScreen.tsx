@@ -26,6 +26,7 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
+import { formatBytes, listNoteStorageEntries } from "../utils/storageManagement";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -189,6 +190,13 @@ export default function NotesScreen() {
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
+  // リストタブの複数選択・一括削除(カレンダータブは対象外)。右上「編集」またはカードの
+  // 長押しで入る。選択モード中は長押しメニュー(openRowMenu)は使わない
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // 選択モード中だけ、各ノートの使用容量(音声+写真)をカードに表示する。
+  // 一覧表示のたびに計算すると重いため、選択モードに入った時だけ取得する
+  const [noteSizeBytes, setNoteSizeBytes] = useState<Record<string, number>>({});
 
   const loadNotes = useCallback(async () => {
     try {
@@ -346,6 +354,27 @@ export default function NotesScreen() {
 
   const isSearching = trimmedQuery.length > 0;
 
+  // 検索中は選択モードのUI(チェックボックス等)を出していないため、検索を始めたら
+  // 一括削除バーだけが浮いたまま残らないよう選択モードを終了しておく
+  useEffect(() => {
+    if (isSearching && selectionMode) {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    }
+  }, [isSearching, selectionMode]);
+
+  // 選択モードに入ったら、各ノートの容量(音声+写真)を取得してカードに表示する
+  useEffect(() => {
+    if (!selectionMode) return;
+    listNoteStorageEntries()
+      .then((rows) => {
+        const map: Record<string, number> = {};
+        for (const row of rows) map[row.sessionId] = row.bytes;
+        setNoteSizeBytes(map);
+      })
+      .catch((e) => console.warn("[Storage] ノート容量の取得に失敗しました", e));
+  }, [selectionMode]);
+
   const searchGroupsForMode = useMemo(() => groupBySession(searchResults), [searchResults]);
   const searchResultCountForMode = searchResults.length;
   const searchPlaceholder = "ノートを検索";
@@ -360,6 +389,20 @@ export default function NotesScreen() {
 
   // ノートを削除する。blocks/audio_filesはON DELETE CASCADEでDB側は消えるが、
   // 実ファイル(写真・音声)はセッション削除前に一覧を取っておいて別途削除する
+  const deleteSessionCompletely = async (sessionId: string) => {
+    const [blocks, audioFiles] = await Promise.all([
+      blocksRepo.listBySessionId(sessionId),
+      audioFilesRepo.listBySessionId(sessionId),
+    ]);
+    await sessionsRepo.deleteById(sessionId);
+    await Promise.all([
+      ...blocks
+        .filter((b) => b.kind === "photo" && b.photoUri)
+        .map((b) => deleteStoredFile(b.photoUri as string)),
+      ...audioFiles.map((f) => deleteStoredFile(f.fileUri)),
+    ]);
+  };
+
   const confirmDeleteSession = (session: SessionSummary) => {
     Alert.alert("このノートを削除しますか？", "録音・写真・メモなど全て削除され、元に戻せません。", [
       { text: "キャンセル", style: "cancel" },
@@ -368,20 +411,50 @@ export default function NotesScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            const [blocks, audioFiles] = await Promise.all([
-              blocksRepo.listBySessionId(session.id),
-              audioFilesRepo.listBySessionId(session.id),
-            ]);
-            await sessionsRepo.deleteById(session.id);
-            await Promise.all([
-              ...blocks
-                .filter((b) => b.kind === "photo" && b.photoUri)
-                .map((b) => deleteStoredFile(b.photoUri as string)),
-              ...audioFiles.map((f) => deleteStoredFile(f.fileUri)),
-            ]);
+            await deleteSessionCompletely(session.id);
             loadNotes();
           } catch (e) {
             console.warn("[DB] ノートの削除に失敗しました", e);
+          }
+        },
+      },
+    ]);
+  };
+
+  const enterSelectionMode = (initialSessionId?: string) => {
+    setSelectionMode(true);
+    setSelectedIds(initialSessionId ? new Set([initialSessionId]) : new Set());
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelected = (sessionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const confirmBulkDeleteSelected = () => {
+    const count = selectedIds.size;
+    if (count === 0) return;
+    Alert.alert(`${count}件のノートを削除します。よろしいですか？`, "録音・写真・メモなど全て削除され、元に戻せません。", [
+      { text: "キャンセル", style: "cancel" },
+      {
+        text: "削除",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await Promise.all([...selectedIds].map((id) => deleteSessionCompletely(id)));
+            exitSelectionMode();
+            loadNotes();
+          } catch (e) {
+            console.warn("[DB] ノートの一括削除に失敗しました", e);
           }
         },
       },
@@ -406,6 +479,9 @@ export default function NotesScreen() {
           </Text>
           <Text style={styles.cardMeta}>
             {formatTime(session.startedAt)} 開始 ・ {formatDuration(session.durationMs)}
+            {selectionMode && mode === "list"
+              ? ` ・ ${formatBytes(noteSizeBytes[session.id] ?? 0)}`
+              : ""}
           </Text>
           {session.starCount > 0 || session.todoCount > 0 || session.questionCount > 0 ? (
             <View style={styles.badgeRow}>
@@ -448,21 +524,40 @@ export default function NotesScreen() {
     );
   };
 
-  const renderCard = (session: SessionSummary, compact = false) => (
-    <TouchableOpacity
-      key={session.id}
-      style={[styles.card, compact && styles.cardNoMargin]}
-      activeOpacity={0.7}
-      onPress={() => goToNote(session.id)}
-      onLongPress={() => openRowMenu("session", session)}
-      ref={(node) => {
-        if (node) rowMenuRefs.current.set(session.id, node);
-        else rowMenuRefs.current.delete(session.id);
-      }}
-    >
-      {renderCardContent(session)}
-    </TouchableOpacity>
-  );
+  const renderCard = (session: SessionSummary, compact = false) => {
+    const showCheckbox = selectionMode && mode === "list" && !compact;
+    const isSelected = selectedIds.has(session.id);
+    return (
+      <TouchableOpacity
+        key={session.id}
+        style={[styles.card, compact && styles.cardNoMargin]}
+        activeOpacity={0.7}
+        onPress={() => {
+          if (showCheckbox) toggleSelected(session.id);
+          else goToNote(session.id);
+        }}
+        onLongPress={() => {
+          if (mode === "list" && !selectionMode) enterSelectionMode(session.id);
+          else if (!selectionMode) openRowMenu("session", session);
+        }}
+        ref={(node) => {
+          if (node) rowMenuRefs.current.set(session.id, node);
+          else rowMenuRefs.current.delete(session.id);
+        }}
+      >
+        {showCheckbox ? (
+          <View style={styles.checkboxWrap}>
+            <Ionicons
+              name={isSelected ? "checkbox" : "square-outline"}
+              size={22}
+              color={isSelected ? "#06c" : "#c7c7cc"}
+            />
+          </View>
+        ) : null}
+        {renderCardContent(session)}
+      </TouchableOpacity>
+    );
+  };
 
   // リスト/カレンダータブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
   // 横並び行)と同じ形にする
@@ -553,6 +648,16 @@ export default function NotesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {mode === "list" && !isSearching ? (
+        <View style={styles.selectionHeaderRow}>
+          <TouchableOpacity
+            onPress={() => (selectionMode ? exitSelectionMode() : enterSelectionMode())}
+          >
+            <Text style={styles.selectionHeaderButtonText}>{selectionMode ? "完了" : "編集"}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {/* 検索バー */}
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color="#8e8e93" />
@@ -574,7 +679,10 @@ export default function NotesScreen() {
               styles.segment,
               mode === m.key && styles.segmentSelected,
             ]}
-            onPress={() => setMode(m.key)}
+            onPress={() => {
+              if (m.key !== "list" && selectionMode) exitSelectionMode();
+              setMode(m.key);
+            }}
           >
             <Text
               style={[
@@ -854,6 +962,18 @@ export default function NotesScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {selectionMode ? (
+        <View style={styles.bulkBar}>
+          <TouchableOpacity
+            style={[styles.bulkButton, selectedIds.size === 0 && styles.bulkButtonDisabled]}
+            disabled={selectedIds.size === 0}
+            onPress={confirmBulkDeleteSelected}
+          >
+            <Text style={styles.bulkButtonText}>選択した項目を削除({selectedIds.size}件)</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -862,6 +982,28 @@ const CARD_RADIUS = 14;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f7" },
+  selectionHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  selectionHeaderButtonText: { fontSize: 16, color: "#06c", fontWeight: "600" },
+  checkboxWrap: { justifyContent: "center", alignItems: "center", paddingRight: 2 },
+  bulkBar: {
+    padding: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#c6c6c8",
+    backgroundColor: "#f2f2f7",
+  },
+  bulkButton: {
+    backgroundColor: "#ff3b30",
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  bulkButtonDisabled: { backgroundColor: "#f2b3af" },
+  bulkButtonText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
