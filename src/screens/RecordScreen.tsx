@@ -172,6 +172,10 @@ export default function RecordScreen() {
   // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
   // 作られてしまわないよう操作を止めておく
   const [restoring, setRestoring] = useState(false);
+  // 復元は完了しているが、まだユーザーが「開始」を押していない(=マイクはまだ起動していない)
+  // セッションID。「録音を再開する」を選んだだけで勝手に録音を始めないよう、実際に
+  // 録音を始めるのはユーザーが明示的に「開始」を押した時点にする
+  const pendingResumeSessionIdRef = useRef<string | null>(null);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
   // 「end」イベントが何らかの理由で二重に発火した場合、finalize/clearScreenStateを
   // 2回走らせない(=既に確定済みのタイムラインを巻き戻さない)ためのガード
@@ -700,16 +704,9 @@ export default function RecordScreen() {
     setAudioUris([]);
     setRestarts(0);
 
-    const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
-    if (!mic.granted) {
-      push("[マイク権限が拒否されました]", "sys");
-      setRestoring(false);
-      return;
-    }
-
-    // 強制終了でDB未登録のまま残っている音声ファイルがあれば、録音再開前に取り込んでおく
-    // (offset_ms/seqの連続性を保つため、続きを録音し始める前に済ませておく必要がある)。
-    // ここで想定外の例外が出ても、録音の再開自体(begin())は止めない
+    // 強制終了でDB未登録のまま残っている音声ファイルがあれば、ここで取り込んでおく
+    // (offset_ms/seqの連続性を保つため、実際に録音を再開する前に済ませておく必要がある)。
+    // ここで想定外の例外が出ても、復元自体は止めない
     try {
       await adoptOrphanAudioFiles(session);
     } catch (e) {
@@ -723,12 +720,28 @@ export default function RecordScreen() {
     const audioContentMs = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
     contentMsRef.current = Math.max(audioContentMs, prevEnd.current);
 
+    // ここではまだマイクを起動しない。「復元中…」を終え「待機中」に戻し、
+    // ユーザーが明示的に「開始」を押した時点で初めてbeginPendingResume()が録音を始める
+    pendingResumeSessionIdRef.current = sessionId;
+    setRestoring(false);
+  };
+
+  // 復元済みセッションについて、ユーザーが「開始」を押した時に初めて呼ばれる。
+  // start()と違いsessionIdRef等は既にresumeExisting()で設定済みのため、マイク権限を
+  // 確認してbegin()するだけでよい
+  const beginPendingResume = async () => {
+    const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
+    if (!mic.granted) {
+      push("[マイク権限が拒否されました]", "sys");
+      return;
+    }
+    pendingResumeSessionIdRef.current = null;
+
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
     finalizedRef.current = false;
     setRunning(true);
-    setRestoring(false);
 
     begin();
   };
@@ -1209,7 +1222,7 @@ export default function RecordScreen() {
           <View style={styles.controlRow}>
             <TouchableOpacity
               style={[styles.controlButtonPause, restoring && styles.controlButtonDisabled]}
-              onPress={paused ? resume : running ? pause : start}
+              onPress={paused ? resume : running ? pause : pendingResumeSessionIdRef.current ? beginPendingResume : start}
               disabled={restoring}
               activeOpacity={0.75}
             >
