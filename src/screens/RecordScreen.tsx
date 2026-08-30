@@ -160,7 +160,11 @@ function recordBlockBadges(b: Block): RecordIconBadge[] {
 export default function RecordScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<MainTabParamList, "Record">>();
-  const resumeHandledRef = useRef(false); // クラッシュ復旧からの再開処理を1回だけ実行するためのガード
+  // クラッシュ復旧からの再開処理を、同じセッションに対して二重実行しないためのガード。
+  // 単なるbooleanだと、1回のアプリ起動で複数のクラッシュセッションを続けて「再開する」を
+  // 選んだ場合に、2件目以降の再開が黙って無視されてしまう(画面には1件目の状態が残ったまま
+  // 別セッションを再開したと思い込んでしまう)ため、セッションIDそのものを覚えておく
+  const resumeHandledSessionIdRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
@@ -690,11 +694,12 @@ export default function RecordScreen() {
     begin();
   };
 
-  // Record画面が resumeSessionId 付きで開かれたら、1回だけ再開処理を走らせる
+  // Record画面が resumeSessionId 付きで開かれたら再開処理を走らせる。同じセッションIDに対しては
+  // 1回だけ、別のセッションIDが来たら(前の再開処理の状態にかかわらず)改めて再開処理を走らせる
   useEffect(() => {
     const resumeSessionId = route.params?.resumeSessionId;
-    if (!resumeSessionId || resumeHandledRef.current) return;
-    resumeHandledRef.current = true;
+    if (!resumeSessionId || resumeHandledSessionIdRef.current === resumeSessionId) return;
+    resumeHandledSessionIdRef.current = resumeSessionId;
     resumeExisting(resumeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.params?.resumeSessionId]);
