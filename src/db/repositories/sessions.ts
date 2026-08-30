@@ -120,11 +120,17 @@ export async function listAllGroupedByMonth(): Promise<MonthGroup<Session>[]> {
 }
 
 // 起動直後のクラッシュ復旧チェック用。duration_ms が 0 のまま残っているセッションは、
-// 録音停止時の finalize (updateDuration) を経ずにアプリが終了した = 異常終了の可能性が高い
+// 録音停止時の finalize (updateDuration) を経ずにアプリが終了した = 異常終了の可能性が高い。
+// ただし「一度も音声が録れないまま正常に終了した」場合もduration_msは0になりうるため、
+// それと区別する必要がある。updateDuration/updateTitle等は必ずupdated_atを更新するため、
+// 作成直後から一度もupdated_atが動いていない(=updated_at === created_at)ものだけを
+// 「本当にfinalizeを経ずに終わった=異常終了」とみなす(スキーマ変更なしで区別できる)
 export async function listCrashed(): Promise<Session[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<SessionRow>(
-    'SELECT * FROM sessions WHERE is_quick = 0 AND duration_ms = 0 ORDER BY started_at ASC;'
+    `SELECT * FROM sessions
+     WHERE is_quick = 0 AND duration_ms = 0 AND updated_at = created_at
+     ORDER BY started_at ASC;`
   );
   return rows.map(mapRow);
 }
