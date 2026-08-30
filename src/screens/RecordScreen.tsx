@@ -737,6 +737,12 @@ export default function RecordScreen() {
     }
     pendingResumeSessionIdRef.current = null;
 
+    // startedAt.currentは通常audiostartイベントで設定されるが、begin()呼び出しから
+    // 実際にaudiostartが発火するまでの間もrunning=trueになり経過時間の計算
+    // (Date.now() - startedAt.current)が走る。ここで設定せずにいると、前回値
+    // (このセッションでは一度も設定されておらずuseRef(0)のまま)が使われ、
+    // Date.now() - 0 という巨大な値が一瞬表示されてしまう
+    startedAt.current = Date.now();
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
