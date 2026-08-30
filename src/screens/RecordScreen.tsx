@@ -1943,8 +1943,8 @@ function Playback({ uri, blocks, leadSec }: { uri: string; blocks: Block[]; lead
         <TouchableOpacity
           style={styles.playbackMiniButton}
           activeOpacity={0.7}
-          onPress={() => {
-            player.seekTo(0);
+          onPress={async () => {
+            await player.seekTo(0);
             player.play();
           }}
         >
@@ -1971,8 +1971,8 @@ function Playback({ uri, blocks, leadSec }: { uri: string; blocks: Block[]; lead
             key={i}
             activeOpacity={0.6}
             style={styles.transcriptRow}
-            onPress={() => {
-              player.seekTo(Math.max(0, b.ms / 1000 - leadSec));
+            onPress={async () => {
+              await player.seekTo(Math.max(0, b.ms / 1000 - leadSec));
               player.play();
             }}
           >

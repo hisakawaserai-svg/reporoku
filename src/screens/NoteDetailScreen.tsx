@@ -405,15 +405,17 @@ export default function NoteDetailScreen() {
     player.replace({ uri: first.fileUri });
   }, [audioFiles, currentFileId, player]);
 
-  // ファイル切り替え(replace)後、ロード完了を待ってからシーク・再生を行う
+  // ファイル切り替え(replace)後、ロード完了を待ってからシーク・再生を行う。
+  // seekTo()はPromiseを返す非同期処理のため、完了を待たずにplay()を呼ばない
   useEffect(() => {
-    if (status.isLoaded && pendingActionRef.current) {
-      const { seconds, autoplay } = pendingActionRef.current;
-      pendingActionRef.current = null;
-      player.seekTo(seconds);
+    if (!status.isLoaded || !pendingActionRef.current) return;
+    const { seconds, autoplay } = pendingActionRef.current;
+    pendingActionRef.current = null;
+    (async () => {
+      await player.seekTo(seconds);
       if (autoplay) player.play();
       else player.pause();
-    }
+    })();
   }, [status.isLoaded, player]);
 
   // 1つのセグメントの再生が終わっても、録音は元々連続していたものなので、
@@ -856,7 +858,7 @@ export default function NoteDetailScreen() {
 
   // targetMs(セッション全体での時刻)へ、必要なら音声ファイルを切り替えつつ移動する
   const seekToPosition = useCallback(
-    (targetMs: number, applyLead: boolean, autoplay: boolean) => {
+    async (targetMs: number, applyLead: boolean, autoplay: boolean) => {
       const resolved = resolveAudioPosition(targetMs, audioFiles);
       if (!resolved) return;
       const { file, positionMs } = resolved;
@@ -868,7 +870,10 @@ export default function NoteDetailScreen() {
         pendingActionRef.current = { seconds: seekSeconds, autoplay };
         player.replace({ uri: file.fileUri });
       } else {
-        player.seekTo(seekSeconds);
+        // seekTo()はPromiseを返す非同期処理。待たずにplay()を呼ぶと、ネイティブ側の
+        // シークが完了する前に再生が始まってしまい、古い位置(直前にいた場所)から
+        // 再生されてしまうことがあった(タップしても反映されない・微妙にズレる不具合)
+        await player.seekTo(seekSeconds);
         if (autoplay) player.play();
         else player.pause();
       }
