@@ -29,6 +29,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as blocksRepo from "../db/repositories/blocks";
+import type { ImportantGroupSummary } from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import * as sessionsRepo from "../db/repositories/sessions";
 import type { AudioFile, Block, Session } from "../db/types";
@@ -254,8 +255,8 @@ export default function NoteDetailScreen() {
   const [inlineFieldBlockId, setInlineFieldBlockId] = useState<string | null>(null);
   const [inlineFieldMode, setInlineFieldMode] = useState<InlineFieldMode | null>(null);
   const [inlineFieldDraft, setInlineFieldDraft] = useState("");
-  // グループ選択のクイック選択肢(既存グループ名)。groupモード以外では使わない
-  const [inlineFieldGroupExisting, setInlineFieldGroupExisting] = useState<string[]>([]);
+  // グループ選択のクイック選択肢(既存グループの件数・中身プレビュー付き)。groupモード以外では使わない
+  const [inlineFieldGroupExisting, setInlineFieldGroupExisting] = useState<ImportantGroupSummary[]>([]);
   // 写真ブロックをタップして全画面表示中のブロック
   const [viewerBlockId, setViewerBlockId] = useState<string | null>(null);
 
@@ -707,7 +708,7 @@ export default function NoteDetailScreen() {
         : block.importantGroup ?? ""
     );
     if (mode === "group") {
-      blocksRepo.listImportantGroupNames().then(setInlineFieldGroupExisting);
+      blocksRepo.listImportantGroupSummaries().then(setInlineFieldGroupExisting);
     } else {
       setInlineFieldGroupExisting([]);
     }

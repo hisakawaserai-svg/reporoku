@@ -19,6 +19,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
+import type { ImportantGroupSummary } from "../db/repositories/blocks";
 import type { TodoGroups } from "../db/repositories/blocks";
 import type { BlockWithSession } from "../db/types";
 import { genId } from "../utils/id";
@@ -225,7 +226,7 @@ export default function SummaryScreen() {
   const [groupPromptVisible, setGroupPromptVisible] = useState(false);
   const [groupPromptBlockId, setGroupPromptBlockId] = useState<string | null>(null);
   const [groupPromptDraft, setGroupPromptDraft] = useState("");
-  const [groupPromptExisting, setGroupPromptExisting] = useState<string[]>([]);
+  const [groupPromptExisting, setGroupPromptExisting] = useState<ImportantGroupSummary[]>([]);
 
   const load = useCallback(() => {
     blocksRepo.listAllTodos().then(setTodos);
@@ -361,7 +362,7 @@ export default function SummaryScreen() {
   const startGroupPrompt = (block: BlockWithSession) => {
     setGroupPromptBlockId(block.id);
     setGroupPromptDraft(block.importantGroup ?? "");
-    blocksRepo.listImportantGroupNames().then(setGroupPromptExisting);
+    blocksRepo.listImportantGroupSummaries().then(setGroupPromptExisting);
     setGroupPromptVisible(true);
   };
 

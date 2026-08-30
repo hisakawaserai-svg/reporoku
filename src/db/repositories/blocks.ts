@@ -340,17 +340,42 @@ export async function setImportantGroup(id: string, group: string | null): Promi
   await db.runAsync('UPDATE blocks SET important_group = ? WHERE id = ?;', [trimmed || null, id]);
 }
 
-// グループ割り当てのクイック選択用に、既存のグループ名の一覧(重複無し、最近使われた順)を返す
-export async function listImportantGroupNames(): Promise<string[]> {
+export interface ImportantGroupSummary {
+  name: string;
+  count: number;
+  latestAt: number;
+  // 中身プレビュー用。選ぶ判断に必要な最小限として、最新1件の一言メモ(無ければ本文)のみ持つ
+  latestSample: string | null;
+}
+
+// グループ割り当てのクイック選択用に、既存グループの一覧(重複無し、最近使われた順)を
+// 中身のプレビュー(件数・最新の一言メモ)付きで返す
+export async function listImportantGroupSummaries(): Promise<ImportantGroupSummary[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ important_group: string }>(
-    `SELECT important_group, MAX(created_at) AS latest
+  const rows = await db.getAllAsync<{
+    important_group: string;
+    text: string | null;
+    summary_note: string | null;
+    created_at: number;
+  }>(
+    `SELECT important_group, text, summary_note, created_at
      FROM blocks
      WHERE important_group IS NOT NULL AND TRIM(important_group) != ''
-     GROUP BY important_group
-     ORDER BY latest DESC;`
+     ORDER BY created_at DESC;`
   );
-  return rows.map((r) => r.important_group);
+
+  const byName = new Map<string, ImportantGroupSummary>();
+  for (const row of rows) {
+    const name = row.important_group;
+    let summary = byName.get(name);
+    if (!summary) {
+      const sample = (row.summary_note?.trim() || row.text?.trim() || '').trim();
+      summary = { name, count: 0, latestAt: row.created_at, latestSample: sample || null };
+      byName.set(name, summary);
+    }
+    summary.count += 1;
+  }
+  return [...byName.values()].sort((a, b) => b.latestAt - a.latestAt);
 }
 
 // タイトル一致行のスニペット用に、マッチ箇所をblocks_ftsのsnippet()と同じ'[' ']'記法で囲む

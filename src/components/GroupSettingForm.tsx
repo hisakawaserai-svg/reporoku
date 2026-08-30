@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import type { ImportantGroupSummary } from "../db/repositories/blocks";
 
 // ★の「グループを設定」専用のフォーム。ノート詳細画面(タイムライン中にインライン展開)・
 // まとめ画面(モーダル)の両方から、中身だけをこのコンポーネントとして共有する。
-// 既存グループが多い場合に備えて検索欄+ラジオ選択の一覧を持つ
+// 既存グループが多い場合に備えて検索欄+ラジオ選択の一覧を持つ。
+// タイトルだけでは中身が分からず選びにくいため、件数と直近の一言メモも表示する
 export default function GroupSettingForm({
   value,
   onChangeText,
@@ -15,7 +17,7 @@ export default function GroupSettingForm({
 }: {
   value: string;
   onChangeText: (text: string) => void;
-  existingGroups: string[];
+  existingGroups: ImportantGroupSummary[];
   onCancel: () => void;
   onConfirm: () => void;
   confirmLabel?: string;
@@ -23,9 +25,9 @@ export default function GroupSettingForm({
   const [search, setSearch] = useState("");
 
   const filteredGroups = useMemo(() => {
-    const sorted = [...existingGroups].sort((a, b) => a.localeCompare(b, "ja"));
+    const sorted = [...existingGroups].sort((a, b) => a.name.localeCompare(b.name, "ja"));
     const query = search.trim().toLowerCase();
-    return query ? sorted.filter((name) => name.toLowerCase().includes(query)) : sorted;
+    return query ? sorted.filter((g) => g.name.toLowerCase().includes(query)) : sorted;
   }, [existingGroups, search]);
 
   return (
@@ -60,19 +62,29 @@ export default function GroupSettingForm({
           {filteredGroups.length === 0 ? (
             <Text style={styles.emptyText}>一致するグループがありません</Text>
           ) : (
-            filteredGroups.map((name) => {
-              const selected = value === name;
+            filteredGroups.map((group) => {
+              const selected = value === group.name;
               return (
                 <TouchableOpacity
-                  key={name}
+                  key={group.name}
                   style={[styles.radioRow, selected && styles.radioRowSelected]}
                   activeOpacity={0.7}
-                  onPress={() => onChangeText(name)}
+                  onPress={() => onChangeText(group.name)}
                 >
                   <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
                     {selected ? <View style={styles.radioInner} /> : null}
                   </View>
-                  <Text style={styles.radioLabel}>{name}</Text>
+                  <View style={styles.radioTextArea}>
+                    <View style={styles.radioTitleRow}>
+                      <Text style={styles.radioLabel}>{group.name}</Text>
+                      <Text style={styles.radioCount}>{group.count}件</Text>
+                    </View>
+                    {group.latestSample ? (
+                      <Text style={styles.radioPreview} numberOfLines={1}>
+                        {group.latestSample}
+                      </Text>
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
               );
             })
@@ -150,7 +162,11 @@ const styles = StyleSheet.create({
   },
   radioOuterSelected: { borderColor: "#d98c00" },
   radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#d98c00" },
+  radioTextArea: { flex: 1 },
+  radioTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   radioLabel: { fontSize: 16, color: "#1c1c1e" },
+  radioCount: { fontSize: 12, color: "#8e8e93" },
+  radioPreview: { fontSize: 12, color: "#8e8e93", marginTop: 2, lineHeight: 16 },
   footer: {
     flexDirection: "row",
     justifyContent: "flex-end",
