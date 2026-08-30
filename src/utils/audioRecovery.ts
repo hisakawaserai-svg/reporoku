@@ -10,7 +10,7 @@ import { genId } from './id';
 // audio_filesテーブルに登録されないまま残ったファイルを「孤児ファイル」と呼ぶ。
 // mtimeが「対象セッションの開始時刻」〜「次に新しいセッションの開始時刻(無ければ無制限)」に
 // 収まるものだけを、そのセッションのものと推測する
-async function findOrphanAudioFiles(
+export async function findOrphanAudioFiles(
   session: Session
 ): Promise<{ uri: string; lastModified: number }[]> {
   const [entries, registeredUris, allSessions] = await Promise.all([
@@ -52,6 +52,18 @@ async function getAudioDurationMs(fileUri: string): Promise<number> {
   } finally {
     player.remove();
   }
+}
+
+// 実尺の取得(音声ファイルの実読み込み)を伴わない、軽い事前チェック。ディスクの一覧取得と
+// DBクエリだけなので一瞬で終わる。「復元する/内容を見るだけ」を選んだ直後にこれだけで
+// 音声の有無を確定させ、時間のかかる実尺取得(adoptOrphanAudioFiles)は画面遷移後に
+// バックグラウンドで行うことで、遷移そのものが壊れたファイルのせいで固まらないようにする
+export async function hasRecoverableAudio(session: Session): Promise<boolean> {
+  const [existing, orphans] = await Promise.all([
+    audioFilesRepo.listBySessionId(session.id),
+    findOrphanAudioFiles(session),
+  ]);
+  return existing.length > 0 || orphans.length > 0;
 }
 
 export interface AdoptOrphanAudioResult {

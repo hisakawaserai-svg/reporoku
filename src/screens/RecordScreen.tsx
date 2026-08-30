@@ -34,6 +34,7 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
+import { adoptOrphanAudioFiles } from "../utils/audioRecovery";
 import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 
@@ -625,25 +626,18 @@ export default function RecordScreen() {
   // start()と違い、新規セッションは作らず、DB上の最後の状態から各種refを再構築してからbegin()を呼ぶ
   // (continuousモードの自動再起動・手動pause→resumeと同じ「既存のrefのままbegin()し直す」仕組みを踏襲)
   const resumeExisting = async (sessionId: string) => {
-    const [session, existingBlocks, audioFiles] = await Promise.all([
+    const [session, existingBlocks] = await Promise.all([
       sessionsRepo.getById(sessionId),
       blocksRepo.listBySessionId(sessionId),
-      audioFilesRepo.listBySessionId(sessionId),
     ]);
     if (!session) return;
 
-    const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
-    if (!mic.granted) {
-      push("[マイク権限が拒否されました]", "sys");
-      return;
-    }
-
+    // まず「これまでの記録」をすぐに画面に出す。孤児音声ファイルの取り込み(実尺取得のため
+    // ファイルを読み込む必要があり、壊れたファイルだと数秒〜10秒ほどかかることがある)を
+    // 先に待ってしまうと、タイムラインが復元されるまで画面が固まって見えてしまうため
     sessionIdRef.current = sessionId;
     sessionStartedAtRef.current = session.startedAt;
     sectionGapMsRef.current = session.sectionGapMs;
-    audioSeqRef.current = audioFiles.reduce((max, f) => Math.max(max, f.seq), -1) + 1;
-    // audio_filesの尺の合計 = これまでに実際に録音された音声の累積時間(offsetMsの連続性と同じ考え方)
-    contentMsRef.current = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
 
     const transcripts = existingBlocks
       .filter((b) => b.kind === "transcript")
@@ -670,13 +664,27 @@ export default function RecordScreen() {
             }
           : { id: b.id, ms: b.startMs, text: `📝 メモ: ${b.text ?? ""}`, kind: "sys" }
       );
+    setBlocks(restoredBlocks);
+    setAudioUris([]);
+    setRestarts(0);
+
+    const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
+    if (!mic.granted) {
+      push("[マイク権限が拒否されました]", "sys");
+      return;
+    }
+
+    // 強制終了でDB未登録のまま残っている音声ファイルがあれば、録音再開前に取り込んでおく
+    // (offset_ms/seqの連続性を保つため、続きを録音し始める前に済ませておく必要がある)
+    await adoptOrphanAudioFiles(session);
+    const audioFiles = await audioFilesRepo.listBySessionId(sessionId);
+    audioSeqRef.current = audioFiles.reduce((max, f) => Math.max(max, f.seq), -1) + 1;
+    // audio_filesの尺の合計 = これまでに実際に録音された音声の累積時間(offsetMsの連続性と同じ考え方)
+    contentMsRef.current = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
 
     lastResultAt.current = Date.now();
     failStreak.current = 0;
     shouldRun.current = true;
-    setBlocks(restoredBlocks);
-    setAudioUris([]);
-    setRestarts(0);
     setRunning(true);
 
     begin();

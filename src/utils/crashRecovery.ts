@@ -6,7 +6,7 @@ import * as blocksRepo from '../db/repositories/blocks';
 import * as audioFilesRepo from '../db/repositories/audioFiles';
 import type { Session } from '../db/types';
 import { deleteStoredFile } from './files';
-import { adoptOrphanAudioFiles, deleteOrphanAudioFiles } from './audioRecovery';
+import { adoptOrphanAudioFiles, deleteOrphanAudioFiles, hasRecoverableAudio } from './audioRecovery';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 
 function formatStartedAt(unixMs: number): string {
@@ -53,11 +53,22 @@ function confirmDiscard(session: Session, onDone: () => void): void {
   );
 }
 
+// 「内容を見るだけ」は画面遷移後にNoteDetailScreenを操作させたいだけで、RecordScreenの
+// ようにその場で取り込み完了を待つ理由が無いため、完全にバックグラウンドで実行する
+function adoptOrphanAudioFilesInBackground(session: Session): void {
+  adoptOrphanAudioFiles(session).catch((e) =>
+    console.warn('[FS] 孤児音声ファイルのバックグラウンド取り込みに失敗しました', e)
+  );
+}
+
+// 孤児音声ファイルの実尺取得(壊れたファイルだと最大10秒ほどかかりうる)を画面遷移の前で
+// 待ってしまうと、その間ダイアログを閉じただけで何も起きないように見えてしまう。
+// そのため遷移は即座に行い、実際の取り込み(RecordScreen側のresumeExisting内)や、
+// 音声の有無が確定するまでの間は後回しにする
 async function handleResume(
   session: Session,
   navigationRef: NavigationContainerRefWithCurrent<RootStackParamList>
 ): Promise<void> {
-  await adoptOrphanAudioFiles(session); // 録音再開前に、取り込める音声ファイルは先に登録しておく
   navigationRef.navigate('MainTabs', {
     screen: 'Record',
     params: { resumeSessionId: session.id },
@@ -68,11 +79,13 @@ async function handleViewOnly(
   session: Session,
   navigationRef: NavigationContainerRefWithCurrent<RootStackParamList>
 ): Promise<void> {
-  const { hasAnyAudio } = await adoptOrphanAudioFiles(session);
+  // 実尺取得はせず、ファイルの存在有無だけを一瞬で確認してから遷移する
+  const hasAudio = await hasRecoverableAudio(session);
   navigationRef.navigate('NoteDetail', {
     noteId: session.id,
-    audioNotice: hasAnyAudio ? undefined : 'missing',
+    audioNotice: hasAudio ? undefined : 'missing',
   });
+  adoptOrphanAudioFilesInBackground(session);
 }
 
 function promptForSession(
