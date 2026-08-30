@@ -59,3 +59,20 @@ export async function listAllFileUris(): Promise<Set<string>> {
   const rows = await db.getAllAsync<{ file_uri: string }>('SELECT file_uri FROM audio_files;');
   return new Set(rows.map((r) => toAbsoluteUri(r.file_uri)));
 }
+
+// 録音終了後、複数セグメントを1本のWAVへ結合した結果で置き換える。
+// 元のセグメント行はすべて削除し、結合後の1件だけを登録する(offset_msは常に0)
+export async function replaceWithMergedFile(
+  sessionId: string,
+  merged: { id: string; fileUri: string; durationMs: number }
+): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM audio_files WHERE session_id = ?;', [sessionId]);
+    await db.runAsync(
+      `INSERT INTO audio_files (id, session_id, file_uri, seq, offset_ms, duration_ms)
+       VALUES (?, ?, ?, 0, 0, ?);`,
+      [merged.id, sessionId, toStorableUri(merged.fileUri), merged.durationMs]
+    );
+  });
+}

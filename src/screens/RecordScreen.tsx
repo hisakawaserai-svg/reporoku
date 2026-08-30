@@ -35,6 +35,7 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
 import { adoptOrphanAudioFiles } from "../utils/audioRecovery";
+import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 
@@ -261,6 +262,12 @@ export default function RecordScreen() {
     sessionsRepo
       .updateDuration(sessionId, durationMs)
       .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
+
+    // 複数セグメントに分かれた音声を1本のWAVへ結合する(「記録が完了しました」ポップアップの
+    // 裏側でバックグラウンド実行される)。画面遷移や保存完了の表示はここでは待たない
+    mergeSessionAudioSegments(sessionId).catch((e) =>
+      console.warn("[FS] 音声セグメントの結合に失敗しました", e)
+    );
   };
 
   // ユーザーが明示的に「終了」した時だけ、保存完了画面に遷移する(エラーによる強制中断時は遷移しない)。
