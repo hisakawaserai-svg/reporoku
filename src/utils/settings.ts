@@ -10,6 +10,8 @@ export interface AppSettings {
   // 新しい録音を開始した時、そのセッションのsection_gap_msの初期値として使う(ms)。
   // 各セッションはこの値を個別に持つため、ここでの変更は既存セッションには影響しない
   defaultSectionGapMs: number;
+  // 初回起動オンボーディングを完了したか。trueなら次回以降は表示しない
+  onboardingCompleted: boolean;
 }
 
 // 選択できるセクション区切りの間隔(ms)。設定画面・録音画面・ノート詳細画面で共通して使う
@@ -23,6 +25,7 @@ export const SECTION_GAP_OPTIONS: { ms: number; label: string }[] = [
 const DEFAULT_SETTINGS: AppSettings = {
   sectionGroupingEnabled: false,
   defaultSectionGapMs: 5000,
+  onboardingCompleted: false,
 };
 
 // 起動中に何度も呼ばれても毎回ファイルI/Oが走らないよう、読み込み結果を保持する
@@ -70,4 +73,12 @@ export function getDefaultSectionGapMs(): number {
 
 export function setDefaultSectionGapMs(ms: number): void {
   saveSettings({ ...loadSettings(), defaultSectionGapMs: ms });
+}
+
+export function getOnboardingCompleted(): boolean {
+  return loadSettings().onboardingCompleted;
+}
+
+export function setOnboardingCompleted(completed: boolean): void {
+  saveSettings({ ...loadSettings(), onboardingCompleted: completed });
 }

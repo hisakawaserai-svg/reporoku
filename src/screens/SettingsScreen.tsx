@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { seedDevTestData } from "../utils/devTestData";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
   SECTION_GAP_OPTIONS,
   getDefaultSectionGapMs,
@@ -51,6 +54,7 @@ const SECTIONS: Section[] = [
 ];
 
 export default function SettingsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [isSeeding, setIsSeeding] = useState(false);
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
   const [defaultSectionGapMs, setDefaultSectionGapMsState] = useState(getDefaultSectionGapMs);
@@ -135,6 +139,17 @@ export default function SettingsScreen() {
                 新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。
               </Text>
             </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>ヘルプ</Text>
+          <View style={styles.card}>
+            <TouchableOpacity style={styles.row} onPress={() => navigation.navigate("Onboarding")}>
+              <Ionicons name="help-circle-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>アプリの使い方を見る</Text>
+              <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+            </TouchableOpacity>
           </View>
         </View>
 

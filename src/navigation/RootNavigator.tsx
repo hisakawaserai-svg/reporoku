@@ -10,6 +10,8 @@ import SettingsScreen from "../screens/SettingsScreen";
 import NoteDetailScreen from "../screens/NoteDetailScreen";
 import ReportScreen from "../screens/ReportScreen";
 import RecordCompleteScreen from "../screens/RecordCompleteScreen";
+import OnboardingScreen from "../screens/OnboardingScreen";
+import { getOnboardingCompleted } from "../utils/settings";
 
 export type MainTabParamList = {
   Record: undefined;
@@ -23,6 +25,7 @@ export type RootStackParamList = {
   NoteDetail: { noteId: string; jumpToBlockId?: string };
   Report: { noteId: string };
   RecordComplete: { noteId: string };
+  Onboarding: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -82,9 +85,11 @@ function MainTabs() {
 }
 
 export default function RootNavigator() {
+  const initialRouteName = getOnboardingCompleted() ? "MainTabs" : "Onboarding";
+
   return (
     <NavigationContainer>
-      <Stack.Navigator>
+      <Stack.Navigator initialRouteName={initialRouteName}>
         <Stack.Screen
           name="MainTabs"
           component={MainTabs}
@@ -103,6 +108,11 @@ export default function RootNavigator() {
         <Stack.Screen
           name="RecordComplete"
           component={RecordCompleteScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Onboarding"
+          component={OnboardingScreen}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>
