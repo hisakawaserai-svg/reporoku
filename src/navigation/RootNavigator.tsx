@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { InteractionManager } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -96,11 +97,17 @@ function MainTabs() {
 export default function RootNavigator() {
   const initialRouteName = getOnboardingCompleted() ? "MainTabs" : "Onboarding";
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  // onReadyは resetRoot 後の再遷移や開発中の Fast Refresh などで複数回呼ばれることがある。
+  // ガード無しだと、まだ破棄・復元し終えていない同じクラッシュセッションに対して
+  // チェックが二重に走り、同じダイアログが繰り返し表示されてしまうため、起動後1回だけに絞る
+  const crashCheckStartedRef = useRef(false);
 
   return (
     <NavigationContainer
       ref={navigationRef}
       onReady={() => {
+        if (crashCheckStartedRef.current) return;
+        crashCheckStartedRef.current = true;
         // 起動直後は react-native-screens 側のレイアウトがまだ落ち着いておらず、ここで即座に
         // navigate すると初回だけ空白表示になることがあるため、操作(トランジション等)が
         // 一段落してから実行する
