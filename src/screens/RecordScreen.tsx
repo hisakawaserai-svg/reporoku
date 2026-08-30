@@ -679,12 +679,20 @@ export default function RecordScreen() {
     }
 
     // 強制終了でDB未登録のまま残っている音声ファイルがあれば、録音再開前に取り込んでおく
-    // (offset_ms/seqの連続性を保つため、続きを録音し始める前に済ませておく必要がある)
-    await adoptOrphanAudioFiles(session);
-    const audioFiles = await audioFilesRepo.listBySessionId(sessionId);
+    // (offset_ms/seqの連続性を保つため、続きを録音し始める前に済ませておく必要がある)。
+    // ここで想定外の例外が出ても、録音の再開自体(begin())は止めない
+    try {
+      await adoptOrphanAudioFiles(session);
+    } catch (e) {
+      console.warn("[FS] 孤児音声ファイルの取り込みに失敗しました", e);
+    }
+    const audioFiles = await audioFilesRepo.listBySessionId(sessionId).catch(() => []);
     audioSeqRef.current = audioFiles.reduce((max, f) => Math.max(max, f.seq), -1) + 1;
-    // audio_filesの尺の合計 = これまでに実際に録音された音声の累積時間(offsetMsの連続性と同じ考え方)
-    contentMsRef.current = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
+    // audio_filesの尺の合計 = これまでに実際に録音された音声の累積時間(offsetMsの連続性と同じ考え方)。
+    // 音声ファイルの取り込みに失敗した場合でも、少なくとも最後のブロックのendMsまでは
+    // 実際に時間が経過していたはずなので、それを下限にする(経過時間表示が0に戻らないように)
+    const audioContentMs = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
+    contentMsRef.current = Math.max(audioContentMs, prevEnd.current);
 
     lastResultAt.current = Date.now();
     failStreak.current = 0;
