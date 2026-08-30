@@ -16,6 +16,21 @@ export function getAudioDirectoryUri(): string {
   return ensureDirectory(audioDirectory).uri;
 }
 
+export interface AudioDirectoryEntry {
+  uri: string;
+  lastModified: number;
+}
+
+// audio/ ディレクトリ直下のファイル一覧を、更新日時つきで返す(クラッシュ復旧時に
+// DB未登録のファイルを探すために使う。サブディレクトリは対象外)
+export function listAudioDirectoryEntries(): AudioDirectoryEntry[] {
+  const dir = ensureDirectory(audioDirectory);
+  return dir
+    .list()
+    .filter((entry): entry is File => entry instanceof File)
+    .map((file) => ({ uri: file.uri, lastModified: file.lastModified ?? 0 }));
+}
+
 // documentDirectory の絶対パス(iOSではコンテナのUUIDを含む)は、アプリの再インストール・
 // 再ビルドのたびに変わりうる。DBに絶対パスのまま保存すると、次にビルドし直しただけで
 // 過去の音声・写真が読み込めなくなるため、保存時は documentDirectory 相対のパスに変換する。

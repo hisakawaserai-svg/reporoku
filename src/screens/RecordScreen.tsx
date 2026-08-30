@@ -17,8 +17,9 @@ import {
   AppStateStatus,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RouteProp } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
@@ -34,7 +35,7 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
 import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
-import type { RootStackParamList } from "../navigation/RootNavigator";
+import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 
 type Block = {
   id?: string;
@@ -76,6 +77,32 @@ const MARK_TILES: {
 // 調整はノート詳細画面に一本化しているため、この画面では開始時に読み込んだ値を録音中ずっと使う
 const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として行間を詰める
 const MS_PER_CHAR = 150; // 1文字あたりの推定発話時間(ms)。ノート詳細画面と同じ概算値
+
+// expo-speech-recognitionのエラーコードは開発者向けの英語表記(例: "audio-capture")のため、
+// ユーザーが読んでも状況が分かるよう日本語の説明文に置き換える(native側のe.messageは
+// プラットフォームごとの生の文言でユーザー向けではないため使わない)
+function describeSpeechRecognitionError(code: string): string {
+  switch (code) {
+    case "audio-capture":
+      return "マイクから音声を取得できませんでした";
+    case "interrupted":
+      return "他の音声(通話や通知音など)により録音が中断されました";
+    case "network":
+      return "ネットワークの問題で音声認識に失敗しました";
+    case "not-allowed":
+      return "マイクの権限が許可されていません";
+    case "service-not-allowed":
+      return "音声認識サービスを利用できませんでした";
+    case "busy":
+      return "音声認識が混み合っています";
+    case "language-not-supported":
+      return "この言語には対応していません";
+    case "speech-timeout":
+      return "音声が検出されませんでした";
+    default:
+      return "音声認識でエラーが発生しました";
+  }
+}
 
 // 発言(text)ブロックの推定継続時間。sysメッセージ(エラー等)は瞬間的なものとして0とする。
 // endMs(音声認識のfinal結果が返ってきた実測終了時刻)があればそちらを使うため、
@@ -131,6 +158,8 @@ function recordBlockBadges(b: Block): RecordIconBadge[] {
 // ロジックは変更していない。見た目(スタイル)のみ Claude Design 案(3a)に合わせて調整。
 export default function RecordScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<MainTabParamList, "Record">>();
+  const resumeHandledRef = useRef(false); // クラッシュ復旧からの再開処理を1回だけ実行するためのガード
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
@@ -208,7 +237,10 @@ export default function RecordScreen() {
   const finalizeSessionDuration = () => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    const durationMs = Math.max(0, Date.now() - sessionStartedAtRef.current);
+    // 「実際に録音された音声の長さ」を保存する(一時停止・再起動・クラッシュ〜再開の
+    // 空白時間は含まれない)。壁時計時間(Date.now() - 開始時刻)だと、再開までの空白が
+    // 長いセッションで実態とかけ離れた値になってしまうため、常にこちらを使う
+    const durationMs = contentMsRef.current;
     sessionsRepo
       .updateDuration(sessionId, durationMs)
       .catch((e) => console.warn("[DB] セッション長さの更新に失敗しました", e));
@@ -484,7 +516,8 @@ export default function RecordScreen() {
     // no-speech は無音が続いた際に毎回発生する想定内のエラーで、
     // end イベント側で自動再開されるため画面には表示しない(ノイズになるだけのため)
     if (e.error === "no-speech") return;
-    push(`[ERROR] ${e.error} — ${e.message}`, "sys");
+    // continuousモードでは直後に自動再開されるため、その旨も併記して不安にさせないようにする
+    push(`⚠️ ${describeSpeechRecognitionError(e.error)}(自動的に再開します)`, "sys");
   });
 
   // ここが肝:終了したら、止めたいわけでなければ即座に再開
@@ -515,7 +548,7 @@ export default function RecordScreen() {
     failStreak.current += 1;
     if (failStreak.current > 8) {
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
-      push("[連続失敗のため中断。上のERRORを確認してください]", "sys");
+      push("⚠️ 音声認識が繰り返し失敗したため録音を中断しました。マイクの状態を確認し、もう一度「開始」を押してください", "sys");
       shouldRun.current = false;
       setRunning(false);
       finalizeSessionDuration();
@@ -587,6 +620,76 @@ export default function RecordScreen() {
 
     begin();
   };
+
+  // クラッシュ復旧の「録音を再開する」から、既存セッションに続けて録音するためのエントリーポイント。
+  // start()と違い、新規セッションは作らず、DB上の最後の状態から各種refを再構築してからbegin()を呼ぶ
+  // (continuousモードの自動再起動・手動pause→resumeと同じ「既存のrefのままbegin()し直す」仕組みを踏襲)
+  const resumeExisting = async (sessionId: string) => {
+    const [session, existingBlocks, audioFiles] = await Promise.all([
+      sessionsRepo.getById(sessionId),
+      blocksRepo.listBySessionId(sessionId),
+      audioFilesRepo.listBySessionId(sessionId),
+    ]);
+    if (!session) return;
+
+    const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
+    if (!mic.granted) {
+      push("[マイク権限が拒否されました]", "sys");
+      return;
+    }
+
+    sessionIdRef.current = sessionId;
+    sessionStartedAtRef.current = session.startedAt;
+    sectionGapMsRef.current = session.sectionGapMs;
+    audioSeqRef.current = audioFiles.reduce((max, f) => Math.max(max, f.seq), -1) + 1;
+    // audio_filesの尺の合計 = これまでに実際に録音された音声の累積時間(offsetMsの連続性と同じ考え方)
+    contentMsRef.current = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
+
+    const transcripts = existingBlocks
+      .filter((b) => b.kind === "transcript")
+      .sort((a, b) => a.startMs - b.startMs);
+    const lastTranscript = transcripts[transcripts.length - 1] ?? null;
+    lastBlockIdRef.current = lastTranscript?.id ?? null;
+    prevEnd.current = lastTranscript ? lastTranscript.endMs ?? lastTranscript.startMs : 0;
+    segStart.current = null;
+
+    const restoredBlocks: Block[] = existingBlocks
+      .filter((b) => b.kind === "transcript" || b.kind === "note")
+      .sort((a, b) => a.startMs - b.startMs)
+      .map((b) =>
+        b.kind === "transcript"
+          ? {
+              id: b.id,
+              ms: b.startMs,
+              endMs: b.endMs ?? undefined,
+              text: b.text ?? "",
+              kind: "text",
+              isStarred: b.isStarred,
+              isTodo: b.isTodo,
+              isQuestion: b.isQuestion,
+            }
+          : { id: b.id, ms: b.startMs, text: `📝 メモ: ${b.text ?? ""}`, kind: "sys" }
+      );
+
+    lastResultAt.current = Date.now();
+    failStreak.current = 0;
+    shouldRun.current = true;
+    setBlocks(restoredBlocks);
+    setAudioUris([]);
+    setRestarts(0);
+    setRunning(true);
+
+    begin();
+  };
+
+  // Record画面が resumeSessionId 付きで開かれたら、1回だけ再開処理を走らせる
+  useEffect(() => {
+    const resumeSessionId = route.params?.resumeSessionId;
+    if (!resumeSessionId || resumeHandledRef.current) return;
+    resumeHandledRef.current = true;
+    resumeExisting(resumeSessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.resumeSessionId]);
 
   const stop = () => {
     shouldRun.current = false;

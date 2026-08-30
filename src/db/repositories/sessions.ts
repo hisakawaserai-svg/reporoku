@@ -119,6 +119,16 @@ export async function listAllGroupedByMonth(): Promise<MonthGroup<Session>[]> {
   return groups;
 }
 
+// 起動直後のクラッシュ復旧チェック用。duration_ms が 0 のまま残っているセッションは、
+// 録音停止時の finalize (updateDuration) を経ずにアプリが終了した = 異常終了の可能性が高い
+export async function listCrashed(): Promise<Session[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<SessionRow>(
+    'SELECT * FROM sessions WHERE is_quick = 0 AND duration_ms = 0 ORDER BY started_at ASC;'
+  );
+  return rows.map(mapRow);
+}
+
 export async function updateTitle(id: string, title: string): Promise<void> {
   const db = await getDb();
   const now = Date.now();

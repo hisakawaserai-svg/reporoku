@@ -51,3 +51,11 @@ export async function listBySessionId(sessionId: string): Promise<AudioFile[]> {
   );
   return rows.map(mapRow);
 }
+
+// クラッシュ復旧時、ディスク上のどのファイルが未登録(孤児)かを判定するために、
+// 全セッション分の登録済みfile_uriだけを軽量に取得する
+export async function listAllFileUris(): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ file_uri: string }>('SELECT file_uri FROM audio_files;');
+  return new Set(rows.map((r) => toAbsoluteUri(r.file_uri)));
+}

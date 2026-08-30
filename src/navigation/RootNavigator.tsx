@@ -1,5 +1,10 @@
+import { InteractionManager } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { NavigationContainer } from "@react-navigation/native";
+import {
+  NavigationContainer,
+  NavigatorScreenParams,
+  useNavigationContainerRef,
+} from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
@@ -12,17 +17,21 @@ import ReportScreen from "../screens/ReportScreen";
 import RecordCompleteScreen from "../screens/RecordCompleteScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import { getOnboardingCompleted } from "../utils/settings";
+import { runCrashRecoveryCheck } from "../utils/crashRecovery";
 
 export type MainTabParamList = {
-  Record: undefined;
+  // resumeSessionId: クラッシュ復旧の「録音を再開する」から遷移してきた場合のみ渡される、
+  // 続きから録音するセッションのID
+  Record: { resumeSessionId?: string } | undefined;
   Notes: undefined;
   Summary: undefined;
   Settings: undefined;
 };
 
 export type RootStackParamList = {
-  MainTabs: undefined;
-  NoteDetail: { noteId: string; jumpToBlockId?: string };
+  MainTabs: NavigatorScreenParams<MainTabParamList> | undefined;
+  // audioNotice: クラッシュ復旧の「内容を見るだけ」で、音声が1件も復元できなかった場合に渡される
+  NoteDetail: { noteId: string; jumpToBlockId?: string; audioNotice?: "missing" };
   Report: { noteId: string };
   RecordComplete: { noteId: string };
   Onboarding: undefined;
@@ -86,9 +95,20 @@ function MainTabs() {
 
 export default function RootNavigator() {
   const initialRouteName = getOnboardingCompleted() ? "MainTabs" : "Onboarding";
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        // 起動直後は react-native-screens 側のレイアウトがまだ落ち着いておらず、ここで即座に
+        // navigate すると初回だけ空白表示になることがあるため、操作(トランジション等)が
+        // 一段落してから実行する
+        InteractionManager.runAfterInteractions(() => {
+          runCrashRecoveryCheck(navigationRef);
+        });
+      }}
+    >
       <Stack.Navigator initialRouteName={initialRouteName}>
         <Stack.Screen
           name="MainTabs"

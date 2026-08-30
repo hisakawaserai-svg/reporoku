@@ -203,6 +203,7 @@ export default function NoteDetailScreen() {
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
   const sessionId = route.params.noteId;
   const jumpToBlockId = route.params.jumpToBlockId;
+  const audioMissingNotice = route.params.audioNotice === "missing";
   // 「まとめ」タブの行をタップした際のジャンプ先。route側のjumpToBlockIdとは独立に、
   // 画面内での遷移(まとめ→タイムライン)にも同じハイライト・自動スクロール機構を使い回す
   const [manualJumpBlockId, setManualJumpBlockId] = useState<string | null>(null);
@@ -1745,6 +1746,15 @@ export default function NoteDetailScreen() {
         ))}
       </View>
 
+      {audioMissingNotice ? (
+        <View style={styles.audioNoticeBar}>
+          <Ionicons name="alert-circle-outline" size={18} color="#c98a00" style={styles.audioNoticeIcon} />
+          <Text style={styles.audioNoticeText}>
+            このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。
+          </Text>
+        </View>
+      ) : null}
+
       <KeyboardAvoidingView
         style={styles.editKeyboardAvoider}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -2187,6 +2197,19 @@ const styles = StyleSheet.create({
     borderBottomColor: "#06c",
   },
   titleMeta: { fontSize: 13, color: "#8e8e93", marginTop: 4 },
+
+  audioNoticeBar: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#fff8ea",
+    borderRadius: 12,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  audioNoticeIcon: { marginTop: 1 },
+  audioNoticeText: { flex: 1, fontSize: 13, color: "#3c3c43", lineHeight: 18 },
 
   editKeyboardAvoider: { flex: 1 },
 
