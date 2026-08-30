@@ -14,6 +14,8 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Sharing from "expo-sharing";
+import * as DocumentPicker from "expo-document-picker";
+import { Directory } from "expo-file-system";
 import { seedDevTestData } from "../utils/devTestData";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
@@ -24,6 +26,7 @@ import {
   setSectionGroupingEnabled,
 } from "../utils/settings";
 import { createBackupZip } from "../utils/backup";
+import { InvalidBackupError, applyBackup, discardExtractedBackup, extractAndValidateBackup } from "../utils/restore";
 import {
   deleteOrphanFiles,
   findOrphanFiles,
@@ -66,6 +69,7 @@ export default function SettingsScreen() {
   const [defaultSectionGapMs, setDefaultSectionGapMsState] = useState(getDefaultSectionGapMs);
   const [totalStorageLabel, setTotalStorageLabel] = useState("—");
   const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
   const [isCheckingOrphans, setIsCheckingOrphans] = useState(false);
   const [isDeletingOrphans, setIsDeletingOrphans] = useState(false);
 
@@ -148,6 +152,67 @@ export default function SettingsScreen() {
     } finally {
       setIsBackingUp(false);
     }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (isBackingUp || isRestoring) return;
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["application/zip", "application/x-zip-compressed", "application/octet-stream"],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
+    const zipUri = result.assets[0]?.uri;
+    if (!zipUri) return;
+
+    let extractDir: Directory;
+    setIsRestoring(true);
+    try {
+      extractDir = await extractAndValidateBackup(zipUri);
+    } catch (e) {
+      setIsRestoring(false);
+      if (e instanceof InvalidBackupError) {
+        Alert.alert("バックアップファイルが正しくありません");
+      } else {
+        console.warn("[Restore] バックアップの検証に失敗しました", e);
+        Alert.alert("バックアップファイルが正しくありません");
+      }
+      return;
+    }
+
+    Alert.alert(
+      "バックアップを復元しますか？",
+      "バックアップを復元すると、現在のデータは全て上書きされます。よろしいですか？",
+      [
+        {
+          text: "キャンセル",
+          style: "cancel",
+          onPress: () => {
+            discardExtractedBackup(extractDir);
+            setIsRestoring(false);
+          },
+        },
+        {
+          text: "復元",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await applyBackup(extractDir);
+              refreshTotalStorageLabel();
+              Alert.alert(
+                "復元が完了しました",
+                "変更を反映するため、アプリを再起動してください。"
+              );
+            } catch (e) {
+              console.warn("[Restore] 復元に失敗しました", e);
+              Alert.alert("復元に失敗しました", "元のデータは保持されています。");
+            } finally {
+              setIsRestoring(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleToggleSectionGrouping = (value: boolean) => {
@@ -235,12 +300,27 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>バックアップ</Text>
           <View style={styles.card}>
-            <TouchableOpacity style={styles.row} disabled={isBackingUp} onPress={handleCreateBackup}>
+            <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
+              disabled={isBackingUp || isRestoring}
+              onPress={handleCreateBackup}
+            >
               <Ionicons name="share-outline" size={20} color="#06c" style={styles.rowIcon} />
               <Text style={styles.rowLabel}>
                 {isBackingUp ? "バックアップを作成中…" : "バックアップを作成"}
               </Text>
               {isBackingUp ? <ActivityIndicator size="small" color="#06c" /> : null}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.row}
+              disabled={isBackingUp || isRestoring}
+              onPress={handleRestoreBackup}
+            >
+              <Ionicons name="cloud-upload-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>
+                {isRestoring ? "復元中…" : "バックアップから復元"}
+              </Text>
+              {isRestoring ? <ActivityIndicator size="small" color="#06c" /> : null}
             </TouchableOpacity>
           </View>
         </View>
