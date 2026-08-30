@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -173,6 +174,18 @@ export default function RecordScreen() {
   // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
   // 作られてしまわないよう操作を止めておく
   const [restoring, setRestoring] = useState(false);
+  // 「復元中…」が数秒〜10秒ほど続くことがあり、見た目が止まって見えて
+  // フリーズと勘違いされやすいため、進行中であることが伝わるよう点を増減させる
+  const [restoringDots, setRestoringDots] = useState(1);
+  useEffect(() => {
+    if (!restoring) {
+      setRestoringDots(1);
+      return;
+    }
+    const id = setInterval(() => setRestoringDots((n) => (n % 3) + 1), 450);
+    return () => clearInterval(id);
+  }, [restoring]);
+  const restoringLabel = `復元中${".".repeat(restoringDots)}`;
   // 復元は完了しているが、まだユーザーが「開始」を押していない(=マイクはまだ起動していない)
   // セッションID。「録音を再開する」を選んだだけで勝手に録音を始めないよう、実際に
   // 録音を始めるのはユーザーが明示的に「開始」を押した時点にする
@@ -1086,9 +1099,13 @@ export default function RecordScreen() {
         </TouchableOpacity>
 
         <View style={styles.statusRow}>
-          <View style={[styles.recordingDot, !(running && !paused) && styles.recordingDotIdle]} />
+          {restoring ? (
+            <ActivityIndicator size="small" color="#8e8e93" style={styles.statusSpinner} />
+          ) : (
+            <View style={[styles.recordingDot, !(running && !paused) && styles.recordingDotIdle]} />
+          )}
           <Text style={styles.statusLabel}>
-            {restoring ? "復元中…" : paused ? "一時停止中" : running ? "収録中" : "待機中"}
+            {restoring ? restoringLabel : paused ? "一時停止中" : running ? "収録中" : "待機中"}
           </Text>
           <Text style={styles.statusTimer}>{fmt(elapsedMs)}</Text>
         </View>
@@ -1262,9 +1279,13 @@ export default function RecordScreen() {
               disabled={restoring}
               activeOpacity={0.75}
             >
-              <Ionicons name={running && !paused ? "pause" : "play"} size={18} color="#1c1c1e" />
+              {restoring ? (
+                <ActivityIndicator size="small" color="#8e8e93" />
+              ) : (
+                <Ionicons name={running && !paused ? "pause" : "play"} size={18} color="#1c1c1e" />
+              )}
               <Text style={styles.controlButtonPauseText}>
-                {restoring ? "復元中…" : paused ? "再開" : running ? "一時停止" : "開始"}
+                {restoring ? restoringLabel : paused ? "再開" : running ? "一時停止" : "開始"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1560,6 +1581,7 @@ const styles = StyleSheet.create({
   },
   recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#e0342f" },
   recordingDotIdle: { backgroundColor: "#b8b8bd" },
+  statusSpinner: { width: 8, height: 8 },
   statusLabel: { fontSize: 16, color: "#1c1c1e", fontWeight: "600" },
   statusTimer: {
     fontSize: 16,
