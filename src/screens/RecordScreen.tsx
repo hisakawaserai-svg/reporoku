@@ -867,6 +867,10 @@ export default function RecordScreen() {
     // 音声ファイルの取り込みに失敗した場合でも、少なくとも最後のブロックのendMsまでは
     // 実際に時間が経過していたはずなので、それを下限にする(経過時間表示が0に戻らないように)
     const audioContentMs = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
+    // 文字起こしが1件も確定していないまま強制終了したセッションだとprevEnd.currentが0のままなので、
+    // 再開後の最初の発言(interimを経由せずfinalが来た場合、開始時刻はprevEnd.currentにフォールバックする)
+    // が00:00で記録されてしまう。ここで音声の実測累積時間まで引き上げておく
+    prevEnd.current = Math.max(prevEnd.current, audioContentMs);
     contentMsRef.current = Math.max(audioContentMs, prevEnd.current);
     // running=falseの間はティッカーのuseEffectが動かず経過時間表示が更新されないため、
     // ここで明示的に反映しておく(そうしないと「開始」を押すまでヘッダーの秒数だけ
@@ -1201,14 +1205,16 @@ export default function RecordScreen() {
             {sleepLines.map((b, i) => {
               const isLast = i === sleepLines.length - 1;
               const active = isLast && !interim;
+              const badges = recordBlockBadges(b);
               return (
-                <Text
-                  key={b.id ?? `sleep-${i}`}
-                  style={[styles.sleepLine, active && styles.sleepLineActive]}
-                  numberOfLines={2}
-                >
-                  {fmt(b.ms)}　{b.text}
-                </Text>
+                <View key={b.id ?? `sleep-${i}`} style={styles.sleepLineRow}>
+                  {badges.map((badge) => (
+                    <Ionicons key={badge.key} name={badge.icon} size={13} color={badge.color} />
+                  ))}
+                  <Text style={[styles.sleepLine, active && styles.sleepLineActive]} numberOfLines={2}>
+                    {fmt(b.ms)}　{b.text}
+                  </Text>
+                </View>
               );
             })}
             {interim ? (
@@ -1930,7 +1936,8 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     gap: 10,
   },
-  sleepLine: { fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.28)" },
+  sleepLineRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  sleepLine: { flex: 1, fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.28)" },
   sleepLineActive: { color: "rgba(255,255,255,0.82)" },
   sleepBottomRow: {
     flexDirection: "row",
