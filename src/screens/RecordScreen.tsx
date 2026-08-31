@@ -186,6 +186,9 @@ export default function RecordScreen() {
   const resumeHandledSessionIdRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
+  // ライブフォーカス帯(LiveFocusBand)が展開中かどうか。展開中の円形イコライザーは
+  // 画面上部に浮かぶオーバーレイとして別コンポーネントで描画するため、その表示可否の判定に使う
+  const [bandExpanded, setBandExpanded] = useState(false);
   // クラッシュ復旧の「録音を再開する」直後、タイムライン復元は終わっているが、マイク権限確認や
   // 孤児音声ファイルの取り込みがまだ終わっておらずbegin()前の状態。この間は「待機中」に見えて
   // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
@@ -1070,7 +1073,7 @@ export default function RecordScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
         <View style={styles.topLeftGroup}>
-          <HeaderEqualizer running={running && !paused} />
+          <MiniMicIcon running={running && !paused} />
         </View>
 
         <View style={styles.topRightGroup}>
@@ -1099,6 +1102,11 @@ export default function RecordScreen() {
       </View>
 
       <View style={styles.transcriptWrap}>
+      {bandExpanded ? (
+        <View style={styles.expandedEqualizerOverlay} pointerEvents="none">
+          <ExpandedFocusEqualizer running={running && !paused} />
+        </View>
+      ) : null}
       {markSelectMode ? (
         <View style={styles.markSelectBannerContainer} pointerEvents="box-none">
           <View style={styles.markSelectBanner}>
@@ -1242,7 +1250,11 @@ export default function RecordScreen() {
       </ScrollView>
       </View>
 
-      <LiveFocusBand text={interim} running={running && !paused} />
+      <LiveFocusBand
+        text={interim}
+        running={running && !paused}
+        onExpandedChange={setBandExpanded}
+      />
 
       <View style={styles.bottomSection}>
         <View style={styles.bottomCard}>
@@ -1500,24 +1512,47 @@ function HeaderEqualizer({ running }: { running: boolean }) {
   );
 }
 
-// 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
-// 縮小(1行)⇄展開(円形ビジュアル+複数行テキスト)はタップで切り替える。
-// 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
-function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+// ヘッダー左上に表示する音量ゲージ付きマイクアイコン(液面ゲージ式)。
+// mic-outline(薄グレー)を土台に、mic(黒塗り)を音量に応じた高さでマスクして重ね、
+// 音量が大きいほど黒く塗りつぶされる量が増えるように見せている。
+function MiniMicIcon({ running }: { running: boolean }) {
+  const [micLevel, setMicLevel] = useState(0);
+  const micLevelRef = useRef(0);
 
-  // 収録が止まったら展開状態のままにしない
   useEffect(() => {
-    if (!running) setExpanded(false);
+    if (!running) {
+      micLevelRef.current = 0;
+      setMicLevel(0);
+    }
   }, [running]);
 
-  const handleToggle = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setExpanded((prev) => !prev);
-  };
+  useSpeechRecognitionEvent("volumechange", (event) => {
+    if (!running) return;
+    // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。0〜1に正規化する
+    const clamped = Math.max(-2, Math.min(10, event.value));
+    const normalized = (clamped + 2) / 12;
+    micLevelRef.current = micLevelRef.current + (normalized - micLevelRef.current) * 0.3;
+    setMicLevel(micLevelRef.current);
+  });
 
+  if (!running) return null;
+
+  return (
+    <View style={styles.miniMicIcon}>
+      <Ionicons name="mic-outline" size={16} color="#c7c7cc" />
+      <View
+        style={[styles.miniMicFillMask, { height: Math.max(2, Math.round(2 + micLevel * 14)) }]}
+      >
+        <Ionicons name="mic" size={16} color="#1c1c1e" style={styles.miniMicFillIcon} />
+      </View>
+    </View>
+  );
+}
+
+// 展開時に画面上部へ浮かぶ円形イコライザー(音量に一斉反応する仕組み自体はHeaderEqualizerと同じ)。
+// LiveFocusBandの展開パネルの中ではなく、画面全体に重なるオーバーレイとして独立して描画する。
+function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   // 音量バー用のレベル(volumechangeイベントの実測値をもとに更新)。
-  // 展開中は大きい円、縮小中はミニイコライザーとして使う。
   // 音声認識からは周波数帯域別のデータ(低音/高音)は取得できず、音量値1つしか
   // 得られないため、本物のイコライザーではなく擬似的な演出として、バーごとに
   // 「反応の強さ(weight)」と「反応の速さ(smoothing)」を変えて個性を出している。
@@ -1528,17 +1563,11 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
   const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
   const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
 
-  // マイクアイコン(縮小時)の音量ゲージ用。0〜1に正規化した音量を滑らかに追従させる
-  const [micLevel, setMicLevel] = useState(0);
-  const micLevelRef = useRef(0);
-
   useEffect(() => {
     if (!running) {
       barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
       barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
       setCircleLevels(barCurrentRef.current);
-      micLevelRef.current = 0;
-      setMicLevel(0);
     }
   }, [running]);
 
@@ -1547,10 +1576,6 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
     // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。既存のバー高さレンジ(4〜22、コンテナの高さまで)に写像する
     const clamped = Math.max(-2, Math.min(10, event.value));
     const normalized = (clamped + 2) / 12;
-
-    micLevelRef.current = micLevelRef.current + (normalized - micLevelRef.current) * 0.3;
-    setMicLevel(micLevelRef.current);
-
     const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
       // バーごとの「個性」を少し大きめにランダムドリフトさせる
       if (Math.random() < 0.5) {
@@ -1574,6 +1599,49 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
   if (!running) return null;
 
   return (
+    <View style={styles.liveFocusCircle}>
+      <View style={styles.liveFocusCircleBars}>
+        {circleLevels.map((h, i) => (
+          <View key={i} style={[styles.liveFocusBar, { height: h }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
+// 縮小(1行)⇄展開(3行までのテキスト)はタップで切り替える。展開中の円形イコライザーは
+// 画面上部に浮かぶオーバーレイ(ExpandedFocusEqualizer)として別途描画されるため、
+// 展開の可否だけをonExpandedChangeで親に伝える。
+// 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
+function LiveFocusBand({
+  text,
+  running,
+  onExpandedChange,
+}: {
+  text: string;
+  running: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 収録が止まったら展開状態のままにしない
+  useEffect(() => {
+    if (!running) setExpanded(false);
+  }, [running]);
+
+  useEffect(() => {
+    onExpandedChange(running && expanded);
+  }, [running, expanded, onExpandedChange]);
+
+  const handleToggle = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setExpanded((prev) => !prev);
+  };
+
+  if (!running) return null;
+
+  return (
     <View style={styles.liveFocusContainer}>
       <View style={styles.liveFocusDivider} />
       <TouchableOpacity
@@ -1582,29 +1650,12 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
         style={expanded ? styles.liveFocusExpanded : styles.liveFocusCollapsed}
       >
         {expanded ? (
-          <>
-            <View style={styles.liveFocusCircle}>
-              <View style={styles.liveFocusCircleBars}>
-                {circleLevels.map((h, i) => (
-                  <View key={i} style={[styles.liveFocusBar, { height: h }]} />
-                ))}
-              </View>
-            </View>
-            <Text style={styles.liveFocusTextExpanded}>{text}</Text>
-          </>
+          <Text style={styles.liveFocusTextExpanded} numberOfLines={3} ellipsizeMode="head">
+            {text}
+          </Text>
         ) : (
           <View style={styles.liveFocusRow}>
-            <View style={styles.miniMicIcon}>
-              <Ionicons name="mic-outline" size={16} color="#c7c7cc" />
-              <View
-                style={[
-                  styles.miniMicFillMask,
-                  { height: Math.max(2, Math.round(2 + micLevel * 14)) },
-                ]}
-              >
-                <Ionicons name="mic" size={16} color="#1c1c1e" style={styles.miniMicFillIcon} />
-              </View>
-            </View>
+            <HeaderEqualizer running={running} />
             <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="head">
               {text}
             </Text>
@@ -1637,6 +1688,18 @@ const styles = StyleSheet.create({
   },
   headerEqualizer: { flexDirection: "row", alignItems: "center", gap: 2, height: 16 },
   headerEqualizerBar: { width: 2, borderRadius: 1, backgroundColor: "#9c9ca3" },
+
+  // 展開中の円形イコライザーを、ログ表示エリア(transcriptWrap)の最上部に浮かせて
+  // 表示するオーバーレイ。ヘッダーの秒数表示と被らないよう、ヘッダーより下から始める
+  // (タップは下の要素に通すためpointerEvents="none")
+  expandedEqualizerOverlay: {
+    position: "absolute",
+    top: 8,
+    left: 0,
+    right: 0,
+    zIndex: 6,
+    alignItems: "center",
+  },
 
   topSection: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
   statusRow: {
@@ -1800,7 +1863,7 @@ const styles = StyleSheet.create({
   liveFocusExpanded: {
     width: "100%",
     paddingBottom: 8,
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: 12,
   },
   liveFocusCircle: {
@@ -1810,6 +1873,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#1c1c1e",
     justifyContent: "center",
     alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
   },
   liveFocusCircleBars: {
     flexDirection: "row",
@@ -1821,7 +1889,7 @@ const styles = StyleSheet.create({
   liveFocusTextExpanded: {
     fontSize: 14,
     color: "#a0a0a6",
-    textAlign: "center",
+    textAlign: "left",
     lineHeight: 20,
     minHeight: 20,
   },
