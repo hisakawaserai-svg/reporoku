@@ -1327,16 +1327,16 @@ export default function RecordScreen() {
             }}
             hitSlop={10}
           >
-            <Ionicons name="moon-outline" size={20} color="#c7c7cc" />
+            <Ionicons name="moon-outline" size={20} color="#8e8e93" />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate("HowToUse", { section: "record" })}
             hitSlop={10}
           >
-            <Ionicons name="help-circle-outline" size={22} color="#c7c7cc" />
+            <Ionicons name="help-circle-outline" size={22} color="#8e8e93" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShowDebug(true)} hitSlop={10}>
-            <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#c7c7cc" />
+            <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#8e8e93" />
           </TouchableOpacity>
         </View>
 
