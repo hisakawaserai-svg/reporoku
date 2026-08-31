@@ -63,6 +63,10 @@ type Block = {
 
 const KEEP_AWAKE_TAG = "record-screen";
 const LIVE_FOCUS_BAR_COUNT = 5;
+// バーごとの高さ係数(中央が高く、端が低い)。全バーが同じ音量値に一斉反応しつつ形に差をつける
+const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
+// バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
+const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
 
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
@@ -653,6 +657,10 @@ export default function RecordScreen() {
         mode: "default",          // ← measurement から変更。AGCが効くようになる
       },
       iosTaskHint: "dictation",    // ← 連続した話し言葉向けのヒント
+      volumeChangeEventOptions: {
+        enabled: true,
+        intervalMillis: 100,
+      },
     });
   };
 
@@ -1452,19 +1460,50 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
     setExpanded((prev) => !prev);
   };
 
-  // 音量バー用のダミーレベル(実データではなく簡易な擬似アニメーション)。展開中は大きい円、縮小中はミニイコライザーとして使う。
+  // 音量バー用のレベル(volumechangeイベントの実測値をもとに更新)。
+  // 展開中は大きい円、縮小中はミニイコライザーとして使う。
+  // 音声認識からは周波数帯域別のデータ(低音/高音)は取得できず、音量値1つしか
+  // 得られないため、本物のイコライザーではなく擬似的な演出として、バーごとに
+  // 「反応の強さ(weight)」と「反応の速さ(smoothing)」を変えて個性を出している。
+  // weightは時々少しだけランダムに揺らすことで、同じ音量でも毎回微妙に違う動きに見せる。
   const [circleLevels, setCircleLevels] = useState<number[]>(
     new Array(LIVE_FOCUS_BAR_COUNT).fill(4)
   );
+  const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
+  const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
+
   useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => {
-      setCircleLevels(
-        Array.from({ length: LIVE_FOCUS_BAR_COUNT }, () => 4 + Math.round(Math.random() * 14))
-      );
-    }, 220);
-    return () => clearInterval(id);
+    if (!running) {
+      barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
+      barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
+      setCircleLevels(barCurrentRef.current);
+    }
   }, [running]);
+
+  useSpeechRecognitionEvent("volumechange", (event) => {
+    if (!running) return;
+    // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。既存のバー高さレンジ(4〜22、コンテナの高さまで)に写像する
+    const clamped = Math.max(-2, Math.min(10, event.value));
+    const normalized = (clamped + 2) / 12;
+    const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
+      // バーごとの「個性」を少し大きめにランダムドリフトさせる
+      if (Math.random() < 0.5) {
+        const drift = (Math.random() - 0.5) * 0.3;
+        barWeightRef.current[i] = Math.max(0.5, Math.min(1.6, barWeightRef.current[i] + drift));
+      }
+      // 音が鳴っているときほど揺らぎを大きくするノイズ(無音時は静かなまま)
+      const noise = (Math.random() - 0.5) * 6 * normalized;
+      // ごく低確率でどこかのバーが一瞬大きく跳ねる
+      const spike = Math.random() < 0.08 ? Math.random() * 6 * normalized : 0;
+      const target = 4 + normalized * 14 * scale * barWeightRef.current[i] + noise + spike;
+      const smoothing = LIVE_FOCUS_BAR_SMOOTHING[i];
+      const current = barCurrentRef.current[i] + (target - barCurrentRef.current[i]) * smoothing;
+      const clampedCurrent = Math.max(4, Math.min(22, current));
+      barCurrentRef.current[i] = clampedCurrent;
+      return Math.round(clampedCurrent);
+    });
+    setCircleLevels(nextLevels);
+  });
 
   if (!running) return null;
 
