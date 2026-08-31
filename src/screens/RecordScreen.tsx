@@ -62,13 +62,8 @@ type Block = {
 };
 
 const KEEP_AWAKE_TAG = "record-screen";
-const LIVE_FOCUS_BAR_COUNT = 5;
-// バーごとの高さ係数(中央が高く、端が低い)。全バーが同じ音量値に一斉反応しつつ形に差をつける
-const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
-// バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
-const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
 
-// ヘッダー左上の音量イコライザー用
+// ヘッダー左上・ライブフォーカス縮小時の音量イコライザー用
 const HEADER_EQ_BAR_COUNT = 9;
 const HEADER_EQ_BAR_SCALE = [0.45, 0.6, 0.75, 0.9, 1, 0.9, 0.75, 0.6, 0.45];
 const HEADER_EQ_BAR_SMOOTHING = [0.5, 0.35, 0.55, 0.4, 0.6, 0.4, 0.55, 0.35, 0.5];
@@ -1073,7 +1068,7 @@ export default function RecordScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
         <View style={styles.topLeftGroup}>
-          <MiniMicIcon running={running && !paused} />
+          <HeaderEqualizer running={running && !paused} />
         </View>
 
         <View style={styles.topRightGroup}>
@@ -1104,7 +1099,7 @@ export default function RecordScreen() {
       <View style={styles.transcriptWrap}>
       {bandExpanded ? (
         <View style={styles.expandedEqualizerOverlay} pointerEvents="none">
-          <ExpandedFocusEqualizer running={running && !paused} />
+          <ExpandedFocusMicIcon running={running && !paused} />
         </View>
       ) : null}
       {markSelectMode ? (
@@ -1549,61 +1544,40 @@ function MiniMicIcon({ running }: { running: boolean }) {
   );
 }
 
-// 展開時に画面上部へ浮かぶ円形イコライザー(音量に一斉反応する仕組み自体はHeaderEqualizerと同じ)。
+// 展開時に画面上部へ浮かぶ音量ゲージ付きマイクアイコン(MiniMicIconの大きいバージョン)。
 // LiveFocusBandの展開パネルの中ではなく、画面全体に重なるオーバーレイとして独立して描画する。
-function ExpandedFocusEqualizer({ running }: { running: boolean }) {
-  // 音量バー用のレベル(volumechangeイベントの実測値をもとに更新)。
-  // 音声認識からは周波数帯域別のデータ(低音/高音)は取得できず、音量値1つしか
-  // 得られないため、本物のイコライザーではなく擬似的な演出として、バーごとに
-  // 「反応の強さ(weight)」と「反応の速さ(smoothing)」を変えて個性を出している。
-  // weightは時々少しだけランダムに揺らすことで、同じ音量でも毎回微妙に違う動きに見せる。
-  const [circleLevels, setCircleLevels] = useState<number[]>(
-    new Array(LIVE_FOCUS_BAR_COUNT).fill(4)
-  );
-  const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
-  const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
+function ExpandedFocusMicIcon({ running }: { running: boolean }) {
+  const [micLevel, setMicLevel] = useState(0);
+  const micLevelRef = useRef(0);
 
   useEffect(() => {
     if (!running) {
-      barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
-      barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
-      setCircleLevels(barCurrentRef.current);
+      micLevelRef.current = 0;
+      setMicLevel(0);
     }
   }, [running]);
 
   useSpeechRecognitionEvent("volumechange", (event) => {
     if (!running) return;
-    // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。既存のバー高さレンジ(4〜22、コンテナの高さまで)に写像する
+    // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。0〜1に正規化する
     const clamped = Math.max(-2, Math.min(10, event.value));
     const normalized = (clamped + 2) / 12;
-    const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
-      // バーごとの「個性」を少し大きめにランダムドリフトさせる
-      if (Math.random() < 0.5) {
-        const drift = (Math.random() - 0.5) * 0.3;
-        barWeightRef.current[i] = Math.max(0.5, Math.min(1.6, barWeightRef.current[i] + drift));
-      }
-      // 音が鳴っているときほど揺らぎを大きくするノイズ(無音時は静かなまま)
-      const noise = (Math.random() - 0.5) * 6 * normalized;
-      // ごく低確率でどこかのバーが一瞬大きく跳ねる
-      const spike = Math.random() < 0.08 ? Math.random() * 6 * normalized : 0;
-      const target = 4 + normalized * 14 * scale * barWeightRef.current[i] + noise + spike;
-      const smoothing = LIVE_FOCUS_BAR_SMOOTHING[i];
-      const current = barCurrentRef.current[i] + (target - barCurrentRef.current[i]) * smoothing;
-      const clampedCurrent = Math.max(4, Math.min(22, current));
-      barCurrentRef.current[i] = clampedCurrent;
-      return Math.round(clampedCurrent);
-    });
-    setCircleLevels(nextLevels);
+    micLevelRef.current = micLevelRef.current + (normalized - micLevelRef.current) * 0.3;
+    setMicLevel(micLevelRef.current);
   });
 
   if (!running) return null;
 
   return (
     <View style={styles.liveFocusCircle}>
-      <View style={styles.liveFocusCircleBars}>
-        {circleLevels.map((h, i) => (
-          <View key={i} style={[styles.liveFocusBar, { height: h }]} />
-        ))}
+      <Ionicons name="mic-outline" size={44} color="#5a5a60" />
+      <View
+        style={[
+          styles.liveFocusMicFillMask,
+          { height: Math.max(6, Math.round(6 + micLevel * 38)) },
+        ]}
+      >
+        <Ionicons name="mic" size={44} color="#fff" style={styles.liveFocusMicFillIcon} />
       </View>
     </View>
   );
@@ -1611,7 +1585,7 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
 
 // 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
 // 縮小(1行)⇄展開(3行までのテキスト)はタップで切り替える。展開中の円形イコライザーは
-// 画面上部に浮かぶオーバーレイ(ExpandedFocusEqualizer)として別途描画されるため、
+// 画面上部に浮かぶオーバーレイ(ExpandedFocusMicIcon)として別途描画されるため、
 // 展開の可否だけをonExpandedChangeで親に伝える。
 // 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
 function LiveFocusBand({
@@ -1655,7 +1629,7 @@ function LiveFocusBand({
           </Text>
         ) : (
           <View style={styles.liveFocusRow}>
-            <HeaderEqualizer running={running} />
+            <MiniMicIcon running={running} />
             <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="head">
               {text}
             </Text>
@@ -1879,13 +1853,9 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 8,
   },
-  liveFocusCircleBars: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    height: 22,
-  },
-  liveFocusBar: { width: 3, borderRadius: 1.5, backgroundColor: "#9c9ca3" },
+  // 44pxのマイクアイコンを88pxの円の中央に重ねて配置し、下から音量分だけクリップして見せる
+  liveFocusMicFillMask: { position: "absolute", left: 22, bottom: 22, width: 44, overflow: "hidden" },
+  liveFocusMicFillIcon: { position: "absolute", left: 0, bottom: 0 },
   liveFocusTextExpanded: {
     fontSize: 14,
     color: "#a0a0a6",
