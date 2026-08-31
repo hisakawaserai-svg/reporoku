@@ -1056,13 +1056,17 @@ export default function RecordScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
-        <TouchableOpacity
-          style={styles.debugButton}
-          onPress={() => setShowDebug(true)}
-          hitSlop={10}
-        >
-          <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#c7c7cc" />
-        </TouchableOpacity>
+        <View style={styles.topRightGroup}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate("HowToUse", { section: "record" })}
+            hitSlop={10}
+          >
+            <Ionicons name="help-circle-outline" size={22} color="#c7c7cc" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowDebug(true)} hitSlop={10}>
+            <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#c7c7cc" />
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.statusRow}>
           {restoring ? (
@@ -1506,7 +1510,15 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fafafc" },
 
-  debugButton: { position: "absolute", top: 0, right: 16, zIndex: 1 },
+  topRightGroup: {
+    position: "absolute",
+    top: 0,
+    right: 16,
+    zIndex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
 
   topSection: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
   statusRow: {

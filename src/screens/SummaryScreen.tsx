@@ -581,6 +581,12 @@ export default function SummaryScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>まとめ</Text>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("HowToUse", { section: "summary" })}
+          hitSlop={8}
+        >
+          <Ionicons name="help-circle-outline" size={24} color="#06c" />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.searchBar}>
@@ -944,6 +950,9 @@ export default function SummaryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f7" },
   header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,

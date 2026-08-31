@@ -33,9 +33,9 @@ import { fontSize } from "../theme/typography";
 
 type DisplayMode = "list" | "calendar";
 
-const MODES: { key: DisplayMode; label: string }[] = [
-  { key: "list", label: "リスト" },
-  { key: "calendar", label: "カレンダー" },
+const MODES: { key: DisplayMode; label: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
+  { key: "list", label: "リスト", icon: "list-outline" },
+  { key: "calendar", label: "カレンダー", icon: "calendar-outline" },
 ];
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -578,15 +578,21 @@ export default function NotesScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {mode === "list" && !isSearching ? (
-        <View style={styles.selectionHeaderRow}>
+      <View style={styles.topBarRow}>
+        {mode === "list" && !isSearching ? (
           <TouchableOpacity
             onPress={() => (selectionMode ? exitSelectionMode() : enterSelectionMode())}
           >
             <Text style={styles.selectionHeaderButtonText}>{selectionMode ? "完了" : "編集"}</Text>
           </TouchableOpacity>
-        </View>
-      ) : null}
+        ) : null}
+        <TouchableOpacity
+          onPress={() => navigation.navigate("HowToUse", { section: "notesList" })}
+          hitSlop={8}
+        >
+          <Ionicons name="help-circle-outline" size={24} color="#06c" />
+        </TouchableOpacity>
+      </View>
 
       {/* 検索バー */}
       <View style={styles.searchBar}>
@@ -614,6 +620,11 @@ export default function NotesScreen() {
               setMode(m.key);
             }}
           >
+            <Ionicons
+              name={m.icon}
+              size={15}
+              color={mode === m.key ? "#1c1c1e" : "#3c3c43"}
+            />
             <Text
               style={[
                 styles.segmentText,
@@ -878,9 +889,11 @@ export default function NotesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f7" },
-  selectionHeaderRow: {
+  topBarRow: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "flex-end",
+    gap: 16,
     paddingHorizontal: 16,
     paddingTop: 8,
   },
@@ -921,9 +934,12 @@ const styles = StyleSheet.create({
   },
   segment: {
     flex: 1,
+    flexDirection: "row",
+    gap: 5,
     paddingVertical: 6,
     borderRadius: 6,
     alignItems: "center",
+    justifyContent: "center",
   },
   segmentSelected: {
     backgroundColor: "#fff",

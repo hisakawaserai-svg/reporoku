@@ -536,9 +536,9 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>ヘルプ</Text>
           <View style={styles.card}>
-            <TouchableOpacity style={styles.row} onPress={() => navigation.navigate("Onboarding")}>
+            <TouchableOpacity style={styles.row} onPress={() => navigation.navigate("HowToUse", { section: "settings" })}>
               <Ionicons name="help-circle-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>アプリの使い方を見る</Text>
+              <Text style={styles.rowLabel}>使い方</Text>
               <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
             </TouchableOpacity>
           </View>

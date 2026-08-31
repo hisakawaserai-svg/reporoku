@@ -18,6 +18,7 @@ import ReportScreen from "../screens/ReportScreen";
 import RecordCompleteScreen from "../screens/RecordCompleteScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import StorageManagementScreen from "../screens/StorageManagementScreen";
+import HowToUseScreen from "../screens/HowToUseScreen";
 import { getOnboardingCompleted } from "../utils/settings";
 import { runCrashRecoveryCheck } from "../utils/crashRecovery";
 
@@ -38,6 +39,8 @@ export type RootStackParamList = {
   RecordComplete: { noteId: string };
   Onboarding: undefined;
   StorageManagement: undefined;
+  // section: 遷移元の画面に対応するタブを開いた状態で表示する場合に渡す
+  HowToUse: { section?: "record" | "noteDetail" | "summary" | "notesList" | "settings" } | undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -118,7 +121,10 @@ export default function RootNavigator() {
         });
       }}
     >
-      <Stack.Navigator initialRouteName={initialRouteName}>
+      <Stack.Navigator
+        initialRouteName={initialRouteName}
+        screenOptions={{ headerBackButtonDisplayMode: "minimal" }}
+      >
         <Stack.Screen
           name="MainTabs"
           component={MainTabs}
@@ -148,6 +154,11 @@ export default function RootNavigator() {
           name="StorageManagement"
           component={StorageManagementScreen}
           options={{ title: "ストレージ管理" }}
+        />
+        <Stack.Screen
+          name="HowToUse"
+          component={HowToUseScreen}
+          options={{ title: "使い方" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

@@ -1793,12 +1793,20 @@ export default function NoteDetailScreen() {
             {session ? session.title || defaultTitle(session) : ""}
           </Text>
         ) : (
-          <TouchableOpacity
-            style={styles.topBarButton}
-            onPress={() => navigation.navigate("Report", { noteId: sessionId })}
-          >
-            <Ionicons name="download-outline" size={22} color="#06c" />
-          </TouchableOpacity>
+          <View style={styles.topBarRightGroup}>
+            <TouchableOpacity
+              style={styles.topBarButton}
+              onPress={() => navigation.navigate("HowToUse", { section: "noteDetail" })}
+            >
+              <Ionicons name="help-circle-outline" size={22} color="#06c" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.topBarButton}
+              onPress={() => navigation.navigate("Report", { noteId: sessionId })}
+            >
+              <Ionicons name="download-outline" size={22} color="#06c" />
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -2297,6 +2305,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  topBarRightGroup: { flexDirection: "row", alignItems: "center" },
   // 行内編集中はタイトル欄一式を畳む代わりに、迷子にならない程度の最小限の
   // タイトル表示だけをトップバーに残す
   topBarCompactTitle: {
