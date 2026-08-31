@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   View,
   Text,
   ScrollView,
@@ -205,6 +206,52 @@ export default function RecordScreen() {
   useEffect(() => {
     if (!running) setSleepMode(false);
   }, [running]);
+
+  // スリープ解除は誤操作防止のため単純タップではなく長押しにし、押している間だけ
+  // 画面が徐々に明るくなる(=解除に近づいている)ことが視覚的にわかるようにする
+  const SLEEP_WAKE_HOLD_MS = 800;
+  const sleepWakeAnim = useRef(new Animated.Value(0)).current;
+  const sleepWakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSleepWakeTimer = () => {
+    if (sleepWakeTimerRef.current) {
+      clearTimeout(sleepWakeTimerRef.current);
+      sleepWakeTimerRef.current = null;
+    }
+  };
+  const handleSleepWakePressIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Animated.timing(sleepWakeAnim, {
+      toValue: 1,
+      duration: SLEEP_WAKE_HOLD_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+    sleepWakeTimerRef.current = setTimeout(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      // ちょうどtoValue:1に到達し切る前後のタイミングでネイティブ側のアニメーションが
+      // まだ動いていると、直後のsetValue(0)がそのフレームで上書きされてしまうことがある。
+      // stopAnimationで確実に止めてから0に戻す
+      sleepWakeAnim.stopAnimation(() => sleepWakeAnim.setValue(0));
+      setSleepMode(false);
+    }, SLEEP_WAKE_HOLD_MS);
+  };
+  const handleSleepWakePressOut = () => {
+    clearSleepWakeTimer();
+    Animated.timing(sleepWakeAnim, {
+      toValue: 0,
+      duration: 200,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  };
+  // 突入・解除どちらの切り替わりでも明るさを0(=黒背景)に戻しておく。そうしないと、次に
+  // スリープモードに入った時、前回長押しを離す前に手を止めた分の明るさが残ってしまう
+  useEffect(() => {
+    clearSleepWakeTimer();
+    sleepWakeAnim.stopAnimation(() => sleepWakeAnim.setValue(0));
+    return clearSleepWakeTimer;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sleepMode]);
 
   // スリープモード中はタブバーも隠す(画面全体を暗い表示に集中させるため)。
   // 画面遷移でアンマウントされる場合に備え、必ず表示状態に戻してから抜ける
@@ -1177,10 +1224,8 @@ export default function RecordScreen() {
       <SafeAreaView style={[styles.container, styles.sleepContainer]} edges={["top"]}>
         <Pressable
           style={styles.sleepOverlay}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-            setSleepMode(false);
-          }}
+          onPressIn={handleSleepWakePressIn}
+          onPressOut={handleSleepWakePressOut}
         >
           <View style={styles.sleepHeader}>
             <View style={styles.sleepStatusRow}>
@@ -1225,9 +1270,9 @@ export default function RecordScreen() {
           </View>
         </Pressable>
 
-        {/* ボタン行は「タップで閉じる」Pressableの外(兄弟要素)に置く。Pressable配下に
+        {/* ボタン行は「長押しで閉じる」Pressableの外(兄弟要素)に置く。Pressable配下に
             TouchableOpacityをネストすると端末によってはタップが親Pressableにも伝わり、
-            ボタン操作と同時にスリープ解除が走って意図した動作(撮影など)が阻害されるため */}
+            ボタン操作と同時にスリープ解除の長押しが走って意図した動作(撮影など)が阻害されるため */}
         <View style={styles.sleepBottomRow}>
           <View style={styles.sleepButtonGroup}>
             <TouchableOpacity
@@ -1275,6 +1320,17 @@ export default function RecordScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* 長押し中だけ徐々に明るくなる層。ヘッダー・タイムライン・下部ボタン行を含む画面全体に
+            重ねることで、解除にどれだけ近づいたかを一体感のある明るさで示す。タッチを奪わないよう
+            pointerEvents="none" にしてボタン操作を妨げない */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.sleepWakeBrighten,
+            { opacity: sleepWakeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] }) },
+          ]}
+        />
       </SafeAreaView>
     );
   }
@@ -1914,6 +1970,14 @@ const styles = StyleSheet.create({
   // スリープモード(Claude Design案 1c)
   sleepContainer: { backgroundColor: "#000000" },
   sleepOverlay: { flex: 1, paddingHorizontal: 20 },
+  sleepWakeBrighten: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#ffffff",
+  },
   sleepHeader: {
     flexDirection: "row",
     alignItems: "center",
