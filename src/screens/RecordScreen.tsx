@@ -77,24 +77,42 @@ const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
 // バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
 const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
 
-// 円の液面ゲージの水面につける波アニメーション用。1周期(WAVE_PERIOD幅)を3周期分並べたSVGパスを
-// 横方向に1周期分だけ無限ループでずらし続けることで、水面が揺れているように見せる
+// 液面ゲージの水面につける波アニメーション用パスを生成する。1周期(period幅)をperiods個
+// 並べたSVGパスを作り、横方向に1周期分だけ無限ループでずらし続けることで水面が揺れて見える
+function buildWavePathD(period: number, amplitude: number, baseline: number, periods: number, height: number): string {
+  let d = `M0,${baseline}`;
+  for (let i = 0; i < periods; i++) {
+    const x0 = i * period;
+    d += ` C${x0 + period * 0.25},${baseline - amplitude} ${x0 + period * 0.25},${baseline - amplitude} ${x0 + period * 0.5},${baseline}`;
+    d += ` C${x0 + period * 0.75},${baseline + amplitude} ${x0 + period * 0.75},${baseline + amplitude} ${x0 + period},${baseline}`;
+  }
+  d += ` L${period * periods},${height} L0,${height} Z`;
+  return d;
+}
+
+// 展開時の円形イコライザー用の波
 const WAVE_PERIOD = 44;
 const WAVE_AMPLITUDE = 3;
 const WAVE_BASELINE = 6;
 const WAVE_SVG_HEIGHT = 14;
 const WAVE_PERIODS = 3;
 const WAVE_SVG_WIDTH = WAVE_PERIOD * WAVE_PERIODS;
-const WAVE_PATH_D = (() => {
-  let d = `M0,${WAVE_BASELINE}`;
-  for (let i = 0; i < WAVE_PERIODS; i++) {
-    const x0 = i * WAVE_PERIOD;
-    d += ` C${x0 + WAVE_PERIOD * 0.25},${WAVE_BASELINE - WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.25},${WAVE_BASELINE - WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.5},${WAVE_BASELINE}`;
-    d += ` C${x0 + WAVE_PERIOD * 0.75},${WAVE_BASELINE + WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.75},${WAVE_BASELINE + WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD},${WAVE_BASELINE}`;
-  }
-  d += ` L${WAVE_SVG_WIDTH},${WAVE_SVG_HEIGHT} L0,${WAVE_SVG_HEIGHT} Z`;
-  return d;
-})();
+const WAVE_PATH_D = buildWavePathD(WAVE_PERIOD, WAVE_AMPLITUDE, WAVE_BASELINE, WAVE_PERIODS, WAVE_SVG_HEIGHT);
+
+// 縮小時のマイクアイコン用の波(円形イコライザーの縮小版)
+const MINI_WAVE_PERIOD = 10;
+const MINI_WAVE_AMPLITUDE = 1;
+const MINI_WAVE_BASELINE = 2;
+const MINI_WAVE_SVG_HEIGHT = 4;
+const MINI_WAVE_PERIODS = 3;
+const MINI_WAVE_SVG_WIDTH = MINI_WAVE_PERIOD * MINI_WAVE_PERIODS;
+const MINI_WAVE_PATH_D = buildWavePathD(
+  MINI_WAVE_PERIOD,
+  MINI_WAVE_AMPLITUDE,
+  MINI_WAVE_BASELINE,
+  MINI_WAVE_PERIODS,
+  MINI_WAVE_SVG_HEIGHT
+);
 
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
@@ -210,8 +228,14 @@ export default function RecordScreen() {
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
   // ライブフォーカス帯(LiveFocusBand)が展開中かどうか。展開中の円形イコライザーは
-  // 画面上部に浮かぶオーバーレイとして別コンポーネントで描画するため、その表示可否の判定に使う
+  // 画面上部に浮かぶオーバーレイとして別コンポーネントで描画するため、その表示可否の判定に使う。
+  // オーバーレイをタップして閉じられるようにするため、展開状態はここ(親)で持つ
   const [bandExpanded, setBandExpanded] = useState(false);
+
+  // 収録が止まったら展開状態のままにしない
+  useEffect(() => {
+    if (!running) setBandExpanded(false);
+  }, [running]);
   // クラッシュ復旧の「録音を再開する」直後、タイムライン復元は終わっているが、マイク権限確認や
   // 孤児音声ファイルの取り込みがまだ終わっておらずbegin()前の状態。この間は「待機中」に見えて
   // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
@@ -1126,8 +1150,16 @@ export default function RecordScreen() {
 
       <View style={styles.transcriptWrap}>
       {bandExpanded ? (
-        <View style={styles.expandedEqualizerOverlay} pointerEvents="none">
-          <ExpandedFocusEqualizer running={running && !paused} />
+        <View style={styles.expandedEqualizerOverlay} pointerEvents="box-none">
+          <TouchableOpacity
+            activeOpacity={0.75}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setBandExpanded(false);
+            }}
+          >
+            <ExpandedFocusEqualizer running={running && !paused} />
+          </TouchableOpacity>
         </View>
       ) : null}
       {markSelectMode ? (
@@ -1276,7 +1308,8 @@ export default function RecordScreen() {
       <LiveFocusBand
         text={interim}
         running={running && !paused}
-        onExpandedChange={setBandExpanded}
+        expanded={bandExpanded}
+        onToggleExpanded={() => setBandExpanded((prev) => !prev)}
       />
 
       <View style={styles.bottomSection}>
@@ -1542,6 +1575,22 @@ function MiniMicIcon({ running }: { running: boolean }) {
   const [micLevel, setMicLevel] = useState(0);
   const micLevelRef = useRef(0);
 
+  // 展開時の円形イコライザーと同じ、水面の波を横に流し続けるアニメーション
+  const waveAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!running) return;
+    const loop = Animated.loop(
+      Animated.timing(waveAnim, {
+        toValue: -MINI_WAVE_PERIOD,
+        duration: 1600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [running, waveAnim]);
+
   useEffect(() => {
     if (!running) {
       micLevelRef.current = 0;
@@ -1560,14 +1609,24 @@ function MiniMicIcon({ running }: { running: boolean }) {
 
   if (!running) return null;
 
+  const fillHeight = Math.max(2, Math.round(2 + micLevel * 14));
+
   return (
     <View style={styles.miniMicIcon}>
       <Ionicons name="mic-outline" size={16} color="#c7c7cc" />
-      <View
-        style={[styles.miniMicFillMask, { height: Math.max(2, Math.round(2 + micLevel * 14)) }]}
-      >
+      <View style={[styles.miniMicFillMask, { height: fillHeight }]}>
         <Ionicons name="mic" size={16} color="#1c1c1e" style={styles.miniMicFillIcon} />
       </View>
+      <Animated.View
+        style={[
+          styles.miniMicWaveStrip,
+          { bottom: fillHeight - MINI_WAVE_BASELINE, transform: [{ translateX: waveAnim }] },
+        ]}
+      >
+        <Svg width={MINI_WAVE_SVG_WIDTH} height={MINI_WAVE_SVG_HEIGHT}>
+          <Path d={MINI_WAVE_PATH_D} fill="rgba(255,255,255,0.35)" />
+        </Svg>
+      </Animated.View>
     </View>
   );
 }
@@ -1675,31 +1734,22 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
 // 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
 // 縮小(1行)⇄展開(3行までのテキスト)はタップで切り替える。展開中の円形イコライザーは
 // 画面上部に浮かぶオーバーレイ(ExpandedFocusEqualizer)として別途描画されるため、
-// 展開の可否だけをonExpandedChangeで親に伝える。
-// 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
+// 展開状態(expanded)は親(RecordScreen)で管理し、ここは制御コンポーネントとして受け取る
+// (オーバーレイをタップした時にも同じ状態を閉じられるようにするため)。
 function LiveFocusBand({
   text,
   running,
-  onExpandedChange,
+  expanded,
+  onToggleExpanded,
 }: {
   text: string;
   running: boolean;
-  onExpandedChange: (expanded: boolean) => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
-  // 収録が止まったら展開状態のままにしない
-  useEffect(() => {
-    if (!running) setExpanded(false);
-  }, [running]);
-
-  useEffect(() => {
-    onExpandedChange(running && expanded);
-  }, [running, expanded, onExpandedChange]);
-
   const handleToggle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setExpanded((prev) => !prev);
+    onToggleExpanded();
   };
 
   if (!running) return null;
@@ -1918,9 +1968,12 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   liveFocusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  miniMicIcon: { width: 16, height: 16 },
+  // 波の帯が16x16の枠からはみ出さないようoverflow:"hidden"にする(液面の塗りつぶし自体は
+  // miniMicFillMask側で別途クリップしているので、ここでの見た目の変化はない)
+  miniMicIcon: { width: 16, height: 16, overflow: "hidden" },
   miniMicFillMask: { position: "absolute", left: 0, bottom: 0, width: 16, overflow: "hidden" },
   miniMicFillIcon: { position: "absolute", left: 0, bottom: 0 },
+  miniMicWaveStrip: { position: "absolute", left: 0 },
   liveFocusTextCollapsed: { flex: 1, fontSize: 13, color: "#a0a0a6" },
 
   liveFocusExpanded: {
