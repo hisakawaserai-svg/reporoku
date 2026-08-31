@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import type { RouteProp } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -35,8 +36,8 @@ import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
-import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
-import { adoptOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecovery";
+import { deleteStoredFile, getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
+import { adoptOrphanAudioFiles, deleteOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecovery";
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import {
   getAllowBluetoothMic,
@@ -236,6 +237,23 @@ export default function RecordScreen() {
   useEffect(() => {
     if (!running) setBandExpanded(false);
   }, [running]);
+
+  // スリープモード(Claude Design案 1c): 画面を暗くして直近数行だけを薄く表示する省電力・
+  // 非集中表示モード。DB結線・音声認識ロジックには関与しない、見た目専用の状態
+  const [sleepMode, setSleepMode] = useState(false);
+  useEffect(() => {
+    if (!running) setSleepMode(false);
+  }, [running]);
+
+  // スリープモード中はタブバーも隠す(画面全体を暗い表示に集中させるため)。
+  // 画面遷移でアンマウントされる場合に備え、必ず表示状態に戻してから抜ける
+  const tabNavigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
+  useEffect(() => {
+    tabNavigation.setOptions({ tabBarStyle: sleepMode ? { display: "none" } : undefined });
+    return () => {
+      tabNavigation.setOptions({ tabBarStyle: undefined });
+    };
+  }, [sleepMode, tabNavigation]);
   // クラッシュ復旧の「録音を再開する」直後、タイムライン復元は終わっているが、マイク権限確認や
   // 孤児音声ファイルの取り込みがまだ終わっておらずbegin()前の状態。この間は「待機中」に見えて
   // 実際には録音再開の準備が進行中のため、誤って「開始」を押して新規セッションが
@@ -258,6 +276,9 @@ export default function RecordScreen() {
   // 録音を始めるのはユーザーが明示的に「開始」を押した時点にする
   const pendingResumeSessionIdRef = useRef<string | null>(null);
   const isPausingRef = useRef(false);       // 意図的な一時停止によるstopか(自動再開・完全終了と区別する)
+  // 「リセット」による破棄目的のstopか。trueの場合、endイベント側では保存(finalize)せず
+  // セッションを丸ごと削除する
+  const isDiscardingRef = useRef(false);
   // 「end」イベントが何らかの理由で二重に発火した場合、finalize/clearScreenStateを
   // 2回走らせない(=既に確定済みのタイムラインを巻き戻さない)ためのガード
   const finalizedRef = useRef(false);
@@ -389,6 +410,63 @@ export default function RecordScreen() {
     setBlocks([]);
     setAudioUris([]);
     setInterim("");
+  };
+
+  // 「リセット」確定後、実際にセッション一式(DBレコード・音声ファイル・写真ファイル)を削除する。
+  // クラッシュ復旧画面の破棄処理(discardCrashedSession)と同じ考え方で、DB未登録のまま
+  // 残っている孤児音声ファイルも含めて削除してから、セッション本体・関連ブロックを消す
+  const performDiscardCurrentSession = async () => {
+    const sessionId = sessionIdRef.current;
+    setRunning(false);
+    setPaused(false);
+    setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+    if (sessionId) {
+      try {
+        const [session, sessionBlocks, audioFiles] = await Promise.all([
+          sessionsRepo.getById(sessionId),
+          blocksRepo.listBySessionId(sessionId),
+          audioFilesRepo.listBySessionId(sessionId),
+        ]);
+        if (session) await deleteOrphanAudioFiles(session);
+        await sessionsRepo.deleteById(sessionId);
+        await Promise.all([
+          ...sessionBlocks.filter((b) => b.kind === "photo" && b.photoUri).map((b) => deleteStoredFile(b.photoUri as string)),
+          ...audioFiles.map((f) => deleteStoredFile(f.fileUri)),
+        ]);
+      } catch (e) {
+        console.warn("[DB] セッションのリセットに失敗しました", e);
+      }
+    }
+    sessionIdRef.current = null;
+    clearScreenState();
+  };
+
+  // 収録画面の「リセット」ボタン。保存も画面遷移もせず、ここまでの録音を丸ごと破棄して
+  // 「待機中」の状態に戻す(終了ボタンと違い、録音完了画面には遷移しない)
+  const handleReset = () => {
+    Alert.alert(
+      "この録音をリセットしますか？",
+      "ここまでの文字起こし・メモ・写真・音声がすべて削除され、元に戻せません。",
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "リセットする",
+          style: "destructive",
+          onPress: () => {
+            if (running && !paused) {
+              // ネイティブの音声認識セッションを止めてから破棄する(endイベント側で実行)
+              isDiscardingRef.current = true;
+              shouldRun.current = false;
+              ExpoSpeechRecognitionModule.stop();
+              return;
+            }
+            // 一時停止中・待機中はネイティブ側が既に止まっているので即座に破棄する
+            shouldRun.current = false;
+            performDiscardCurrentSession();
+          },
+        },
+      ]
+    );
   };
 
   const toggleStarOnLastBlock = () => {
@@ -635,6 +713,14 @@ export default function RecordScreen() {
   useSpeechRecognitionEvent("end", () => {
     isRecognizingRef.current = false;
 
+    if (isDiscardingRef.current) {
+      // リセットによるstop。保存せず、セッションを丸ごと破棄する
+      isDiscardingRef.current = false;
+      finalizedRef.current = true; // 通常の終了処理(保存)が後から走らないようにする
+      performDiscardCurrentSession();
+      return;
+    }
+
     if (isPausingRef.current) {
       // 一時停止による停止。セッションは終了させず、次の「再開」を待つ
       isPausingRef.current = false;
@@ -821,6 +907,10 @@ export default function RecordScreen() {
     // 実際に時間が経過していたはずなので、それを下限にする(経過時間表示が0に戻らないように)
     const audioContentMs = audioFiles.reduce((sum, f) => sum + f.durationMs, 0);
     contentMsRef.current = Math.max(audioContentMs, prevEnd.current);
+    // running=falseの間はティッカーのuseEffectが動かず経過時間表示が更新されないため、
+    // ここで明示的に反映しておく(そうしないと「開始」を押すまでヘッダーの秒数だけ
+    // 00:00のままになり、復元済みログの時刻と食い違って見えてしまう)
+    setElapsedMs(contentMsRef.current);
 
     // ここではまだマイクを起動しない。「復元中…」を終え「待機中」に戻し、
     // ユーザーが明示的に「開始」を押した時点で初めてbeginPendingResume()が録音を始める
@@ -1116,6 +1206,112 @@ export default function RecordScreen() {
   // バッジを出す必要がない
   const transcriptOverflowing = transcriptContentHeight > transcriptViewportHeight;
 
+  if (sleepMode) {
+    const sleepLines = blocks.filter((b) => b.kind === "text").slice(-6);
+    return (
+      <SafeAreaView style={[styles.container, styles.sleepContainer]} edges={["top"]}>
+        <Pressable
+          style={styles.sleepOverlay}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            setSleepMode(false);
+          }}
+        >
+          <View style={styles.sleepHeader}>
+            <View style={styles.sleepStatusRow}>
+              <View style={[styles.sleepDot, !(running && !paused) && styles.sleepDotIdle]} />
+              <Text style={styles.sleepStatusLabel}>
+                {paused ? "一時停止中" : running ? "収録中" : "待機中"}
+              </Text>
+              <Text style={styles.sleepStatusTimer}>{fmt(elapsedMs)}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                setSleepMode(false);
+              }}
+              hitSlop={10}
+            >
+              <Ionicons name="moon" size={20} color="#c7c7cc" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.sleepTimeline}>
+            {sleepLines.map((b, i) => {
+              const isLast = i === sleepLines.length - 1;
+              const active = isLast && !interim;
+              return (
+                <Text
+                  key={b.id ?? `sleep-${i}`}
+                  style={[styles.sleepLine, active && styles.sleepLineActive]}
+                  numberOfLines={2}
+                >
+                  {fmt(b.ms)}　{b.text}
+                </Text>
+              );
+            })}
+            {interim ? (
+              <Text style={[styles.sleepLine, styles.sleepLineActive]} numberOfLines={2}>
+                {interim}
+              </Text>
+            ) : null}
+          </View>
+        </Pressable>
+
+        {/* ボタン行は「タップで閉じる」Pressableの外(兄弟要素)に置く。Pressable配下に
+            TouchableOpacityをネストすると端末によってはタップが親Pressableにも伝わり、
+            ボタン操作と同時にスリープ解除が走って意図した動作(撮影など)が阻害されるため */}
+        <View style={styles.sleepBottomRow}>
+          <View style={styles.sleepButtonGroup}>
+            <TouchableOpacity
+              style={[styles.sleepActionButton, restoring && styles.sleepActionButtonDisabled]}
+              activeOpacity={0.7}
+              onPress={
+                paused ? resume : running ? pause : pendingResumeSessionIdRef.current ? beginPendingResume : start
+              }
+              disabled={restoring}
+              hitSlop={8}
+            >
+              {restoring ? (
+                <ActivityIndicator size="small" color="#8e8e93" />
+              ) : (
+                <Ionicons name={running && !paused ? "pause" : "play"} size={16} color="#e5e5ea" />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.sleepActionButton, !running && styles.sleepActionButtonDisabled]}
+              activeOpacity={0.7}
+              onPress={endSession}
+              disabled={!running}
+              hitSlop={8}
+            >
+              <Ionicons name="square" size={14} color={colors.danger.action} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.sleepButtonGroup}>
+            <TouchableOpacity
+              style={styles.sleepActionButton}
+              activeOpacity={0.7}
+              onPress={() => handleMarkPress("star")}
+              hitSlop={8}
+            >
+              <Ionicons name="star" size={16} color={colors.star.accent} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sleepActionButton}
+              activeOpacity={0.7}
+              onPress={() => handleMarkPress("photo")}
+              hitSlop={8}
+            >
+              <Ionicons name="camera" size={16} color="#c7c7cc" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
@@ -1124,6 +1320,15 @@ export default function RecordScreen() {
         </View>
 
         <View style={styles.topRightGroup}>
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setSleepMode(true);
+            }}
+            hitSlop={10}
+          >
+            <Ionicons name="moon-outline" size={20} color="#c7c7cc" />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => navigation.navigate("HowToUse", { section: "record" })}
             hitSlop={10}
@@ -1327,6 +1532,15 @@ export default function RecordScreen() {
           </View>
 
           <View style={styles.controlRow}>
+            <TouchableOpacity
+              style={[styles.controlButtonReset, (!running || restoring) && styles.controlButtonDisabled]}
+              onPress={handleReset}
+              disabled={!running || restoring}
+              activeOpacity={0.75}
+              hitSlop={6}
+            >
+              <Ionicons name="refresh" size={18} color="#8e8e93" />
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.controlButtonPause, restoring && styles.controlButtonDisabled]}
               onPress={paused ? resume : running ? pause : pendingResumeSessionIdRef.current ? beginPendingResume : start}
@@ -1782,6 +1996,51 @@ function LiveFocusBand({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fafafc" },
 
+  // スリープモード(Claude Design案 1c)
+  sleepContainer: { backgroundColor: "#000000" },
+  sleepOverlay: { flex: 1, paddingHorizontal: 20 },
+  sleepHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 10,
+  },
+  sleepStatusRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  sleepDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: colors.danger.action },
+  sleepDotIdle: { backgroundColor: "#5a5a5e" },
+  sleepStatusLabel: { fontSize: 13, color: "#8e8e93", fontWeight: "600" },
+  sleepStatusTimer: {
+    fontSize: 13,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+    color: "#c7c7cc",
+  },
+  sleepTimeline: {
+    flex: 1,
+    justifyContent: "flex-end",
+    paddingBottom: 28,
+    gap: 10,
+  },
+  sleepLine: { fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.28)" },
+  sleepLineActive: { color: "rgba(255,255,255,0.82)" },
+  sleepBottomRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+  },
+  sleepButtonGroup: { flexDirection: "row", alignItems: "center", gap: 14 },
+  sleepActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sleepActionButtonDisabled: { opacity: 0.35 },
+
   topRightGroup: {
     position: "absolute",
     top: 0,
@@ -2049,6 +2308,14 @@ const styles = StyleSheet.create({
   controlRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  controlButtonReset: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eceef1",
   },
   controlButtonPause: {
     flex: 1,
