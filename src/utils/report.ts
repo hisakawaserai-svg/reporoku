@@ -45,7 +45,8 @@ function formatDateSlash(unixMs: number): string {
 function headerLines(session: Session): string[] {
   const start = session.startedAt;
   const end = session.startedAt + session.durationMs;
-  return [`【受講報告】${session.title}`, `日時：${formatDateSlash(start)} ${formatHHMM(start)}〜${formatHHMM(end)}`];
+  const title = session.title.trim() || "無題のノート";
+  return [title, `日時：${formatDateSlash(start)} ${formatHHMM(start)}〜${formatHHMM(end)}`];
 }
 
 // ★のブロックは、一言メモ(summary_note)があればそれを優先し、無ければ元の発言テキストを使う
