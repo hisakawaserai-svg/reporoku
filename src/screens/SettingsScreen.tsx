@@ -326,27 +326,6 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>設定</Text>
-        {SECTIONS.map((section) => (
-          <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionHeader}>{section.title}</Text>
-            <View style={styles.card}>
-              {section.rows.map((row, i) => (
-                <TouchableOpacity
-                  key={row.label}
-                  style={[
-                    styles.row,
-                    i < section.rows.length - 1 && styles.rowDivider,
-                  ]}
-                >
-                  <Ionicons name={row.icon} size={20} color="#06c" style={styles.rowIcon} />
-                  <Text style={styles.rowLabel}>{row.label}</Text>
-                  {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
-                  <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        ))}
 
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>再生</Text>
@@ -441,6 +420,39 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionHeader}>タイムライン表示</Text>
+          <View style={styles.card}>
+            <View style={[styles.row, styles.rowDivider]}>
+              <Ionicons name="layers-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>セクション分けを表示する</Text>
+              <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
+            </View>
+            <View style={styles.gapRow}>
+              <Text style={styles.rowLabel}>新しい録音のデフォルト間隔</Text>
+              <View style={styles.gapOptionRow}>
+                {SECTION_GAP_OPTIONS.map((opt) => {
+                  const selected = opt.ms === defaultSectionGapMs;
+                  return (
+                    <TouchableOpacity
+                      key={opt.ms}
+                      style={[styles.gapOption, selected && styles.gapOptionSelected]}
+                      onPress={() => handleSelectDefaultSectionGap(opt.ms)}
+                    >
+                      <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.gapHint}>
+                新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionHeader}>ストレージ管理</Text>
           <View style={styles.card}>
             <TouchableOpacity
@@ -501,39 +513,6 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>タイムライン表示</Text>
-          <View style={styles.card}>
-            <View style={[styles.row, styles.rowDivider]}>
-              <Ionicons name="layers-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>セクション分けを表示する</Text>
-              <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
-            </View>
-            <View style={styles.gapRow}>
-              <Text style={styles.rowLabel}>新しい録音のデフォルト間隔</Text>
-              <View style={styles.gapOptionRow}>
-                {SECTION_GAP_OPTIONS.map((opt) => {
-                  const selected = opt.ms === defaultSectionGapMs;
-                  return (
-                    <TouchableOpacity
-                      key={opt.ms}
-                      style={[styles.gapOption, selected && styles.gapOptionSelected]}
-                      onPress={() => handleSelectDefaultSectionGap(opt.ms)}
-                    >
-                      <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <Text style={styles.gapHint}>
-                新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
           <Text style={styles.sectionHeader}>ヘルプ</Text>
           <View style={styles.card}>
             <TouchableOpacity style={styles.row} onPress={() => navigation.navigate("HowToUse", { section: "settings" })}>
@@ -543,6 +522,28 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {SECTIONS.map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionHeader}>{section.title}</Text>
+            <View style={styles.card}>
+              {section.rows.map((row, i) => (
+                <TouchableOpacity
+                  key={row.label}
+                  style={[
+                    styles.row,
+                    i < section.rows.length - 1 && styles.rowDivider,
+                  ]}
+                >
+                  <Ionicons name={row.icon} size={20} color="#06c" style={styles.rowIcon} />
+                  <Text style={styles.rowLabel}>{row.label}</Text>
+                  {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
+                  <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ))}
 
         {__DEV__ ? (
           <View style={styles.section}>
