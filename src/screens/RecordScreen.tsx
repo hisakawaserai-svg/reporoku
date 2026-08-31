@@ -1551,8 +1551,8 @@ function MiniMicIcon({ running }: { running: boolean }) {
   );
 }
 
-// 展開時に画面上部へ浮かぶ円形イコライザー。バーの動きに加え、円の背景自体も音量に
-// 合わせて拡大・縮小させ、波打つように脈動して見せる。
+// 展開時に画面上部へ浮かぶ円形イコライザー。バーの動きに加え、円の背景自体もマイク
+// アイコン(MiniMicIcon)と同じ液面ゲージ式で、音量に応じて下から明るく塗りつぶす。
 // LiveFocusBandの展開パネルの中ではなく、画面全体に重なるオーバーレイとして独立して描画する。
 function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   // 音量バー用のレベル(volumechangeイベントの実測値をもとに更新)。
@@ -1566,17 +1566,17 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
   const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
 
-  // 円の拡大・縮小(脈動)用。0〜1に正規化した音量を滑らかに追従させる
-  const [pulseLevel, setPulseLevel] = useState(0);
-  const pulseLevelRef = useRef(0);
+  // 円の液面ゲージ(下からの塗りつぶし)用。0〜1に正規化した音量を滑らかに追従させる
+  const [fillLevel, setFillLevel] = useState(0);
+  const fillLevelRef = useRef(0);
 
   useEffect(() => {
     if (!running) {
       barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
       barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
       setCircleLevels(barCurrentRef.current);
-      pulseLevelRef.current = 0;
-      setPulseLevel(0);
+      fillLevelRef.current = 0;
+      setFillLevel(0);
     }
   }, [running]);
 
@@ -1586,8 +1586,8 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
     const clamped = Math.max(-2, Math.min(10, event.value));
     const normalized = (clamped + 2) / 12;
 
-    pulseLevelRef.current = pulseLevelRef.current + (normalized - pulseLevelRef.current) * 0.3;
-    setPulseLevel(pulseLevelRef.current);
+    fillLevelRef.current = fillLevelRef.current + (normalized - fillLevelRef.current) * 0.3;
+    setFillLevel(fillLevelRef.current);
 
     const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
       // バーごとの「個性」を少し大きめにランダムドリフトさせる
@@ -1612,11 +1612,14 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   if (!running) return null;
 
   return (
-    <View style={[styles.liveFocusCircle, { transform: [{ scale: 1 + pulseLevel * 0.2 }] }]}>
-      <View style={styles.liveFocusCircleBars}>
-        {circleLevels.map((h, i) => (
-          <View key={i} style={[styles.liveFocusBar, { height: h }]} />
-        ))}
+    <View style={styles.liveFocusCircle}>
+      <View style={styles.liveFocusCircleInner}>
+        <View style={[styles.liveFocusCircleFill, { height: Math.round(fillLevel * 88) }]} />
+        <View style={styles.liveFocusCircleBars}>
+          {circleLevels.map((h, i) => (
+            <View key={i} style={[styles.liveFocusBar, { height: h }]} />
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -1879,18 +1882,32 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
   },
+  // 影(shadow)はoverflow:"hidden"だと切れてしまうため、影を持つ外側と
+  // 塗りつぶしをクリップする内側(liveFocusCircleInner)を分けている
   liveFocusCircle: {
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: "#1c1c1e",
-    justifyContent: "center",
-    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 8,
+  },
+  liveFocusCircleInner: {
+    flex: 1,
+    borderRadius: 44,
+    backgroundColor: "#1c1c1e",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  liveFocusCircleFill: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(255,255,255,0.22)",
   },
   liveFocusCircleBars: {
     flexDirection: "row",
