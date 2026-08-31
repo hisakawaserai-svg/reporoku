@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as colors from "../theme/colors";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -33,8 +34,10 @@ export function useRowLongPressMenu<T>() {
     else refs.delete(id);
   };
 
-  const open = (id: string, data: T) => {
-    const node = refs.get(id);
+  // nodeOverrideは、対象行がregisterRefで登録されていない場所(呼び出し元がローカルに
+  // 保持している別のViewの参照)から直接開きたい場合に使う
+  const open = (id: string, data: T, nodeOverride?: View | null) => {
+    const node = nodeOverride ?? refs.get(id);
     if (!node) return;
     node.measureInWindow((x, y, width, height) => {
       setAnchor({ data, x, y, width, height });
@@ -67,6 +70,10 @@ export function RowLongPressMenu<T>({
   onClose,
   accentBarColor,
   renderPreview,
+  extra,
+  extraHeight = 0,
+  highlightOverride,
+  menuOverride,
 }: {
   anchor: Anchor<T> | null;
   scale: Animated.Value;
@@ -76,14 +83,25 @@ export function RowLongPressMenu<T>({
   // rowMenuAccentBar/timelineAccentBarと同じ見た目)。不要なkindではundefinedのまま渡す
   accentBarColor?: string;
   renderPreview: (data: T) => React.ReactNode;
+  // 通常のitems一覧の上に足したい追加コンテンツ(録音画面の★📝❓トグル行など)。
+  // 不要な画面ではundefinedのまま渡す
+  extra?: React.ReactNode;
+  // extraの高さ(位置計算に使う)。extraを渡す場合はセットで渡す
+  extraHeight?: number;
+  // ゴーストの表示位置・高さを呼び出し側で完全に制御したい場合に使う(ノート詳細画面のように、
+  // ブロックの実測高さに上限を設けてoverflow:hiddenで切り詰める必要がある場合など)
+  highlightOverride?: { top: number; height: number };
+  // メニュー本体(位置・中身)を丸ごと呼び出し側で制御したい場合に使う(ノート詳細画面のように、
+  // 項目数が多くitems一覧+固定位置計算では表現できず、ページ送りが必要な場合など)
+  menuOverride?: { top: number; left: number; width: number; content: React.ReactNode };
 }) {
   let top = 0;
   let left = 0;
   let highlightTop = 0;
-  if (anchor) {
+  if (anchor && !menuOverride) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
-    const menuHeight = items.length * MENU_ITEM_HEIGHT;
+    const menuHeight = extraHeight + items.length * MENU_ITEM_HEIGHT;
     const spaceBelow = windowHeight - (anchor.y + anchor.height) - MENU_GAP;
     const spaceAbove = anchor.y - MENU_GAP;
     const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
@@ -92,6 +110,9 @@ export function RowLongPressMenu<T>({
     const maxTop = windowHeight - menuHeight - MENU_SCREEN_MARGIN;
     top = Math.max(minTop, Math.min(top, maxTop));
     left = Math.max(16, Math.min(anchor.x, windowWidth - MENU_WIDTH - 16));
+  }
+  if (anchor) {
+    const windowHeight = Dimensions.get("window").height;
     highlightTop = Math.max(
       MENU_SCREEN_MARGIN,
       Math.min(anchor.y, windowHeight - anchor.height - MENU_SCREEN_MARGIN)
@@ -107,13 +128,21 @@ export function RowLongPressMenu<T>({
               pointerEvents="none"
               style={[
                 styles.highlight,
-                {
-                  top: highlightTop,
-                  left: anchor.x,
-                  width: anchor.width,
-                  minHeight: anchor.height,
-                  transform: [{ scale }],
-                },
+                highlightOverride
+                  ? {
+                      top: highlightOverride.top,
+                      left: anchor.x,
+                      width: anchor.width,
+                      height: highlightOverride.height,
+                      overflow: "hidden",
+                    }
+                  : {
+                      top: highlightTop,
+                      left: anchor.x,
+                      width: anchor.width,
+                      minHeight: anchor.height,
+                    },
+                { transform: [{ scale }] },
               ]}
             >
               {accentBarColor ? (
@@ -121,18 +150,30 @@ export function RowLongPressMenu<T>({
               ) : null}
               {renderPreview(anchor.data)}
             </Animated.View>
-            <View style={[styles.menuList, { top, left, width: MENU_WIDTH }]}>
-              {items.map((item, index) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
-                  onPress={item.onPress}
-                >
-                  <Text style={styles.menuItemText}>{item.label}</Text>
-                  <Ionicons name={item.icon} size={18} color={item.color ?? "#3c3c43"} />
-                </TouchableOpacity>
-              ))}
-            </View>
+            {menuOverride ? (
+              <View
+                style={[
+                  styles.menuList,
+                  { top: menuOverride.top, left: menuOverride.left, width: menuOverride.width },
+                ]}
+              >
+                {menuOverride.content}
+              </View>
+            ) : (
+              <View style={[styles.menuList, { top, left, width: MENU_WIDTH }]}>
+                {extra}
+                {items.map((item, index) => (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
+                    onPress={item.onPress}
+                  >
+                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Ionicons name={item.icon} size={18} color={item.color ?? "#3c3c43"} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </>
         ) : null}
       </Pressable>
@@ -141,7 +182,7 @@ export function RowLongPressMenu<T>({
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
+  overlay: { flex: 1, backgroundColor: colors.overlay.menu },
   highlight: {
     position: "absolute",
     backgroundColor: "#fff",
@@ -180,6 +221,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
-  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
+  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
   menuItemText: { fontSize: 15, color: "#1c1c1e" },
 });

@@ -1,7 +1,6 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
   Dimensions,
   GestureResponderEvent,
   Image,
@@ -46,16 +45,20 @@ import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCard";
 import GroupSettingForm from "../components/GroupSettingForm";
+import { RowLongPressMenu, useRowLongPressMenu } from "../components/RowLongPressMenu";
 import * as Clipboard from "expo-clipboard";
 import { getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
+import { fontSize } from "../theme/typography";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
 const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; tint?: string }[] = [
   { key: "all", label: "すべて" },
-  { key: "star", label: "★", bg: "#fdf0dc", tint: "#d98c00" },
-  { key: "todo", label: "✓", bg: "#e0f7e6", tint: "#1f9254" },
-  { key: "question", label: "?", bg: "#f2e8fc", tint: "#7c4dff" },
+  { key: "star", label: "★", bg: colors.star.background, tint: colors.star.accent },
+  { key: "todo", label: "✓", bg: colors.todo.background, tint: colors.todo.accent },
+  { key: "question", label: "?", bg: colors.question.background, tint: colors.question.accent },
   { key: "photo", icon: "camera-outline", bg: "#eef1f4", tint: "#57575c" },
   { key: "note", icon: "document-text-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
@@ -191,9 +194,9 @@ type IconBadge = { key: string; icon: IconName; color: string };
 // 該当するアイコンをすべて横に並べたバッジとして返す
 function activeBadges(block: Block): IconBadge[] {
   const badges: IconBadge[] = [];
-  if (block.isStarred) badges.push({ key: "star", icon: "star", color: "#d98c00" });
-  if (block.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: "#1f9254" });
-  if (block.isQuestion) badges.push({ key: "question", icon: "help-circle", color: "#7c4dff" });
+  if (block.isStarred) badges.push({ key: "star", icon: "star", color: colors.star.accent });
+  if (block.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: colors.todo.accent });
+  if (block.isQuestion) badges.push({ key: "question", icon: "help-circle", color: colors.question.accent });
   return badges;
 }
 
@@ -240,15 +243,9 @@ export default function NoteDetailScreen() {
   // タイムライン上でテキストをタップして編集中のブロック(発言・メモ・写真キャプション共通)
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
-  // 長押しで開く「結合/分割/マーク」メニューの対象ブロックと、その画面上の位置
-  // (ブロックの近くにメニューを吹き出し表示するため、テキスト部分の実測座標を保持する)
-  const [menuAnchor, setMenuAnchor] = useState<{
-    blockId: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
+  // 長押しで開く「結合/分割/マーク」メニュー。他画面と共通のRowLongPressMenuを使う。
+  // データは常に最新のblocksから引き直せるよう、ブロックそのものではなくblockIdだけを保持する
+  const rowMenu = useRowLongPressMenu<string>();
   // 長押しメニューの項目が画面に収まりきらないとき、スクロールではなくページ送りにする。
   // メニューを開き直すたびに1ページ目に戻す
   const [menuPage, setMenuPage] = useState(0);
@@ -283,11 +280,6 @@ export default function NoteDetailScreen() {
   // セクションのView自体のonLayout(sectionLayoutYRef)と合算して初めて絶対位置になる
   const blockLayoutYRef = useRef<Map<string, number>>(new Map());
   const sectionLayoutYRef = useRef<Map<string, number>>(new Map());
-  // 長押しメニューの位置決めのため、各ブロックの本文Viewの参照を保持する
-  const blockRowRefs = useRef<Map<string, View>>(new Map());
-  // 長押しメニューを開いたとき、対象ブロックのハイライトが「グイーン」と一回り
-  // 大きくなる演出用のアニメーション値(同じ場所を中心に拡大する)
-  const menuHighlightScale = useRef(new Animated.Value(1)).current;
   const jumpedBlockIdRef = useRef<string | null>(null);
   // ブロックをタップして再生開始した直後は、そのブロックは既に画面内に見えている
   // (タップできたのだから)ため、自動追従スクロールで無駄に画面をそのブロックの
@@ -507,7 +499,7 @@ export default function NoteDetailScreen() {
   const startEditingBlock = useCallback(
     async (block: Block) => {
       if (splittingBlockId) return; // 分割位置の選択中はテキスト編集を開始しない
-      setMenuAnchor(null); // 長押しメニューの「テキスト編集」から呼ばれた場合、メニューを閉じる
+      rowMenu.close(); // 長押しメニューの「テキスト編集」から呼ばれた場合、メニューを閉じる
       if (editingBlockId && editingBlockId !== block.id) {
         await commitBlockEdit();
       }
@@ -521,7 +513,7 @@ export default function NoteDetailScreen() {
 
   // 長押しで「結合/分割/マーク」メニューを開く。編集中・分割選択中は開かない。
   // ブロックの本文Viewの画面上の実測座標を取得し、その近くにメニューを表示する。
-  // 「まとめ」タブの行など、blockRowRefsに登録されていない呼び出し元からは
+  // 「まとめ」タブの行など、rowMenu.registerRefで登録されていない呼び出し元からは
   // nodeOverrideで直接そのTouchableOpacityの参照を渡す
   const openBlockMenu = (block: Block, nodeOverride?: View | null) => {
     if (editingBlockId || splittingBlockId || inlineFieldBlockId || newBlockDraft) return;
@@ -529,27 +521,11 @@ export default function NoteDetailScreen() {
       pauseBaselineIndexRef.current = filtered.findIndex((b) => b.id === activeBlockId);
       setScrollPaused(true);
     }
-    const node = nodeOverride ?? blockRowRefs.current.get(block.id);
-    if (!node) return;
-    node.measureInWindow((x, y, width, height) => {
-      setMenuAnchor({ blockId: block.id, x, y, width, height });
-      setMenuPage(0);
-      menuHighlightScale.setValue(1);
-      Animated.spring(menuHighlightScale, {
-        toValue: 1.08,
-        friction: 4,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
-    });
+    setMenuPage(0);
+    rowMenu.open(block.id, block.id, nodeOverride);
   };
 
-  // 閉じる時も、拡大を元に戻すアニメーションを再生してから消す
-  const closeBlockMenu = () => {
-    Animated.timing(menuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }).start(() =>
-      setMenuAnchor(null)
-    );
-  };
+  const closeBlockMenu = () => rowMenu.close();
 
   // 「↓ 新着N件」バッジをタップしたときの再開。自動追従を再開するだけで、実際のスクロールは
   // activeBlockId/scrollPausedを見ているuseEffect(下記)がまとめて行う
@@ -559,7 +535,7 @@ export default function NoteDetailScreen() {
   const closePhotoViewer = () => setViewerBlockId(null);
 
   const startSplitting = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     setSplittingBlockId(block.id);
     setSplitIndex(Math.floor((block.text ?? "").length / 2));
   };
@@ -605,7 +581,7 @@ export default function NoteDetailScreen() {
   // 前後どちらかの隣接ブロックとテキストを結合する。★/ToDo/質問フラグはORで両方引き継ぐ
   const mergeWithNeighbor = useCallback(
     async (block: Block, direction: "prev" | "next") => {
-      setMenuAnchor(null);
+      rowMenu.close();
       const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
       const index = sorted.findIndex((b) => b.id === block.id);
       const neighbor = direction === "prev" ? sorted[index - 1] : sorted[index + 1];
@@ -645,7 +621,7 @@ export default function NoteDetailScreen() {
 
   const toggleBlockStar = useCallback(
     async (block: Block) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       try {
         await blocksRepo.toggleStar(block.id);
         loadBlocks();
@@ -658,7 +634,7 @@ export default function NoteDetailScreen() {
 
   const toggleBlockTodo = useCallback(
     async (block: Block) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       try {
         await blocksRepo.toggleTodo(block.id);
         loadBlocks();
@@ -671,7 +647,7 @@ export default function NoteDetailScreen() {
 
   const toggleBlockTodoDone = useCallback(
     async (block: Block) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       try {
         await blocksRepo.toggleTodoDone(block.id);
         loadBlocks();
@@ -683,7 +659,7 @@ export default function NoteDetailScreen() {
   );
 
   const copyBlockText = useCallback((block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     Clipboard.setStringAsync(block.text ?? "").catch((e) =>
       console.warn("[Clipboard] コピーに失敗しました", e)
     );
@@ -693,7 +669,7 @@ export default function NoteDetailScreen() {
   // (回答はここでは変えない。既に回答済みのブロックをオフにした場合も回答はそのまま残る)
   const toggleBlockQuestion = useCallback(
     async (block: Block) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       try {
         await blocksRepo.toggleQuestion(block.id);
         loadBlocks();
@@ -708,7 +684,7 @@ export default function NoteDetailScreen() {
   // 「ブロックの1つのフィールドをテキストで編集する」という同じ形なので、行内展開カード
   // (InlineEditCard)1つを、モード違いとして使い回す
   const startInlineField = (block: Block, mode: InlineFieldMode) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     setInlineFieldBlockId(block.id);
     setInlineFieldMode(mode);
     setInlineFieldDraft(
@@ -753,7 +729,7 @@ export default function NoteDetailScreen() {
   };
 
   const startMemoPrompt = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     setNewBlockDraft({ afterBlockId: block.id, text: "" });
   };
 
@@ -789,7 +765,7 @@ export default function NoteDetailScreen() {
   // afterがnullの場合(ブロックが1つも無いセッション)は、挿入位置の基準が無いので先頭に追加する
   const addPhotoAfter = useCallback(
     async (after: Block | null) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       try {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) return;
@@ -845,7 +821,7 @@ export default function NoteDetailScreen() {
 
   const confirmDeleteBlock = useCallback(
     (block: Block) => {
-      setMenuAnchor(null);
+      rowMenu.close();
       Alert.alert("このブロックを削除しますか？", "元に戻せません。", [
         { text: "キャンセル", style: "cancel" },
         {
@@ -937,12 +913,20 @@ export default function NoteDetailScreen() {
     return () => clearTimeout(timer);
   }, [dragRatio]);
 
-  const sortedBlocks = [...blocks].sort((a, b) => a.startMs - b.startMs);
+  // ブロック数の多いノートで毎レンダーのソート/フィルタが無駄なコストにならないよう、
+  // blocks/filterが変わった時だけ計算し直す
+  const sortedBlocks = useMemo(
+    () => [...blocks].sort((a, b) => a.startMs - b.startMs),
+    [blocks]
+  );
   // フィルタで絞り込んだ、実際にタイムライン上に表示されているブロック一覧。
   // 自動追従の対象や「新着N件」の件数は、この「今画面に出せるブロック」基準で
   // 数えないと、フィルタで隠れているブロックの位置に飛ぼうとしたり、
   // 表示されないブロックの分まで新着扱いしてしまう
-  const filtered = sortedBlocks.filter((b) => matchesFilter(b, filter));
+  const filtered = useMemo(
+    () => sortedBlocks.filter((b) => matchesFilter(b, filter)),
+    [sortedBlocks, filter]
+  );
   // 自動再生時: 実際の再生位置(lead分の巻き戻りを含まない currentGlobalMs)が
   // 次のブロックの時刻に到達したら、ハイライトを1つずつ先へ進める。
   // タップ直後(まだleadの手前区間を再生中)は currentGlobalMs がそのブロックの
@@ -1160,8 +1144,11 @@ export default function NoteDetailScreen() {
     }
   }
 
-  // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか
-  const menuBlockId = menuAnchor?.blockId ?? null;
+  // 長押しメニューの対象ブロックと、結合/分割それぞれが可能かどうか。
+  // 以下の位置計算は元々{blockId, x, y, width, height}という形の独自stateを前提に
+  // 書かれているため、rowMenu.anchor(data/x/y/width/height)をその形のまま参照できるようにする
+  const menuAnchor = rowMenu.anchor;
+  const menuBlockId = menuAnchor?.data ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
   // ゴーストカードの接続線(下に次のブロックがある場合だけ表示)を、実際のタイムライン行と
   // 同じ判定で出す。セクション区切りが無効なときはtimelineGroupsが1グループにまとまるため、
@@ -1204,24 +1191,24 @@ export default function NoteDetailScreen() {
           key: "star",
           icon: "star",
           active: menuBlock.isStarred,
-          activeColor: "#d98c00",
-          inactiveBg: "#fdf0dc",
+          activeColor: colors.star.accent,
+          inactiveBg: colors.star.background,
           onPress: () => toggleBlockStar(menuBlock),
         },
         {
           key: "todo",
           icon: "checkmark",
           active: menuBlock.isTodo,
-          activeColor: "#1f9254",
-          inactiveBg: "#e0f7e6",
+          activeColor: colors.todo.accent,
+          inactiveBg: colors.todo.background,
           onPress: () => toggleBlockTodo(menuBlock),
         },
         {
           key: "question",
           icon: "help-circle",
           active: menuBlock.isQuestion,
-          activeColor: "#7c4dff",
-          inactiveBg: "#f2e8fc",
+          activeColor: colors.question.accent,
+          inactiveBg: colors.question.background,
           onPress: () => toggleBlockQuestion(menuBlock),
         },
       ]
@@ -1233,7 +1220,7 @@ export default function NoteDetailScreen() {
           key: "todoDone",
           label: menuBlock.todoDone ? "未完了に戻す" : "完了にする",
           icon: "checkmark-done-outline",
-          color: "#1f9254",
+          color: colors.todo.accent,
           onPress: () => toggleBlockTodoDone(menuBlock),
         }
       : null;
@@ -1245,7 +1232,7 @@ export default function NoteDetailScreen() {
           key: "answer",
           label: menuBlock.questionTerm?.trim() ? "回答を編集" : "回答を記入",
           icon: "chatbubble-ellipses-outline",
-          color: "#7c4dff",
+          color: colors.question.accent,
           onPress: () => startInlineField(menuBlock, "answer"),
         }
       : null;
@@ -1257,7 +1244,7 @@ export default function NoteDetailScreen() {
           key: "summaryNote",
           label: menuBlock.summaryNote?.trim() ? "一言メモを編集" : "一言メモを書く",
           icon: "create-outline",
-          color: "#d98c00",
+          color: colors.star.accent,
           onPress: () => startInlineField(menuBlock, "summaryNote"),
         }
       : null;
@@ -1271,7 +1258,7 @@ export default function NoteDetailScreen() {
             ? `グループ: ${menuBlock.importantGroup}`
             : "グループを設定",
           icon: "albums-outline",
-          color: "#d98c00",
+          color: colors.star.accent,
           onPress: () => startInlineField(menuBlock, "group"),
         }
       : null;
@@ -1347,7 +1334,7 @@ export default function NoteDetailScreen() {
         key: "delete",
         label: "削除",
         icon: "trash-outline",
-        color: "#ff3b30",
+        color: colors.danger.action,
         onPress: () => confirmDeleteBlock(menuBlock),
       }
     : null;
@@ -1555,9 +1542,9 @@ export default function NoteDetailScreen() {
     tint: string;
     items: Block[];
   }[] = [
-    { key: "star", label: "重要", icon: "star", bg: "#fdf0dc", tint: "#d98c00", items: blocks.filter((b) => b.isStarred) },
-    { key: "question", label: "質問", icon: "help-circle", bg: "#f2e8fc", tint: "#7c4dff", items: blocks.filter((b) => b.isQuestion) },
-    { key: "todo", label: "Todo", icon: "checkmark-circle", bg: "#e0f7e6", tint: "#1f9254", items: blocks.filter((b) => b.isTodo) },
+    { key: "star", label: "重要", icon: "star", bg: colors.star.background, tint: colors.star.accent, items: blocks.filter((b) => b.isStarred) },
+    { key: "question", label: "質問", icon: "help-circle", bg: colors.question.background, tint: colors.question.accent, items: blocks.filter((b) => b.isQuestion) },
+    { key: "todo", label: "Todo", icon: "checkmark-circle", bg: colors.todo.background, tint: colors.todo.accent, items: blocks.filter((b) => b.isTodo) },
     { key: "photo", label: "写真", icon: "camera", bg: "#eef1f4", tint: "#57575c", items: blocks.filter((b) => b.kind === "photo") },
     { key: "note", label: "メモ", icon: "document-text", bg: "#f5ecdd", tint: "#8a6d3b", items: blocks.filter((b) => b.kind === "note") },
   ];
@@ -1566,7 +1553,7 @@ export default function NoteDetailScreen() {
     // 現在の区分自体のマークは行内に重複表示しないよう除く
     const crossBadges = activeBadges(block).filter((b) => b.key !== sectionKey);
     const answer = block.questionTerm?.trim();
-    // blockRowRefs(タイムライン用)には登録されていないため、長押しメニューの位置測定用に
+    // rowMenu.registerRef(タイムライン用)には登録されていないため、長押しメニューの位置測定用に
     // このカード自体の参照をローカルに保持し、openBlockMenuへ直接渡す
     let rowNode: View | null = null;
     return (
@@ -1606,7 +1593,7 @@ export default function NoteDetailScreen() {
             <Ionicons
               name={block.todoDone ? "checkmark-circle" : "ellipse-outline"}
               size={18}
-              color={block.todoDone ? "#34c759" : "#c7c7cc"}
+              color={block.todoDone ? colors.todo.accent : "#c7c7cc"}
             />
             <Text style={[styles.summaryText, block.todoDone && styles.summaryTextDone]}>
               {block.text ?? ""}
@@ -1964,6 +1951,11 @@ export default function NoteDetailScreen() {
         onLayout={(e) => setTimelineViewportHeight(e.nativeEvent.layout.height)}
         onScroll={(e) => setTimelineScrollY(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={32}
+        // 行内編集カード(InlineEditCard)のキャンセル/決定ボタンが、キーボード表示中は
+        // 1回目のタップでキーボードを閉じるだけになってしまい(ボタン自体は反応しない)、
+        // 2回押さないと決定できなくなる問題を防ぐ。"handled"はタップ先が実際にタッチを
+        // 処理できる要素(ボタン等)の場合はキーボードを閉じずにそのタップを効かせる
+        keyboardShouldPersistTaps="handled"
       >
         {filtered.length === 0 ? (
           blocks.length === 0 ? (
@@ -2039,10 +2031,7 @@ export default function NoteDetailScreen() {
                     activeOpacity={0.6}
                     onPress={() => handleBlockPress(block)}
                     onLongPress={() => openBlockMenu(block)}
-                    ref={(node) => {
-                      if (node) blockRowRefs.current.set(block.id, node);
-                      else blockRowRefs.current.delete(block.id);
-                    }}
+                    ref={rowMenu.registerRef(block.id)}
                     onLayout={(e) => {
                       blockLayoutYRef.current.set(block.id, e.nativeEvent.layout.y);
                       if (
@@ -2107,67 +2096,64 @@ export default function NoteDetailScreen() {
       )}
       </KeyboardAvoidingView>
 
-      <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
-        <Pressable style={styles.menuOverlay} onPress={closeBlockMenu}>
-          {menuAnchor && menuBlock ? (
+      <RowLongPressMenu
+        anchor={menuBlock ? rowMenu.anchor : null}
+        scale={rowMenu.scale}
+        items={[]}
+        onClose={closeBlockMenu}
+        highlightOverride={{ top: highlightTop, height: anchorLayoutHeight }}
+        renderPreview={() =>
+          menuBlock ? (
             <>
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.menuHighlight,
-                  {
-                    top: highlightTop,
-                    left: menuAnchor.x,
-                    width: menuAnchor.width,
-                    height: anchorLayoutHeight,
-                    overflow: "hidden",
-                    transform: [{ scale: menuHighlightScale }],
-                  },
-                ]}
-              >
-                {menuBlock.isTodo ? <View style={styles.timelineAccentBar} /> : null}
-                <View style={styles.rowMenuHighlightTimelineRow}>
-                  {renderTimelineRowContent(menuBlock, menuBlockHasLineBelow)}
-                </View>
-              </Animated.View>
-              <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
-                {menuPages[menuPageIndex].map((row, index) => (
-                  <Fragment key={row.key}>{row.render(index > 0)}</Fragment>
-                ))}
-                {menuPages.length > 1 ? (
-                  <View style={styles.menuPaginationBar}>
-                    <TouchableOpacity
-                      hitSlop={8}
-                      disabled={menuPageIndex === 0}
-                      onPress={() => setMenuPage((p) => Math.max(0, p - 1))}
-                    >
-                      <Ionicons
-                        name="chevron-back"
-                        size={20}
-                        color={menuPageIndex === 0 ? "#d1d1d6" : "#3c3c43"}
-                      />
-                    </TouchableOpacity>
-                    <Text style={styles.menuPaginationText}>
-                      {menuPageIndex + 1} / {menuPages.length}
-                    </Text>
-                    <TouchableOpacity
-                      hitSlop={8}
-                      disabled={menuPageIndex === menuPages.length - 1}
-                      onPress={() => setMenuPage((p) => Math.min(menuPages.length - 1, p + 1))}
-                    >
-                      <Ionicons
-                        name="chevron-forward"
-                        size={20}
-                        color={menuPageIndex === menuPages.length - 1 ? "#d1d1d6" : "#3c3c43"}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
+              {menuBlock.isTodo ? <View style={styles.timelineAccentBar} /> : null}
+              <View style={styles.rowMenuHighlightTimelineRow}>
+                {renderTimelineRowContent(menuBlock, menuBlockHasLineBelow)}
               </View>
             </>
-          ) : null}
-        </Pressable>
-      </Modal>
+          ) : null
+        }
+        menuOverride={{
+          top: menuListTop,
+          left: menuLeft,
+          width: MENU_WIDTH,
+          content: (
+            <>
+              {menuPages[menuPageIndex].map((row, index) => (
+                <Fragment key={row.key}>{row.render(index > 0)}</Fragment>
+              ))}
+              {menuPages.length > 1 ? (
+                <View style={styles.menuPaginationBar}>
+                  <TouchableOpacity
+                    hitSlop={8}
+                    disabled={menuPageIndex === 0}
+                    onPress={() => setMenuPage((p) => Math.max(0, p - 1))}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={20}
+                      color={menuPageIndex === 0 ? "#d1d1d6" : "#3c3c43"}
+                    />
+                  </TouchableOpacity>
+                  <Text style={styles.menuPaginationText}>
+                    {menuPageIndex + 1} / {menuPages.length}
+                  </Text>
+                  <TouchableOpacity
+                    hitSlop={8}
+                    disabled={menuPageIndex === menuPages.length - 1}
+                    onPress={() => setMenuPage((p) => Math.min(menuPages.length - 1, p + 1))}
+                  >
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={menuPageIndex === menuPages.length - 1 ? "#d1d1d6" : "#3c3c43"}
+                    />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </>
+          ),
+        }}
+      />
 
       <PhotoViewerModal
         visible={viewerBlockId !== null}
@@ -2323,9 +2309,9 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  titleSection: { paddingHorizontal: 20, paddingTop: 2, paddingBottom: 12 },
+  titleSection: { paddingHorizontal: spacing.screenPadding, paddingTop: 2, paddingBottom: 12 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  titleText: { fontSize: 22, fontWeight: "700", color: "#1c1c1e", flexShrink: 1 },
+  titleText: { fontSize: fontSize.pageTitle, fontWeight: "700", color: "#1c1c1e", flexShrink: 1 },
   titleInput: {
     fontSize: 22,
     fontWeight: "700",
@@ -2340,8 +2326,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     backgroundColor: "#fff8ea",
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: radius.card,
+    padding: spacing.cardPadding,
     marginHorizontal: 16,
     marginBottom: 8,
     gap: 8,
@@ -2361,7 +2347,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: "#ebebf0",
+    backgroundColor: colors.searchBarBackground,
   },
   chipSelected: { backgroundColor: "#1c1c1e" },
   chipText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
@@ -2370,9 +2356,9 @@ const styles = StyleSheet.create({
   // 「タイムライン/まとめ」の切り替えセグメント
   viewModeRow: {
     flexDirection: "row",
-    marginHorizontal: 20,
+    marginHorizontal: spacing.screenPadding,
     marginBottom: 8,
-    backgroundColor: "#e5e5ea",
+    backgroundColor: colors.searchBarBackground,
     borderRadius: 10,
     padding: 2,
   },
@@ -2415,11 +2401,11 @@ const styles = StyleSheet.create({
   summarySectionCount: { fontSize: 12, color: "#8e8e93" },
   summaryCard: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: radius.card,
     marginHorizontal: 16,
     marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.cardPadding,
+    paddingVertical: spacing.cardPadding,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
@@ -2505,7 +2491,7 @@ const styles = StyleSheet.create({
   sectionWrap: { marginTop: 14 },
   sectionDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5ea",
+    borderTopColor: colors.divider,
   },
   sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
@@ -2569,7 +2555,7 @@ const styles = StyleSheet.create({
   timelineBadgeRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   editedBadge: { flexDirection: "row", alignItems: "center", gap: 2 },
   editedBadgeText: { fontSize: 10, color: "#8e8e93" },
-  timelineText: { fontSize: 15, color: "#1c1c1e", lineHeight: 21 },
+  timelineText: { fontSize: fontSize.body, color: "#1c1c1e", lineHeight: 21 },
   timelineTextPlaceholder: { fontSize: 15, color: "#b0b0b6", lineHeight: 21, fontStyle: "italic" },
   timelineTextInput: {
     fontSize: 15,
@@ -2603,37 +2589,14 @@ const styles = StyleSheet.create({
   // 0.3だと薄すぎてキーボードが透けて見えてしまうため、適切な濃さまで上げる
   debugOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: colors.overlay.prompt,
     justifyContent: "flex-end",
     zIndex: 10,
   },
 
-  // 長押しメニュー(iOSネイティブ風): 暗幕の上に、実測した位置・サイズぴったりの
-  // 明るい複製を重ねてハイライトとし、その近くに項目リストを吹き出し表示する
-  menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
-  menuHighlight: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  menuList: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
+  // 長押しメニュー(iOSネイティブ風)。暗幕・ハイライト複製・項目リストの外枠自体は
+  // 共通コンポーネントRowLongPressMenuが持つため、ここには項目リストの中身(行・区切り線・
+  // ページ送りバー)のスタイルだけが残る
   // 項目が多いメニュー用のページ送りバー(スクロールの代わり)
   menuPaginationBar: {
     flexDirection: "row",
@@ -2642,7 +2605,7 @@ const styles = StyleSheet.create({
     gap: 16,
     height: 40,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5ea",
+    borderTopColor: colors.divider,
   },
   menuPaginationText: { fontSize: 13, color: "#3c3c43", fontWeight: "600" },
   menuItem: {
@@ -2652,11 +2615,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
-  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
+  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.divider },
   menuItemText: { fontSize: 15, color: "#1c1c1e" },
   menuAttrRow: { flexDirection: "row", height: 48 },
   menuAttrButton: { flex: 1, alignItems: "center", justifyContent: "center" },
-  menuAttrButtonDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e5ea" },
+  menuAttrButtonDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.divider },
   menuMergeRow: { flexDirection: "row", height: 44 },
   menuMergeButton: {
     flex: 1,
@@ -2699,7 +2662,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 4,
   },
-  questionTermText: { fontSize: 12, color: "#7c4dff", marginTop: 4 },
+  questionTermText: { fontSize: 12, color: colors.question.accent, marginTop: 4 },
   emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40 },
   // 音声すら記録されず、ブロックが1つも無いセッション用。長押しで開く既存の
   // 「メモを追加」「写真を追加」と同じ操作を、直接タップできるボタンとして用意する
@@ -2723,7 +2686,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5ea",
+    borderTopColor: colors.divider,
     backgroundColor: "#fafafc",
   },
   playerButton: {

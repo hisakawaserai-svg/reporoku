@@ -14,14 +14,16 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as sessionsRepo from "../db/repositories/sessions";
 import type { Block, Session } from "../db/types";
 import { buildReportText, reportFileName, type ReportTemplate } from "../utils/report";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
 // ノート詳細画面のバッジ(activeBadges)と同じアイコン・配色に揃える
 const SUMMARY_ICONS: { key: string; icon: IconName; color: string }[] = [
-  { key: "star", icon: "star", color: "#d98c00" },
-  { key: "todo", icon: "checkmark-circle", color: "#1f9254" },
-  { key: "question", icon: "help-circle", color: "#7c4dff" },
+  { key: "star", icon: "star", color: colors.star.accent },
+  { key: "todo", icon: "checkmark-circle", color: colors.todo.accent },
+  { key: "question", icon: "help-circle", color: colors.question.accent },
 ];
 
 const TEMPLATES: { key: ReportTemplate; label: string; description: string }[] = [
@@ -176,10 +178,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: radius.card,
+    padding: spacing.cardPadding,
     borderWidth: 1,
-    borderColor: "#e5e5ea",
+    borderColor: colors.divider,
   },
   templateCardSelected: { borderColor: "#06c" },
   radio: {
@@ -196,14 +198,14 @@ const styles = StyleSheet.create({
   templateDescription: { fontSize: 13, color: "#8e8e93" },
   previewBox: {
     backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 14,
+    borderRadius: radius.card,
+    padding: spacing.cardPadding,
     borderWidth: 1,
-    borderColor: "#e5e5ea",
+    borderColor: colors.divider,
   },
   previewText: { fontSize: 13, lineHeight: 20, color: "#1c1c1e" },
-  card: { backgroundColor: "#fff", borderRadius: 10, overflow: "hidden" },
-  row: { paddingVertical: 12, paddingHorizontal: 14 },
-  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#c6c6c8" },
+  card: { backgroundColor: "#fff", borderRadius: radius.card, overflow: "hidden" },
+  row: { paddingVertical: spacing.cardPadding, paddingHorizontal: spacing.cardPadding },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
   rowLabel: { fontSize: 16, color: "#06c" },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -25,6 +25,10 @@ import type { BlockWithSession } from "../db/types";
 import { genId } from "../utils/id";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import GroupSettingForm from "../components/GroupSettingForm";
+import InlineEditCard from "../components/InlineEditCard";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
+import { fontSize } from "../theme/typography";
 
 type RowMenuData =
   | { kind: "todo" | "question"; block: BlockWithSession }
@@ -46,66 +50,18 @@ function formatDateSlash(unixMs: number): string {
   ).padStart(2, "0")}`;
 }
 
-// kind別の配色(アイコン・バッジ背景・保存ボタン)。★重要の編集も
-// Todo/質問と同じカード型モーダルに乗せられるよう、ここに追加してある
-const ITEM_FORM_KIND_STYLE: Record<
-  "todo" | "question" | "star",
-  {
-    icon: keyof typeof Ionicons.glyphMap;
-    iconColor: string;
-    badgeBg: string;
-    saveColor: string;
-  }
-> = {
-  todo: { icon: "checkmark", iconColor: "#1f9254", badgeBg: "#e0f7e6", saveColor: "#34c759" },
-  question: { icon: "help", iconColor: "#7c4dff", badgeBg: "#f2e8fc", saveColor: "#7c4dff" },
-  star: { icon: "star", iconColor: "#d98c00", badgeBg: "#fdf0dc", saveColor: "#d98c00" },
-};
-
-// Todo/質問/★の「追加」「編集」で共通のカード型モーダル。アイコンバッジ付きヘッダー+
-// 下線入力+丸型保存ボタンのレイアウトを、クイック追加・ToDo編集・質問編集・★編集の各所で使い回す
+// Todo/質問/★の「追加」「編集」で共通のモーダル外枠。中身のカード(InlineEditCard)は
+// タイムライン(ノート詳細画面)のインライン編集と共通のコンポーネントを使い回す
 // (元は「ノート」タブのToDo/質問タブにあった実装をそのままこちらへ移設したもの)
-type ItemFormModalProps = {
-  visible: boolean;
-  kind: "todo" | "question" | "star";
-  // 省略した場合、ヘッダー(アイコンバッジ+タイトル)自体を出さない。グループ設定のように
-  // ヘッダーが本文入力の邪魔になる場合はタイトル無しで使う
-  title?: string;
-  subtitle?: string;
-  // グループ選択チップなど、本文入力欄の上に足したい追加コンテンツ(無ければ何も出さない)
-  extra?: React.ReactNode;
-  mainValue: string;
-  onMainChange: (text: string) => void;
-  mainPlaceholder: string;
-  mainCaption: string;
-  showAnswer?: boolean;
-  answerValue?: string;
-  onAnswerChange?: (text: string) => void;
-  answerPlaceholder?: string;
-  answerCaption?: string;
-  onCancel: () => void;
-  onConfirm: () => void;
-};
-
-function ItemFormModal({
+function EditCardModal({
   visible,
-  kind,
-  title,
-  subtitle,
-  extra,
-  mainValue,
-  onMainChange,
-  mainPlaceholder,
-  mainCaption,
-  showAnswer,
-  answerValue,
-  onAnswerChange,
-  answerPlaceholder,
-  answerCaption,
   onCancel,
-  onConfirm,
-}: ItemFormModalProps) {
-  const kindStyle = ITEM_FORM_KIND_STYLE[kind];
+  children,
+}: {
+  visible: boolean;
+  onCancel: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onCancel}>
       <KeyboardAvoidingView
@@ -113,55 +69,8 @@ function ItemFormModal({
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <Pressable style={styles.quickAddOverlay} onPress={onCancel}>
-          <Pressable style={styles.quickAddPanel} onPress={(e) => e.stopPropagation()}>
-            {title ? (
-              <View style={styles.quickAddHeader}>
-                <View style={[styles.quickAddIconBadge, { backgroundColor: kindStyle.badgeBg }]}>
-                  <Ionicons name={kindStyle.icon} size={22} color={kindStyle.iconColor} />
-                </View>
-                <View>
-                  <Text style={styles.quickAddTitle}>{title}</Text>
-                  {subtitle ? <Text style={styles.quickAddSubtitle}>{subtitle}</Text> : null}
-                </View>
-              </View>
-            ) : null}
-
-            {extra}
-
-            <TextInput
-              style={styles.quickAddUnderlineInput}
-              value={mainValue}
-              onChangeText={onMainChange}
-              placeholder={mainPlaceholder}
-              autoFocus
-              multiline
-            />
-            <Text style={styles.quickAddFieldCaption}>{mainCaption}</Text>
-
-            {showAnswer ? (
-              <>
-                <TextInput
-                  style={styles.quickAddUnderlineInput}
-                  value={answerValue}
-                  onChangeText={onAnswerChange}
-                  placeholder={answerPlaceholder}
-                  multiline
-                />
-                <Text style={styles.quickAddFieldCaption}>{answerCaption}</Text>
-              </>
-            ) : null}
-
-            <View style={styles.quickAddFooter}>
-              <TouchableOpacity onPress={onCancel}>
-                <Text style={styles.quickAddCancelText}>キャンセル</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.quickAddSaveButton, { backgroundColor: kindStyle.saveColor }]}
-                onPress={onConfirm}
-              >
-                <Ionicons name="checkmark" size={22} color="#fff" />
-              </TouchableOpacity>
-            </View>
+          <Pressable style={styles.editCardPanel} onPress={(e) => e.stopPropagation()}>
+            {children}
           </Pressable>
         </Pressable>
       </KeyboardAvoidingView>
@@ -291,7 +200,7 @@ export default function SummaryScreen() {
     load();
   };
 
-  // ★の一言メモ編集。デザイン(カード型モーダル)はTodo/質問と共通のItemFormModalを使い、
+  // ★の一言メモ編集。デザイン(カード型モーダル)はTodo/質問と共通のInlineEditCardを使い、
   // kind="star"の配色(金色/★アイコン)で表示する
   const startStarEdit = (block: BlockWithSession) => {
     setStarEditBlockId(block.id);
@@ -392,7 +301,7 @@ export default function SummaryScreen() {
         <Ionicons
           name={block.todoDone ? "checkmark-circle" : "ellipse-outline"}
           size={24}
-          color={block.todoDone ? "#34c759" : "#c7c7cc"}
+          color={block.todoDone ? colors.todo.accent : "#c7c7cc"}
         />
       </TouchableOpacity>
       <View style={styles.rowTextCol}>
@@ -426,7 +335,7 @@ export default function SummaryScreen() {
           ]}
         >
           {resolved ? (
-            <Ionicons name="checkmark" size={16} color="#1f9254" />
+            <Ionicons name="checkmark" size={16} color={colors.todo.accent} />
           ) : (
             <Text style={styles.questionIconBadgeText}>?</Text>
           )}
@@ -557,11 +466,20 @@ export default function SummaryScreen() {
     (block.sessionTitle ?? "").toLowerCase().includes(trimmedQuery) ||
     (block.importantGroup ?? "").toLowerCase().includes(trimmedQuery);
 
-  const todoSearchResults = isSearching
-    ? [...todos.pending, ...todos.done].filter(matchesQuery)
-    : [];
-  const questionSearchResults = isSearching ? questions.filter(matchesQuery) : [];
-  const starSearchResults = isSearching ? starred.filter(matchesQuery) : [];
+  // Todo/質問/★の件数が多い場合に、検索していない間や無関係な再レンダーのたびに
+  // 毎回フィルタし直さないよう、検索語や対象データが変わった時だけ計算し直す
+  const todoSearchResults = useMemo(
+    () => (isSearching ? [...todos.pending, ...todos.done].filter(matchesQuery) : []),
+    [isSearching, todos, trimmedQuery]
+  );
+  const questionSearchResults = useMemo(
+    () => (isSearching ? questions.filter(matchesQuery) : []),
+    [isSearching, questions, trimmedQuery]
+  );
+  const starSearchResults = useMemo(
+    () => (isSearching ? starred.filter(matchesQuery) : []),
+    [isSearching, starred, trimmedQuery]
+  );
 
   const isEmptyForTab = isSearching
     ? (!showTodoSection || todoSearchResults.length === 0) &&
@@ -588,7 +506,7 @@ export default function SummaryScreen() {
             key: "toggleDone",
             label: block.todoDone ? "未対応に戻す" : "完了にする",
             icon: "checkmark-done-outline",
-            color: "#1f9254",
+            color: colors.todo.accent,
             onPress: () => rowMenu.close(() => toggleTodoDone(block)),
           },
           {
@@ -615,7 +533,7 @@ export default function SummaryScreen() {
             key: "defer",
             label: block.isDeferred ? "保留を解除する" : "保留にする",
             icon: "time-outline",
-            color: "#d98c00",
+            color: colors.star.accent,
             onPress: () => rowMenu.close(() => toggleDeferred(block)),
           },
           {
@@ -643,7 +561,7 @@ export default function SummaryScreen() {
               ? `グループ: ${block.importantGroup}`
               : "グループを設定",
             icon: "albums-outline",
-            color: "#d98c00",
+            color: colors.star.accent,
             onPress: () => rowMenu.close(() => startGroupPrompt(block)),
           },
           {
@@ -877,67 +795,71 @@ export default function SummaryScreen() {
         </TouchableOpacity>
       ) : null}
 
-      <ItemFormModal
-        visible={todoEditVisible}
-        kind="todo"
-        title="ToDoを編集"
-        subtitle={todoEditSubtitle}
-        mainValue={todoEditDraft}
-        onMainChange={setTodoEditDraft}
-        mainPlaceholder="ToDoの内容"
-        mainCaption="必須"
-        onCancel={cancelTodoEdit}
-        onConfirm={confirmTodoEdit}
-      />
+      <EditCardModal visible={todoEditVisible} onCancel={cancelTodoEdit}>
+        <InlineEditCard
+          kind="todo"
+          title="ToDoを編集"
+          subtitle={todoEditSubtitle}
+          value={todoEditDraft}
+          onChangeText={setTodoEditDraft}
+          placeholder="ToDoの内容"
+          caption="必須"
+          onCancel={cancelTodoEdit}
+          onConfirm={confirmTodoEdit}
+        />
+      </EditCardModal>
 
-      <ItemFormModal
-        visible={answerPromptVisible}
-        kind="question"
-        title="質問を編集"
-        subtitle={answerPromptSubtitle}
-        mainValue={answerPromptQDraft}
-        onMainChange={setAnswerPromptQDraft}
-        mainPlaceholder="質問の内容"
-        mainCaption="Q ・ 必須"
-        showAnswer
-        answerValue={answerPromptDraft}
-        onAnswerChange={setAnswerPromptDraft}
-        answerPlaceholder="わかったこと・聞いた答えなど"
-        answerCaption="A ・ 任意"
-        onCancel={cancelAnswerPrompt}
-        onConfirm={confirmAnswerPrompt}
-      />
+      <EditCardModal visible={answerPromptVisible} onCancel={cancelAnswerPrompt}>
+        <InlineEditCard
+          kind="question"
+          title="質問を編集"
+          subtitle={answerPromptSubtitle}
+          value={answerPromptQDraft}
+          onChangeText={setAnswerPromptQDraft}
+          placeholder="質問の内容"
+          caption="Q ・ 必須"
+          showSecondary
+          secondaryValue={answerPromptDraft}
+          onSecondaryChange={setAnswerPromptDraft}
+          secondaryPlaceholder="わかったこと・聞いた答えなど"
+          secondaryCaption="A ・ 任意"
+          onCancel={cancelAnswerPrompt}
+          onConfirm={confirmAnswerPrompt}
+        />
+      </EditCardModal>
 
-      <ItemFormModal
-        visible={starEditVisible}
-        kind="star"
-        title="一言メモを編集"
-        subtitle={starEditSubtitle}
-        mainValue={starEditDraft}
-        onMainChange={setStarEditDraft}
-        mainPlaceholder="一言でまとめる(例: パスワードを使い回さない)"
-        mainCaption="空にすると元の発言テキストがそのまま表示されます"
-        onCancel={cancelStarEdit}
-        onConfirm={confirmStarEdit}
-      />
+      <EditCardModal visible={starEditVisible} onCancel={cancelStarEdit}>
+        <InlineEditCard
+          kind="star"
+          title="一言メモを編集"
+          subtitle={starEditSubtitle}
+          value={starEditDraft}
+          onChangeText={setStarEditDraft}
+          placeholder="一言でまとめる(例: パスワードを使い回さない)"
+          caption="空にすると元の発言テキストがそのまま表示されます"
+          onCancel={cancelStarEdit}
+          onConfirm={confirmStarEdit}
+        />
+      </EditCardModal>
 
-      <ItemFormModal
-        visible={quickAddVisible}
-        kind={quickAddKind}
-        title={quickAddKind === "todo" ? "ToDoを追加" : "質問を追加"}
-        subtitle="クイック追加"
-        mainValue={quickAddDraft}
-        onMainChange={setQuickAddDraft}
-        mainPlaceholder={quickAddKind === "todo" ? "ToDoの内容" : "質問の内容"}
-        mainCaption={quickAddKind === "todo" ? "必須" : "Q ・ 必須"}
-        showAnswer={quickAddKind === "question"}
-        answerValue={quickAddAnswerDraft}
-        onAnswerChange={setQuickAddAnswerDraft}
-        answerPlaceholder="わかったこと・聞いた答えなど"
-        answerCaption="A ・ 任意・あとで記入してもOK"
-        onCancel={cancelQuickAdd}
-        onConfirm={confirmQuickAdd}
-      />
+      <EditCardModal visible={quickAddVisible} onCancel={cancelQuickAdd}>
+        <InlineEditCard
+          kind={quickAddKind}
+          title={quickAddKind === "todo" ? "ToDoを追加" : "質問を追加"}
+          subtitle="クイック追加"
+          value={quickAddDraft}
+          onChangeText={setQuickAddDraft}
+          placeholder={quickAddKind === "todo" ? "ToDoの内容" : "質問の内容"}
+          caption={quickAddKind === "todo" ? "必須" : "Q ・ 必須"}
+          showSecondary={quickAddKind === "question"}
+          secondaryValue={quickAddAnswerDraft}
+          onSecondaryChange={setQuickAddAnswerDraft}
+          secondaryPlaceholder="わかったこと・聞いた答えなど"
+          secondaryCaption="A ・ 任意・あとで記入してもOK"
+          onCancel={cancelQuickAdd}
+          onConfirm={confirmQuickAdd}
+        />
+      </EditCardModal>
 
       <Modal visible={groupPromptVisible} animationType="fade" transparent onRequestClose={cancelGroupPrompt}>
         <KeyboardAvoidingView
@@ -1026,12 +948,12 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
-  headerTitle: { fontSize: 28, fontWeight: "700", color: "#1c1c1e" },
+  headerTitle: { fontSize: fontSize.tabTitle, fontWeight: "700", color: "#1c1c1e" },
 
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#e5e5ea",
+    backgroundColor: colors.searchBarBackground,
     borderRadius: 10,
     marginHorizontal: 16,
     marginBottom: 8,
@@ -1045,7 +967,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: "#e5e5ea",
+    backgroundColor: colors.searchBarBackground,
     borderRadius: 10,
     padding: 2,
   },
@@ -1082,12 +1004,12 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   sectionPillText: { fontSize: 13, fontWeight: "700" },
-  sectionPillStar: { backgroundColor: "#fdf0dc" },
-  sectionPillTextStar: { color: "#d98c00" },
-  sectionPillTodo: { backgroundColor: "#e0f7e6" },
-  sectionPillTextTodo: { color: "#1f9254" },
-  sectionPillQuestion: { backgroundColor: "#f2e8fc" },
-  sectionPillTextQuestion: { color: "#7c4dff" },
+  sectionPillStar: { backgroundColor: colors.star.background },
+  sectionPillTextStar: { color: colors.star.accent },
+  sectionPillTodo: { backgroundColor: colors.todo.background },
+  sectionPillTextTodo: { color: colors.todo.accent },
+  sectionPillQuestion: { backgroundColor: colors.question.background },
+  sectionPillTextQuestion: { color: colors.question.accent },
   sectionCount: { fontSize: 13, color: "#8e8e93", marginLeft: 8 },
   sectionChevron: { marginLeft: "auto" },
 
@@ -1099,7 +1021,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#34c759",
+    backgroundColor: colors.todo.accent,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
@@ -1108,7 +1030,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  fabQuestion: { backgroundColor: "#7c4dff" },
+  fabQuestion: { backgroundColor: colors.question.accent },
 
   // 行の長押しメニューのゴーストカードに表示するプレビュー文
   rowMenuPreviewText: { fontSize: 15, color: "#1c1c1e" },
@@ -1142,8 +1064,8 @@ const styles = StyleSheet.create({
   statusHeaderPillText: { fontSize: 13, fontWeight: "700" },
   statusPillDone: { backgroundColor: "#e5e5ea" },
   statusPillTextDone: { color: "#636366" },
-  statusPillDeferred: { backgroundColor: "#fdf0dc" },
-  statusPillTextDeferred: { color: "#d98c00" },
+  statusPillDeferred: { backgroundColor: colors.star.background },
+  statusPillTextDeferred: { color: colors.star.accent },
 
   // ToDo/質問カード(ノートタブのToDo/質問タブから移設した見た目)
   rowTextCol: { flex: 1 },
@@ -1151,11 +1073,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: radius.card,
     marginHorizontal: 16,
     marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: spacing.cardPadding,
+    paddingVertical: spacing.cardPadding,
     gap: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -1163,17 +1085,17 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
-  todoText: { flex: 1, fontSize: 15, color: "#1c1c1e" },
+  todoText: { flex: 1, fontSize: fontSize.body, color: "#1c1c1e" },
   todoTextDone: { color: "#8e8e93", textDecorationLine: "line-through" },
 
   // ユーザーが束ねた★グループ(importantGroup)のカード。1グループ=1カードにまとめる
   groupCard: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: radius.card,
     marginHorizontal: 16,
     marginBottom: 8,
-    paddingHorizontal: 14,
-    paddingTop: 12,
+    paddingHorizontal: spacing.cardPadding,
+    paddingTop: spacing.cardPadding,
     paddingBottom: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -1182,17 +1104,17 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   groupCardTitle: {
-    fontSize: 16,
+    fontSize: fontSize.cardTitle,
     fontWeight: "700",
     color: "#1c1c1e",
     paddingBottom: 8,
     marginBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#e5e5ea",
+    borderBottomColor: colors.divider,
   },
   groupCardRow: { flexDirection: "row", alignItems: "center", paddingBottom: 8 },
   cardSubMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
-  questionAnswerPreview: { fontSize: 12, color: "#34c759", marginTop: 3 },
+  questionAnswerPreview: { fontSize: 12, color: colors.todo.accent, marginTop: 3 },
   questionIconBadge: {
     width: 28,
     height: 28,
@@ -1200,9 +1122,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  questionIconBadgeOpen: { backgroundColor: "#f2e8fc" },
-  questionIconBadgeResolved: { backgroundColor: "#e0f7e6" },
-  questionIconBadgeText: { fontSize: 15, fontWeight: "700", color: "#7c4dff" },
+  questionIconBadgeOpen: { backgroundColor: colors.question.background },
+  questionIconBadgeResolved: { backgroundColor: colors.todo.background },
+  questionIconBadgeText: { fontSize: 15, fontWeight: "700", color: colors.question.accent },
   deferButton: {
     alignSelf: "flex-start",
     marginTop: 6,
@@ -1222,67 +1144,16 @@ const styles = StyleSheet.create({
   },
   placeholderText: { color: "#8e8e93", fontSize: 14, textAlign: "center" },
 
-  // クイック追加/ToDo編集/質問編集の共通モーダル(ノートタブから移設)。付箋(マスキングテープ)型で
-  // 画面中央にわずかに傾けて浮かせる。アイコンバッジ付きヘッダー+下線入力+丸型保存ボタン
+  // クイック追加/ToDo編集/質問編集の共通モーダル外枠(ノートタブから移設)
   itemFormKeyboardAvoider: { flex: 1, justifyContent: "flex-end" },
   quickAddOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: colors.overlay.card,
     justifyContent: "center",
     alignItems: "center",
   },
-  quickAddPanel: {
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    width: "85%",
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  quickAddHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22 },
-  quickAddIconBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  quickAddTitle: { fontSize: 18, fontWeight: "700", color: "#1c1c1e" },
-  quickAddSubtitle: { fontSize: 13, color: "#8e8e93", marginTop: 2 },
-  quickAddUnderlineInput: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#d1d1d6",
-    paddingVertical: 8,
-    fontSize: 16,
-    color: "#1c1c1e",
-    minHeight: 40,
-    textAlignVertical: "top",
-  },
-  quickAddFieldCaption: { fontSize: 12, color: "#8e8e93", marginTop: 6, marginBottom: 18 },
-  quickAddFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  quickAddCancelText: { fontSize: 16, color: "#8e8e93" },
-  quickAddSaveButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  // GroupSettingForm自体がカードの背景・パディング・影を持つので、ここでは幅だけ制約する
+  // InlineEditCard/GroupSettingForm自体がカードの背景・パディング・影を持つので、
+  // ここでは幅だけ制約する
+  editCardPanel: { width: "85%" },
   groupSettingPanel: { width: "88%", maxWidth: 420 },
 });

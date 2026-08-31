@@ -9,6 +9,8 @@ import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
+import * as colors from "../theme/colors";
+import { fontSize } from "../theme/typography";
 
 function formatTime(unixMs: number): string {
   const d = new Date(unixMs);
@@ -76,7 +78,7 @@ export default function RecordCompleteScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.checkCircle}>
-          <Ionicons name="checkmark" size={36} color="#2fa84f" />
+          <Ionicons name="checkmark" size={36} color={colors.todo.accent} />
         </View>
         <Text style={styles.heading}>記録が完了しました</Text>
         <Text style={styles.subheading}>
@@ -96,19 +98,19 @@ export default function RecordCompleteScreen() {
         <View style={styles.countsRow}>
           {counts.star > 0 ? (
             <View style={styles.countItem}>
-              <Ionicons name="star" size={16} color="#c98a00" />
+              <Ionicons name="star" size={16} color={colors.star.accent} />
               <Text style={styles.countText}>{counts.star}</Text>
             </View>
           ) : null}
           {counts.todo > 0 ? (
             <View style={styles.countItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#2fa84f" />
+              <Ionicons name="checkmark-circle" size={16} color={colors.todo.accent} />
               <Text style={styles.countText}>{counts.todo}</Text>
             </View>
           ) : null}
           {counts.question > 0 ? (
             <View style={styles.countItem}>
-              <Ionicons name="help-circle" size={16} color="#7c4dff" />
+              <Ionicons name="help-circle" size={16} color={colors.question.accent} />
               <Text style={styles.countText}>{counts.question}</Text>
             </View>
           ) : null}
@@ -139,7 +141,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 18,
   },
-  heading: { fontSize: 20, fontWeight: "700", color: "#1c1c1e" },
+  heading: { fontSize: fontSize.dialogHeading, fontWeight: "700", color: "#1c1c1e" },
   subheading: { fontSize: 14, color: "#8e8e93", marginTop: 6 },
 
   fieldLabel: { alignSelf: "flex-start", fontSize: 13, color: "#8e8e93", marginTop: 32 },

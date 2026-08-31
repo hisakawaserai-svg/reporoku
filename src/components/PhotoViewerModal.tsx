@@ -10,6 +10,7 @@ import {
   TapGestureHandler,
 } from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
+import * as colors from "../theme/colors";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -227,7 +228,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor: colors.overlay.photoViewer,
   },
   backdropImmersive: { backgroundColor: "#000" },
   imageWrap: {

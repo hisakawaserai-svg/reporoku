@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
-  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -27,8 +26,10 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
 import { formatBytes, listNoteStorageEntries } from "../utils/storageManagement";
-
-type IconName = keyof typeof Ionicons.glyphMap;
+import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
+import { fontSize } from "../theme/typography";
 
 type DisplayMode = "list" | "calendar";
 
@@ -171,27 +172,16 @@ export default function NotesScreen() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [monthGroups, setMonthGroups] = useState<MonthGroup<SessionSummary>[]>([]);
-  // リスト/カレンダーの行(セッションカード)を長押しして開く選択肢メニュー。ノート詳細画面の
-  // 長押しメニューとレイアウトを揃えるため、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
-  type RowMenuKind = "session";
-  const [rowMenuAnchor, setRowMenuAnchor] = useState<{
-    kind: RowMenuKind;
-    block: BlockWithSession | SessionSummary;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const rowMenuRefs = useRef<Map<string, View>>(new Map());
-  // 長押しした行を、ノート詳細画面のopenBlockMenuと同じく少し拡大したゴーストとして表示するアニメーション
-  const rowMenuHighlightScale = useRef(new Animated.Value(1)).current;
+  // リスト/カレンダーの行(セッションカード)を長押しして開く選択肢メニュー。他画面と共通の
+  // RowLongPressMenuを使い、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
+  const rowMenu = useRowLongPressMenu<SessionSummary>();
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
   // リストタブの複数選択・一括削除(カレンダータブは対象外)。右上「編集」またはカードの
-  // 長押しで入る。選択モード中は長押しメニュー(openRowMenu)は使わない
+  // 長押しで入る。選択モード中は長押しメニュー(rowMenu)は使わない
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 選択モード中だけ、各ノートの使用容量(音声+写真)をカードに表示する。
@@ -201,55 +191,30 @@ export default function NotesScreen() {
   const loadNotes = useCallback(async () => {
     try {
       const groups = await sessionsRepo.listAllGroupedByMonth();
-      const summarized: MonthGroup<SessionSummary>[] = await Promise.all(
-        groups.map(async (group) => ({
-          monthKey: group.monthKey,
-          items: await Promise.all(
-            group.items.map(async (session) => {
-              const blocks = await blocksRepo.listBySessionId(session.id);
-              const photoBlocks = blocks.filter((b) => b.kind === "photo" && b.photoUri);
-              return {
-                ...session,
-                starCount: blocks.filter((b) => b.isStarred).length,
-                todoCount: blocks.filter((b) => b.isTodo).length,
-                questionCount: blocks.filter((b) => b.isQuestion).length,
-                photoCount: photoBlocks.length,
-                photoUri: photoBlocks[0]?.photoUri ?? null,
-              };
-            })
-          ),
-        }))
-      );
+      // セッションごとに個別クエリを投げるN+1を避け、全セッション分のブロックを
+      // 1回(必要ならバッチ分割)のIN句クエリでまとめて取得してからグルーピングする
+      const allSessionIds = groups.flatMap((g) => g.items.map((s) => s.id));
+      const blocksBySessionId = await blocksRepo.listBySessionIds(allSessionIds);
+      const summarized: MonthGroup<SessionSummary>[] = groups.map((group) => ({
+        monthKey: group.monthKey,
+        items: group.items.map((session) => {
+          const blocks = blocksBySessionId.get(session.id) ?? [];
+          const photoBlocks = blocks.filter((b) => b.kind === "photo" && b.photoUri);
+          return {
+            ...session,
+            starCount: blocks.filter((b) => b.isStarred).length,
+            todoCount: blocks.filter((b) => b.isTodo).length,
+            questionCount: blocks.filter((b) => b.isQuestion).length,
+            photoCount: photoBlocks.length,
+            photoUri: photoBlocks[0]?.photoUri ?? null,
+          };
+        }),
+      }));
       setMonthGroups(summarized);
     } catch (e) {
       console.warn("[DB] ノート一覧の取得に失敗しました", e);
     }
   }, []);
-
-  // リスト/カレンダータブの行を長押しして選択肢メニューを開く。ノート詳細画面のopenBlockMenuと
-  // 同じく、対象行の画面上の実測座標を取得してその近くにメニューを表示する
-  const openRowMenu = (kind: RowMenuKind, block: BlockWithSession | SessionSummary) => {
-    const node = rowMenuRefs.current.get(block.id);
-    if (!node) return;
-    node.measureInWindow((x, y, width, height) => {
-      setRowMenuAnchor({ kind, block, x, y, width, height });
-      rowMenuHighlightScale.setValue(1);
-      Animated.spring(rowMenuHighlightScale, {
-        toValue: 1.06,
-        friction: 4,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
-    });
-  };
-
-  // 閉じる時も、拡大を元に戻すアニメーションを再生してから消す
-  const closeRowMenu = (after?: () => void) => {
-    Animated.timing(rowMenuHighlightScale, { toValue: 1, duration: 140, useNativeDriver: true }).start(() => {
-      setRowMenuAnchor(null);
-      after?.();
-    });
-  };
 
   useFocusEffect(
     useCallback(() => {
@@ -538,12 +503,9 @@ export default function NotesScreen() {
         }}
         onLongPress={() => {
           if (mode === "list" && !selectionMode) enterSelectionMode(session.id);
-          else if (!selectionMode) openRowMenu("session", session);
+          else if (!selectionMode) rowMenu.open(session.id, session);
         }}
-        ref={(node) => {
-          if (node) rowMenuRefs.current.set(session.id, node);
-          else rowMenuRefs.current.delete(session.id);
-        }}
+        ref={rowMenu.registerRef(session.id)}
       >
         {showCheckbox ? (
           <View style={styles.checkboxWrap}>
@@ -559,60 +521,28 @@ export default function NotesScreen() {
     );
   };
 
-  // リスト/カレンダータブの長押しメニューの項目。ノート詳細画面のactionItems(テキスト+アイコンの
-  // 横並び行)と同じ形にする
-  type RowMenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
-  const rowMenuItems: RowMenuItem[] = !rowMenuAnchor
+  // リスト/カレンダータブの長押しメニューの項目。他画面のRowLongPressMenuと同じ形にする
+  const rowMenuItems: RowMenuItem[] = !rowMenu.anchor
     ? []
     : (() => {
-        const session = rowMenuAnchor.block as SessionSummary;
+        const session = rowMenu.anchor.data;
         return [
           {
             key: "open",
             label: "ノートを開く",
-            icon: "open-outline" as IconName,
+            icon: "open-outline",
             color: "#06c",
-            onPress: () => closeRowMenu(() => goToNote(session.id)),
+            onPress: () => rowMenu.close(() => goToNote(session.id)),
           },
           {
             key: "delete",
             label: "削除",
-            icon: "trash-outline" as IconName,
-            color: "#ff3b30",
-            onPress: () => closeRowMenu(() => confirmDeleteSession(session)),
+            icon: "trash-outline",
+            color: colors.danger.action,
+            onPress: () => rowMenu.close(() => confirmDeleteSession(session)),
           },
         ];
       })();
-
-  // メニューの位置決め。ノート詳細画面のmenuList位置計算と同じロジック
-  // (吹き出しが画面外にはみ出さないよう、上下どちらに表示するかを空きスペースで判定する)
-  const ROW_MENU_ITEM_HEIGHT = 44;
-  // ゴーストカードが少し傾いているため、その分だけ余分に隙間を空けてメニューと被らないようにする
-  const ROW_MENU_GAP = 13;
-  const ROW_MENU_WIDTH = 220;
-  const ROW_MENU_SCREEN_MARGIN = 40;
-  let rowMenuTop = 0;
-  let rowMenuLeft = 0;
-  let rowMenuHighlightTop = 0;
-  if (rowMenuAnchor) {
-    const windowHeight = Dimensions.get("window").height;
-    const windowWidth = Dimensions.get("window").width;
-    const menuHeight = rowMenuItems.length * ROW_MENU_ITEM_HEIGHT;
-    const spaceBelow = windowHeight - (rowMenuAnchor.y + rowMenuAnchor.height) - ROW_MENU_GAP;
-    const spaceAbove = rowMenuAnchor.y - ROW_MENU_GAP;
-    const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
-    rowMenuTop = showBelow
-      ? rowMenuAnchor.y + rowMenuAnchor.height + ROW_MENU_GAP
-      : rowMenuAnchor.y - ROW_MENU_GAP - menuHeight;
-    const minTop = ROW_MENU_SCREEN_MARGIN;
-    const maxTop = windowHeight - menuHeight - ROW_MENU_SCREEN_MARGIN;
-    rowMenuTop = Math.max(minTop, Math.min(rowMenuTop, maxTop));
-    rowMenuLeft = Math.max(16, Math.min(rowMenuAnchor.x, windowWidth - ROW_MENU_WIDTH - 16));
-    rowMenuHighlightTop = Math.max(
-      ROW_MENU_SCREEN_MARGIN,
-      Math.min(rowMenuAnchor.y, windowHeight - rowMenuAnchor.height - ROW_MENU_SCREEN_MARGIN)
-    );
-  }
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
@@ -696,8 +626,8 @@ export default function NotesScreen() {
         ))}
       </View>
 
-      <ScrollView style={styles.content}>
-        {isSearching ? (
+      {isSearching ? (
+        <ScrollView style={styles.content}>
           <View>
             {queryTooShort ? (
               <View style={styles.placeholder}>
@@ -718,34 +648,36 @@ export default function NotesScreen() {
               ))
             )}
           </View>
-        ) : (
-          <>
-            {mode === "list" && (
-              <View>
-                {monthGroups.length === 0 ? (
-                  <View style={styles.placeholder}>
-                    <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-                    <Text style={styles.placeholderText}>まだ記録がありません</Text>
-                  </View>
-                ) : (
-                  monthGroups.map((group) => {
-                    const [year, month] = group.monthKey.split("-");
-                    return (
-                      <View key={group.monthKey}>
-                        <View style={styles.monthHeaderRow}>
-                          <View style={styles.monthHeaderPill}>
-                            <Text style={styles.monthHeaderPillText}>{Number(month)}月</Text>
-                          </View>
-                          <Text style={styles.monthHeaderYear}>{year}年</Text>
-                        </View>
-                        {group.items.map((session) => renderCard(session))}
-                      </View>
-                    );
-                  })
-                )}
+        </ScrollView>
+      ) : mode === "list" ? (
+        // ノートが数百件規模になっても全カードを一度にマウントしないよう、
+        // ScrollView+mapではなくSectionList(月ごとのセクション見出し付き仮想化リスト)にする
+        <SectionList
+          style={styles.content}
+          sections={monthGroups.map((group) => ({ title: group.monthKey, data: group.items }))}
+          keyExtractor={(session) => session.id}
+          renderItem={({ item }) => renderCard(item)}
+          renderSectionHeader={({ section }) => {
+            const [year, month] = section.title.split("-");
+            return (
+              <View style={styles.monthHeaderRow}>
+                <View style={styles.monthHeaderPill}>
+                  <Text style={styles.monthHeaderPillText}>{Number(month)}月</Text>
+                </View>
+                <Text style={styles.monthHeaderYear}>{year}年</Text>
               </View>
-            )}
-
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.placeholder}>
+              <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
+              <Text style={styles.placeholderText}>まだ記録がありません</Text>
+            </View>
+          }
+        />
+      ) : (
+        <ScrollView style={styles.content}>
+          <>
             {mode === "calendar" && (
               <View>
                 <View style={styles.calHeader}>
@@ -849,53 +781,19 @@ export default function NotesScreen() {
                 </View>
               </View>
             )}
-
           </>
-        )}
-      </ScrollView>
+        </ScrollView>
+      )}
 
-      <Modal
-        visible={rowMenuAnchor !== null}
-        animationType="fade"
-        transparent
-        onRequestClose={() => closeRowMenu()}
-      >
-        <Pressable style={styles.rowMenuOverlay} onPress={() => closeRowMenu()}>
-          {rowMenuAnchor ? (
-            <>
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.rowMenuHighlight,
-                  {
-                    top: rowMenuHighlightTop,
-                    left: rowMenuAnchor.x,
-                    width: rowMenuAnchor.width,
-                    minHeight: rowMenuAnchor.height,
-                    transform: [{ scale: rowMenuHighlightScale }],
-                  },
-                ]}
-              >
-                <View style={styles.rowMenuHighlightCardRow}>
-                  {renderCardContent(rowMenuAnchor.block as SessionSummary)}
-                </View>
-              </Animated.View>
-              <View style={[styles.rowMenuList, { top: rowMenuTop, left: rowMenuLeft, width: ROW_MENU_WIDTH }]}>
-                {rowMenuItems.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.rowMenuItem, index > 0 && styles.rowMenuItemDivider]}
-                    onPress={item.onPress}
-                  >
-                    <Text style={styles.rowMenuItemText}>{item.label}</Text>
-                    <Ionicons name={item.icon} size={18} color={item.color} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          ) : null}
-        </Pressable>
-      </Modal>
+      <RowLongPressMenu
+        anchor={rowMenu.anchor}
+        scale={rowMenu.scale}
+        items={rowMenuItems}
+        onClose={() => rowMenu.close()}
+        renderPreview={(session) => (
+          <View style={styles.rowMenuHighlightCardRow}>{renderCardContent(session)}</View>
+        )}
+      />
 
       <Modal
         visible={monthPickerVisible}
@@ -978,8 +876,6 @@ export default function NotesScreen() {
   );
 }
 
-const CARD_RADIUS = 14;
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f7" },
   selectionHeaderRow: {
@@ -993,12 +889,12 @@ const styles = StyleSheet.create({
   bulkBar: {
     padding: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#c6c6c8",
+    borderTopColor: colors.divider,
     backgroundColor: "#f2f2f7",
   },
   bulkButton: {
-    backgroundColor: "#ff3b30",
-    borderRadius: 10,
+    backgroundColor: colors.danger.action,
+    borderRadius: radius.card,
     paddingVertical: 13,
     alignItems: "center",
   },
@@ -1007,9 +903,9 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#ebebf0",
+    backgroundColor: colors.searchBarBackground,
     borderRadius: 10,
-    marginHorizontal: 16,
+    marginHorizontal: spacing.screenPadding,
     marginTop: 12,
     paddingHorizontal: 10,
     height: 36,
@@ -1017,9 +913,9 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 6, fontSize: 15 },
   segmentedControl: {
     flexDirection: "row",
-    backgroundColor: "#ebebf0",
+    backgroundColor: colors.searchBarBackground,
     borderRadius: 8,
-    marginHorizontal: 16,
+    marginHorizontal: spacing.screenPadding,
     marginTop: 12,
     padding: 2,
   },
@@ -1039,47 +935,9 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, color: "#3c3c43" },
   segmentTextSelected: { fontWeight: "600" },
-  // リスト/カレンダータブの長押しメニュー。ノート詳細画面のmenuOverlay/menuList/menuItemと
-  // 同じ見た目(丸角カード+区切り線付きの行)に揃える
-  rowMenuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
-  // 長押しメニュー表示中のゴーストカード。iOS純正の白背景+テープ+わずかな傾きで
-  // 「持ち上げた」感を出す
-  rowMenuHighlight: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  rowMenuHighlightText: { fontSize: 15, color: "#1c1c1e" },
-  // ゴーストカードの中でrenderCardContentを呼ぶ際、実カード(styles.card)と同じ
-  // 横並びレイアウトになるようにする(rowMenuHighlight自体は向き指定を持たないため)
+  // リスト/カレンダータブの長押しメニュー(RowLongPressMenu)用。ゴーストカードの中で
+  // renderCardContentを呼ぶ際、実カード(styles.card)と同じ横並びレイアウトになるようにする
   rowMenuHighlightCardRow: { flexDirection: "row", gap: 10 },
-  rowMenuList: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  rowMenuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  rowMenuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
-  rowMenuItemText: { fontSize: 15, color: "#1c1c1e" },
   content: { flex: 1, marginTop: 12 },
   sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
@@ -1113,10 +971,10 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
     backgroundColor: "#fff",
-    borderRadius: CARD_RADIUS,
-    marginHorizontal: 16,
+    borderRadius: radius.card,
+    marginHorizontal: spacing.screenPadding,
     marginBottom: 10,
-    padding: 12,
+    padding: spacing.cardPadding,
     gap: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -1125,7 +983,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   cardBody: { flex: 1, justifyContent: "center" },
-  cardTitle: { fontSize: 16, fontWeight: "600", color: "#1c1c1e" },
+  cardTitle: { fontSize: fontSize.cardTitle, fontWeight: "600", color: "#1c1c1e" },
   cardMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
   badgeRow: { flexDirection: "row", gap: 7, marginTop: 8 },
   // ぷっくりパステルバッジ: 完全な丸みと余裕のあるパディングで「ぷっくり」感を出す
@@ -1137,15 +995,15 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     gap: 3,
   },
-  badgeStar: { backgroundColor: "#fdf0dc" },
-  badgeStarIcon: { fontSize: 12, color: "#d98c00" },
-  badgeStarText: { fontSize: 12, color: "#d98c00", fontWeight: "700" },
-  badgeTodo: { backgroundColor: "#e0f7e6" },
-  badgeTodoIcon: { fontSize: 12, color: "#1f9254" },
-  badgeTodoText: { fontSize: 12, color: "#1f9254", fontWeight: "700" },
-  badgeQuestion: { backgroundColor: "#f2e8fc" },
-  badgeQuestionIcon: { fontSize: 12, color: "#7c4dff", fontWeight: "700" },
-  badgeQuestionText: { fontSize: 12, color: "#7c4dff", fontWeight: "700" },
+  badgeStar: { backgroundColor: colors.star.background },
+  badgeStarIcon: { fontSize: 12, color: colors.star.accent },
+  badgeStarText: { fontSize: 12, color: colors.star.accent, fontWeight: "700" },
+  badgeTodo: { backgroundColor: colors.todo.background },
+  badgeTodoIcon: { fontSize: 12, color: colors.todo.accent },
+  badgeTodoText: { fontSize: 12, color: colors.todo.accent, fontWeight: "700" },
+  badgeQuestion: { backgroundColor: colors.question.background },
+  badgeQuestionIcon: { fontSize: 12, color: colors.question.accent, fontWeight: "700" },
+  badgeQuestionText: { fontSize: 12, color: colors.question.accent, fontWeight: "700" },
 
   cardNoMargin: { marginHorizontal: 0 },
 
@@ -1239,7 +1097,7 @@ const styles = StyleSheet.create({
   // カレンダーヘッダーの月選択ピッカー
   monthPickerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: colors.overlay.card,
     justifyContent: "flex-end",
   },
   monthPickerSheet: {
@@ -1304,10 +1162,10 @@ const styles = StyleSheet.create({
 
   // 検索結果
   searchRow: {
-    marginHorizontal: 16,
+    marginHorizontal: spacing.screenPadding,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#e5e5ea",
+    borderBottomColor: colors.divider,
   },
   searchSnippet: { fontSize: 15, color: "#1c1c1e", marginTop: 3 },
   // 黄色マーカー型ハイライト(背景色でハイライト)

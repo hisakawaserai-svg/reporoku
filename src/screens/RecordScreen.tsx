@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
   View,
   Text,
   ScrollView,
@@ -39,6 +38,9 @@ import { adoptOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecove
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
+import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
+import * as colors from "../theme/colors";
+import { fontSize } from "../theme/typography";
 
 type Block = {
   id?: string;
@@ -66,8 +68,8 @@ const MARK_TILES: {
   bg: string;
   tint: string;
 }[] = [
-  { key: "star", icon: "star", label: "重要", border: "#f3cf7c", bg: "#fff8e8", tint: "#c98a00" },
-  { key: "todo", icon: "checkmark-circle", label: "ToDo", border: "#9adcab", bg: "#eefbf1", tint: "#2fa84f" },
+  { key: "star", icon: "star", label: "重要", border: "#f3cf7c", bg: "#fff8e8", tint: colors.star.accent },
+  { key: "todo", icon: "checkmark-circle", label: "ToDo", border: "#9adcab", bg: "#eefbf1", tint: colors.todo.accent },
   { key: "question", icon: "help-circle", label: "質問", border: "#c9b3f5", bg: "#f5f0ff", tint: "#7c4dff" },
   { key: "photo", icon: "camera", label: "撮影", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
   { key: "memo", icon: "create", label: "メモ", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
@@ -151,8 +153,8 @@ type RecordIconBadge = { key: string; icon: keyof typeof Ionicons.glyphMap; colo
 // 該当するアイコンをすべて横に並べたバッジとして返す(ノート詳細画面のactiveBadgesと同じ考え方)
 function recordBlockBadges(b: Block): RecordIconBadge[] {
   const badges: RecordIconBadge[] = [];
-  if (b.isStarred) badges.push({ key: "star", icon: "star", color: "#c98a00" });
-  if (b.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: "#2fa84f" });
+  if (b.isStarred) badges.push({ key: "star", icon: "star", color: colors.star.accent });
+  if (b.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: colors.todo.accent });
   if (b.isQuestion) badges.push({ key: "question", icon: "help-circle", color: "#7c4dff" });
   return badges;
 }
@@ -228,16 +230,9 @@ export default function RecordScreen() {
   const [markSelectMode, setMarkSelectMode] = useState<MarkKey | null>(null);
 
   // タイムライン上でブロックを長押しして開く「結合/分割/マーク」メニュー相当(録音中は結合/分割は無し)。
-  // ノート詳細画面のものと同様の見た目・挙動にするため、対象ブロックの実測座標を保持する
-  const [menuAnchor, setMenuAnchor] = useState<{
-    blockId: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const blockRowRefs = useRef<Map<string, View>>(new Map());
-  const menuHighlightScale = useRef(new Animated.Value(1)).current;
+  // 他画面と共通のRowLongPressMenuを使う。データは常に最新のblocksから引き直せるよう、
+  // ブロックそのものではなくblockIdだけを保持する
+  const rowMenu = useRowLongPressMenu<string>();
   // 長押しメニューからの「テキスト編集」で編集中のブロック
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -412,21 +407,10 @@ export default function RecordScreen() {
       pauseBaselineCountRef.current = blocks.filter((b) => b.kind === "text").length;
       setScrollPaused(true);
     }
-    const node = blockRowRefs.current.get(block.id);
-    if (!node) return;
-    node.measureInWindow((x, y, width, height) => {
-      setMenuAnchor({ blockId: block.id!, x, y, width, height });
-      menuHighlightScale.setValue(1);
-      Animated.spring(menuHighlightScale, {
-        toValue: 1.08,
-        friction: 4,
-        tension: 160,
-        useNativeDriver: true,
-      }).start();
-    });
+    rowMenu.open(block.id, block.id);
   };
 
-  const closeBlockMenu = () => setMenuAnchor(null);
+  const closeBlockMenu = () => rowMenu.close();
 
   // 「↓ 新着N件」バッジをタップしたときの再開。自動スクロールを再開し、最新まで一度ジャンプする
   const resumeAutoScroll = () => {
@@ -435,7 +419,7 @@ export default function RecordScreen() {
   };
 
   const toggleBlockStar = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     const id = block.id;
     if (!id) return;
     setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isStarred: !b.isStarred } : b)));
@@ -443,7 +427,7 @@ export default function RecordScreen() {
   };
 
   const toggleBlockTodo = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     const id = block.id;
     if (!id) return;
     setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isTodo: !b.isTodo } : b)));
@@ -453,7 +437,7 @@ export default function RecordScreen() {
   // ★/📝と同じ「即座にマークするだけ」の挙動。question_kind/question_termには触れない
   // (仕分けはノート詳細画面の長押しメニューで後から行う)
   const toggleBlockQuestion = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     const id = block.id;
     if (!id) return;
     setBlocks((p) => p.map((b) => (b.id === id ? { ...b, isQuestion: !b.isQuestion } : b)));
@@ -461,7 +445,7 @@ export default function RecordScreen() {
   };
 
   const startEditingBlock = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     if (!block.id) return;
     setEditingBlockId(block.id);
     setEditDraft(block.text);
@@ -479,7 +463,7 @@ export default function RecordScreen() {
   };
 
   const confirmDeleteBlock = (block: Block) => {
-    setMenuAnchor(null);
+    rowMenu.close();
     const id = block.id;
     if (!id) return;
     Alert.alert("このブロックを削除しますか？", "元に戻せません。", [
@@ -968,12 +952,11 @@ export default function RecordScreen() {
     ? groupBlocksIntoSections(blocks, sectionGapMsRef.current)
     : [{ key: "flat", blocks }];
 
-  // 長押しメニューの対象ブロックと、メニュー項目
-  const menuBlockId = menuAnchor?.blockId ?? null;
+  // 長押しメニューの対象ブロックと、メニュー項目。データは常に最新のblocksから引き直す
+  const menuBlockId = rowMenu.anchor?.data ?? null;
   const menuBlock = menuBlockId ? blocks.find((b) => b.id === menuBlockId) ?? null : null;
 
   type IconName = keyof typeof Ionicons.glyphMap;
-  type MenuItem = { key: string; label: string; icon: IconName; color: string; onPress: () => void };
   type AttrButton = {
     key: string;
     icon: IconName;
@@ -989,30 +972,31 @@ export default function RecordScreen() {
           key: "star",
           icon: "star",
           active: !!menuBlock.isStarred,
-          activeColor: "#d98c00",
-          inactiveBg: "#fdf0dc",
+          activeColor: colors.star.accent,
+          inactiveBg: colors.star.background,
           onPress: () => toggleBlockStar(menuBlock),
         },
         {
           key: "todo",
           icon: "checkmark",
           active: !!menuBlock.isTodo,
-          activeColor: "#1f9254",
-          inactiveBg: "#e0f7e6",
+          activeColor: colors.todo.accent,
+          inactiveBg: colors.todo.background,
           onPress: () => toggleBlockTodo(menuBlock),
         },
         {
           key: "question",
           icon: "help-circle",
           active: !!menuBlock.isQuestion,
-          activeColor: "#7c4dff",
-          inactiveBg: "#f2e8fc",
+          activeColor: colors.question.accent,
+          inactiveBg: colors.question.background,
           onPress: () => toggleBlockQuestion(menuBlock),
         },
       ]
     : [];
 
-  const actionItems: MenuItem[] = menuBlock
+  // RowLongPressMenuのitemsは1本のリストなので、テキスト編集/メモ/写真/削除を1つにまとめる
+  const menuItems: RowMenuItem[] = menuBlock
     ? [
         {
           key: "edit",
@@ -1027,7 +1011,7 @@ export default function RecordScreen() {
           icon: "document-text-outline",
           color: "#8e8e93",
           onPress: () => {
-            setMenuAnchor(null);
+            rowMenu.close();
             setMemoModalVisible(true);
           },
         },
@@ -1037,48 +1021,20 @@ export default function RecordScreen() {
           icon: "camera-outline",
           color: "#8e8e93",
           onPress: () => {
-            setMenuAnchor(null);
+            rowMenu.close();
             handlePhotoCapture();
           },
         },
+        {
+          key: "delete",
+          label: "削除",
+          icon: "trash-outline",
+          color: colors.danger.action,
+          onPress: () => confirmDeleteBlock(menuBlock),
+        },
       ]
     : [];
-
-  const deleteItem: MenuItem | null = menuBlock
-    ? {
-        key: "delete",
-        label: "削除",
-        icon: "trash-outline",
-        color: "#ff3b30",
-        onPress: () => confirmDeleteBlock(menuBlock),
-      }
-    : null;
-
-  const MENU_ROW_HEIGHT = 44;
   const MENU_ATTR_ROW_HEIGHT = 48;
-  const MENU_GAP = 10;
-  const MENU_WIDTH = 230;
-  const MENU_SCREEN_MARGIN = 40;
-  let menuListTop = 0;
-  let menuLeft = 0;
-  if (menuAnchor) {
-    const windowHeight = Dimensions.get("window").height;
-    const windowWidth = Dimensions.get("window").width;
-    const menuHeight =
-      (menuBlock ? MENU_ATTR_ROW_HEIGHT : 0) +
-      actionItems.length * MENU_ROW_HEIGHT +
-      (deleteItem ? MENU_ROW_HEIGHT : 0);
-    const spaceBelow = windowHeight - (menuAnchor.y + menuAnchor.height) - MENU_GAP;
-    const spaceAbove = menuAnchor.y - MENU_GAP;
-    const showBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
-    menuListTop = showBelow
-      ? menuAnchor.y + menuAnchor.height + MENU_GAP
-      : menuAnchor.y - MENU_GAP - menuHeight;
-    const minTop = MENU_SCREEN_MARGIN;
-    const maxTop = windowHeight - menuHeight - MENU_SCREEN_MARGIN;
-    menuListTop = Math.max(minTop, Math.min(menuListTop, maxTop));
-    menuLeft = Math.max(16, Math.min(menuAnchor.x, windowWidth - MENU_WIDTH - 16));
-  }
 
   // 「↓ 新着N件」バッジ用: 一時停止中に増えた発言ブロックの件数
   const textBlockCount = blocks.filter((b) => b.kind === "text").length;
@@ -1140,6 +1096,9 @@ export default function RecordScreen() {
         ref={scrollRef}
         style={styles.transcriptArea}
         contentContainerStyle={styles.transcriptContent}
+        // テキスト編集中のキャンセル/完了ボタンが、キーボード表示中は1回目のタップで
+        // キーボードを閉じるだけになってしまい2回押す必要が生じる問題を防ぐ
+        keyboardShouldPersistTaps="handled"
         onLayout={(e) => setTranscriptViewportHeight(e.nativeEvent.layout.height)}
         onContentSizeChange={(_w, h) => {
           setTranscriptContentHeight(h);
@@ -1211,11 +1170,7 @@ export default function RecordScreen() {
                   activeOpacity={0.7}
                   onPress={markSelectMode && b.id ? () => pickBlockForMark(b) : undefined}
                   onLongPress={() => !markSelectMode && b.id && openBlockMenu(b)}
-                  ref={(node) => {
-                    if (!b.id) return;
-                    if (node) blockRowRefs.current.set(b.id, node as unknown as View);
-                    else blockRowRefs.current.delete(b.id);
-                  }}
+                  ref={b.id ? rowMenu.registerRef(b.id) : undefined}
                   style={[
                     marked ? styles.transcriptMarkedRow : styles.transcriptRow,
                     spacing === "paragraph" && styles.transcriptRowParagraph,
@@ -1386,70 +1341,40 @@ export default function RecordScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={menuAnchor !== null} animationType="fade" transparent onRequestClose={closeBlockMenu}>
-        <Pressable style={styles.blockMenuOverlay} onPress={closeBlockMenu}>
-          {menuAnchor && menuBlock ? (
-            <>
-              <Animated.View
-                pointerEvents="none"
+      <RowLongPressMenu
+        anchor={menuBlock ? rowMenu.anchor : null}
+        scale={rowMenu.scale}
+        items={menuItems}
+        onClose={closeBlockMenu}
+        extraHeight={MENU_ATTR_ROW_HEIGHT}
+        renderPreview={() =>
+          menuBlock ? (
+            <View style={styles.menuHighlightRow}>
+              <Text style={styles.transcriptTime}>{fmt(menuBlock.ms)}</Text>
+              <Text style={styles.transcriptText} numberOfLines={4}>
+                {menuBlock.text}
+              </Text>
+            </View>
+          ) : null
+        }
+        extra={
+          <View style={styles.menuAttrRow}>
+            {attributeButtons.map((attr, index) => (
+              <TouchableOpacity
+                key={attr.key}
                 style={[
-                  styles.menuHighlight,
-                  {
-                    top: menuAnchor.y,
-                    left: menuAnchor.x,
-                    width: menuAnchor.width,
-                    minHeight: menuAnchor.height,
-                    transform: [{ scale: menuHighlightScale }],
-                  },
+                  styles.menuAttrButton,
+                  index > 0 && styles.menuAttrButtonDivider,
+                  { backgroundColor: attr.active ? attr.activeColor : attr.inactiveBg },
                 ]}
+                onPress={attr.onPress}
               >
-                <Text style={styles.transcriptTime}>{fmt(menuBlock.ms)}</Text>
-                <Text style={styles.transcriptText} numberOfLines={4}>
-                  {menuBlock.text}
-                </Text>
-              </Animated.View>
-              <View style={[styles.menuList, { top: menuListTop, left: menuLeft, width: MENU_WIDTH }]}>
-                <View style={styles.menuAttrRow}>
-                  {attributeButtons.map((attr, index) => (
-                    <TouchableOpacity
-                      key={attr.key}
-                      style={[
-                        styles.menuAttrButton,
-                        index > 0 && styles.menuAttrButtonDivider,
-                        { backgroundColor: attr.active ? attr.activeColor : attr.inactiveBg },
-                      ]}
-                      onPress={attr.onPress}
-                    >
-                      <Ionicons name={attr.icon} size={18} color={attr.active ? "#fff" : attr.activeColor} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {actionItems.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.menuItem, index > 0 && styles.menuItemDivider]}
-                    onPress={item.onPress}
-                  >
-                    <Text style={styles.menuItemText}>{item.label}</Text>
-                    <Ionicons name={item.icon} size={18} color={item.color} />
-                  </TouchableOpacity>
-                ))}
-                {deleteItem ? (
-                  <TouchableOpacity
-                    style={[styles.menuItem, styles.menuItemDivider]}
-                    onPress={deleteItem.onPress}
-                  >
-                    <Text style={[styles.menuItemText, { color: deleteItem.color }]}>
-                      {deleteItem.label}
-                    </Text>
-                    <Ionicons name={deleteItem.icon} size={18} color={deleteItem.color} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </>
-          ) : null}
-        </Pressable>
-      </Modal>
+                <Ionicons name={attr.icon} size={18} color={attr.active ? "#fff" : attr.activeColor} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -1579,7 +1504,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 7,
   },
-  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#e0342f" },
+  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger.action },
   recordingDotIdle: { backgroundColor: "#b8b8bd" },
   statusSpinner: { width: 8, height: 8 },
   statusLabel: { fontSize: 16, color: "#1c1c1e", fontWeight: "600" },
@@ -1646,7 +1571,7 @@ const styles = StyleSheet.create({
   sectionWrap: { marginTop: 14 },
   sectionDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#e5e5ea",
+    borderTopColor: colors.divider,
   },
   sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
@@ -1659,7 +1584,8 @@ const styles = StyleSheet.create({
   // 発言間の「間」が1.5秒未満のブロックは、同じ段落として自然に繋がって見えるよう行間を詰める
   transcriptRowParagraph: { marginBottom: 2 },
   transcriptTime: { fontSize: 12, color: "#8e8e93", marginTop: 2, width: 40 },
-  transcriptText: { fontSize: 16, color: "#1c1c1e", flex: 1, lineHeight: 22 },
+  // 録音中はノールックで読む場面があるため、他画面の本文(fontSize.body)より意図的に大きい
+  transcriptText: { fontSize: fontSize.liveCaption, color: "#1c1c1e", flex: 1, lineHeight: 22 },
   transcriptMarkedRow: {
     borderLeftWidth: 3,
     borderLeftColor: "#d3d3d9",
@@ -1670,7 +1596,7 @@ const styles = StyleSheet.create({
   transcriptMarkedHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
   transcriptBadgeRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   transcriptMarkedTime: { fontSize: 13, fontWeight: "700", color: "#8e8e93" },
-  sysText: { fontSize: 12, color: "#c00", marginBottom: 8 },
+  sysText: { fontSize: 12, color: colors.danger.text, marginBottom: 8 },
   transcriptEditBody: { flex: 1 },
   editTextInput: {
     fontSize: 16,
@@ -1700,46 +1626,11 @@ const styles = StyleSheet.create({
   editActionButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
   editActionButtonPrimaryText: { fontSize: 13, fontWeight: "600", color: "#fff" },
 
-  // 長押しメニュー(ノート詳細画面と同様の見た目)
-  blockMenuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)" },
-  menuHighlight: {
-    position: "absolute",
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    elevation: 8,
-  },
-  menuList: {
-    position: "absolute",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 11,
-  },
-  menuItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#e5e5ea" },
-  menuItemText: { fontSize: 15, color: "#1c1c1e" },
+  // 長押しメニュー(共通コンポーネントRowLongPressMenuの中で使うプレビュー・追加行の見た目)
+  menuHighlightRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   menuAttrRow: { flexDirection: "row", height: 48 },
   menuAttrButton: { flex: 1, alignItems: "center", justifyContent: "center" },
-  menuAttrButtonDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: "#e5e5ea" },
+  menuAttrButtonDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.divider },
   placeholderText: {
     fontSize: 13,
     color: "#b8b8bd",
@@ -1753,7 +1644,7 @@ const styles = StyleSheet.create({
   },
   liveFocusDivider: {
     height: 1,
-    backgroundColor: "#e5e5ea",
+    backgroundColor: colors.divider,
     marginBottom: 10,
   },
   liveFocusCollapsed: {
@@ -1832,7 +1723,7 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#e0342f",
+    backgroundColor: colors.danger.action,
   },
   controlButtonStopText: { fontSize: 16, fontWeight: "600", color: "#fff" },
   controlButtonDisabled: { opacity: 0.35 },
@@ -1852,7 +1743,7 @@ const styles = StyleSheet.create({
   // 0.3だと薄すぎてキーボードが透けて見えてしまうため、適切な濃さまで上げる
   debugOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: colors.overlay.prompt,
     justifyContent: "flex-end",
     zIndex: 10,
   },

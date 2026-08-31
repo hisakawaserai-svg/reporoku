@@ -145,6 +145,34 @@ export async function listBySessionId(sessionId: string): Promise<Block[]> {
   return rows.map(mapRow);
 }
 
+// SQLiteのバインド変数上限(環境によっては999)を超えないよう、IN句1回あたりの件数を抑える
+const LIST_BY_SESSION_IDS_BATCH_SIZE = 500;
+
+// ノート一覧画面用。セッションごとに1クエリずつ投げるN+1を避けるため、
+// 対象セッションID群のブロックを(必要ならバッチ分割した)IN句クエリでまとめて取得し、
+// sessionIdごとにグルーピングして返す(値が無いセッションは呼び出し側でデフォルト値を扱う)
+export async function listBySessionIds(sessionIds: string[]): Promise<Map<string, Block[]>> {
+  const result = new Map<string, Block[]>();
+  if (sessionIds.length === 0) return result;
+
+  const db = await getDb();
+  for (let i = 0; i < sessionIds.length; i += LIST_BY_SESSION_IDS_BATCH_SIZE) {
+    const batch = sessionIds.slice(i, i + LIST_BY_SESSION_IDS_BATCH_SIZE);
+    const placeholders = batch.map(() => "?").join(",");
+    const rows = await db.getAllAsync<BlockRow>(
+      `SELECT * FROM blocks WHERE session_id IN (${placeholders}) ORDER BY start_ms ASC;`,
+      batch
+    );
+    for (const row of rows) {
+      const block = mapRow(row);
+      const list = result.get(block.sessionId);
+      if (list) list.push(block);
+      else result.set(block.sessionId, [block]);
+    }
+  }
+  return result;
+}
+
 // バックアップ書き出し用。写真ブロックが参照している実ファイルのURIのみを、
 // セッションをまたいで一括取得する(Documents/photos/配下の孤児ファイルは含めない)
 export async function listAllPhotoUris(): Promise<string[]> {

@@ -18,6 +18,7 @@ import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { setOnboardingCompleted } from "../utils/settings";
+import { fontSize } from "../theme/typography";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  heading: { fontSize: 20, fontWeight: "700", color: "#1c1c1e", textAlign: "center" },
+  heading: { fontSize: fontSize.dialogHeading, fontWeight: "700", color: "#1c1c1e", textAlign: "center" },
   subheading: {
     fontSize: 14,
     color: "#8e8e93",

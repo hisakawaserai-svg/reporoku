@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
 
 // ★の「グループを設定」専用のフォーム。ノート詳細画面(タイムライン中にインライン展開)・
 // まとめ画面(モーダル)の両方から、中身だけをこのコンポーネントとして共有する。
@@ -110,8 +112,8 @@ export default function GroupSettingForm({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: radius.formCard,
+    padding: spacing.formCardPadding,
     marginVertical: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -122,15 +124,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: "700", color: "#1c1c1e", marginBottom: 10 },
   input: {
     borderWidth: 1.5,
-    borderColor: "#d98c00",
+    borderColor: colors.star.accent,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
     color: "#1c1c1e",
-    backgroundColor: "#fdf6e8",
+    backgroundColor: colors.star.background,
   },
-  divider: { height: 1, backgroundColor: "#e5e5ea", marginVertical: 16 },
+  divider: { height: 1, backgroundColor: colors.divider, marginVertical: 16 },
   sectionLabel: { fontSize: 13, color: "#8e8e93", marginBottom: 10 },
   searchBox: {
     flexDirection: "row",
@@ -155,7 +157,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 10,
   },
-  radioRowSelected: { backgroundColor: "#fdf0dc" },
+  radioRowSelected: { backgroundColor: colors.star.background },
   radioOuter: {
     width: 22,
     height: 22,
@@ -165,8 +167,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  radioOuterSelected: { borderColor: "#d98c00" },
-  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: "#d98c00" },
+  radioOuterSelected: { borderColor: colors.star.accent },
+  radioInner: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.star.accent },
   radioTextArea: { flex: 1 },
   radioTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   radioLabel: { fontSize: 16, color: "#1c1c1e" },
@@ -181,7 +183,7 @@ const styles = StyleSheet.create({
   },
   cancelText: { fontSize: 16, color: "#8e8e93", fontWeight: "600" },
   saveButton: {
-    backgroundColor: "#d98c00",
+    backgroundColor: colors.star.accent,
     paddingHorizontal: 24,
     paddingVertical: 10,
     borderRadius: 22,

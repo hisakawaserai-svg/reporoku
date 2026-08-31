@@ -7,6 +7,18 @@ const PHOTOS_DIR_NAME = "photos";
 
 export class InvalidBackupError extends Error {}
 
+// 復元処理の失敗後、退避データへのロールバックそのものにも失敗した場合に投げる。
+// このケースでは呼び出し元は「元のデータは保持されています」とは案内できないため、
+// 通常のRestore失敗と区別できるようにしている
+export class RestoreRollbackFailedError extends Error {
+  constructor(
+    public readonly originalError: unknown,
+    public readonly rollbackError: unknown
+  ) {
+    super("復元に失敗し、退避データへのロールバックにも失敗しました");
+  }
+}
+
 // react-native-zip-archiveはfile://スキームなしのプレーンなパスを想定しているため、
 // expo-file-systemのuri(file://...)から変換する
 function toPlainPath(uri: string): string {
@@ -125,6 +137,7 @@ export async function applyBackup(extractDir: Directory): Promise<void> {
           await rollbackFromSafety(safetyDir, currentDbFile, currentAudioDir, currentPhotosDir);
         } catch (rollbackError) {
           console.warn("[Restore] 退避データへの復元にも失敗しました", rollbackError);
+          throw new RestoreRollbackFailedError(e, rollbackError);
         }
         throw e;
       }

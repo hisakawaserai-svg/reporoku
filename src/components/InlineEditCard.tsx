@@ -1,20 +1,27 @@
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
 export type InlineEditKind = "star" | "todo" | "question" | "neutral";
 
 // 種別ごとの配色(アイコン・バッジ背景・保存ボタン)。「まとめ」画面のクイック追加/編集
-// カード(ItemFormModal)と揃えている
+// カードと揃えている
 const KIND_STYLE: Record<
   InlineEditKind,
   { icon: IconName; iconColor: string; badgeBg: string; saveColor: string }
 > = {
-  star: { icon: "star", iconColor: "#d98c00", badgeBg: "#fdf0dc", saveColor: "#d98c00" },
-  todo: { icon: "checkmark", iconColor: "#1f9254", badgeBg: "#e0f7e6", saveColor: "#34c759" },
-  question: { icon: "help", iconColor: "#7c4dff", badgeBg: "#f2e8fc", saveColor: "#7c4dff" },
-  neutral: { icon: "create-outline", iconColor: "#8e8e93", badgeBg: "#f2f2f7", saveColor: "#06c" },
+  star: { icon: "star", iconColor: colors.star.accent, badgeBg: colors.star.background, saveColor: colors.star.accent },
+  todo: { icon: "checkmark", iconColor: colors.todo.accent, badgeBg: colors.todo.background, saveColor: colors.todo.accent },
+  question: {
+    icon: "help",
+    iconColor: colors.question.accent,
+    badgeBg: colors.question.background,
+    saveColor: colors.question.accent,
+  },
+  neutral: { icon: "create-outline", iconColor: "#8e8e93", badgeBg: "#f2f2f7", saveColor: colors.primary },
 };
 
 // タイムライン(ノート詳細画面)で使う、行内展開型の編集カード。「テキスト編集」「回答を記入」
@@ -31,6 +38,11 @@ export default function InlineEditCard({
   onChangeText,
   placeholder,
   caption,
+  showSecondary,
+  secondaryValue,
+  onSecondaryChange,
+  secondaryPlaceholder,
+  secondaryCaption,
   onCancel,
   onConfirm,
   confirmDisabled,
@@ -46,6 +58,12 @@ export default function InlineEditCard({
   onChangeText: (text: string) => void;
   placeholder?: string;
   caption?: string;
+  // 質問の「Q」「A」編集のように、本文入力の下にもう1つ入力欄を足したい場合に使う
+  showSecondary?: boolean;
+  secondaryValue?: string;
+  onSecondaryChange?: (text: string) => void;
+  secondaryPlaceholder?: string;
+  secondaryCaption?: string;
   onCancel: () => void;
   onConfirm: () => void;
   confirmDisabled?: boolean;
@@ -77,6 +95,19 @@ export default function InlineEditCard({
       />
       {caption ? <Text style={styles.caption}>{caption}</Text> : null}
 
+      {showSecondary ? (
+        <>
+          <TextInput
+            style={styles.input}
+            value={secondaryValue}
+            onChangeText={onSecondaryChange}
+            placeholder={secondaryPlaceholder}
+            multiline
+          />
+          {secondaryCaption ? <Text style={styles.caption}>{secondaryCaption}</Text> : null}
+        </>
+      ) : null}
+
       <View style={styles.footer}>
         <TouchableOpacity onPress={onCancel}>
           <Text style={styles.cancelText}>キャンセル</Text>
@@ -99,10 +130,10 @@ export default function InlineEditCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
-    borderRadius: 18,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
+    borderRadius: radius.formCard,
+    paddingHorizontal: spacing.formCardPadding,
+    paddingTop: spacing.formCardPadding,
+    paddingBottom: spacing.formCardPadding,
     marginVertical: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },

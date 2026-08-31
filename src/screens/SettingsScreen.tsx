@@ -26,7 +26,13 @@ import {
   setSectionGroupingEnabled,
 } from "../utils/settings";
 import { createBackupZip } from "../utils/backup";
-import { InvalidBackupError, applyBackup, discardExtractedBackup, extractAndValidateBackup } from "../utils/restore";
+import {
+  InvalidBackupError,
+  RestoreRollbackFailedError,
+  applyBackup,
+  discardExtractedBackup,
+  extractAndValidateBackup,
+} from "../utils/restore";
 import {
   deleteOrphanFiles,
   findOrphanFiles,
@@ -34,6 +40,9 @@ import {
   listNoteStorageEntries,
   totalBytesOf,
 } from "../utils/storageManagement";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
+import { fontSize } from "../theme/typography";
 
 type Row = { icon: keyof typeof Ionicons.glyphMap; label: string; value?: string };
 type Section = { title: string; rows: Row[] };
@@ -205,7 +214,14 @@ export default function SettingsScreen() {
               );
             } catch (e) {
               console.warn("[Restore] 復元に失敗しました", e);
-              Alert.alert("復元に失敗しました", "元のデータは保持されています。");
+              if (e instanceof RestoreRollbackFailedError) {
+                Alert.alert(
+                  "復元に失敗しました",
+                  "復元に失敗し、データの状態が不安定になっている可能性があります。バックアップから再度復元をお試しいただくか、お手数ですがサポートにご連絡ください。"
+                );
+              } else {
+                Alert.alert("復元に失敗しました", "元のデータは保持されています。");
+              }
             } finally {
               setIsRestoring(false);
             }
@@ -394,7 +410,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f2f2f7" },
   content: { paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: "700", marginHorizontal: 16, marginTop: 12, marginBottom: 8 },
+  title: { fontSize: fontSize.tabTitle, fontWeight: "700", marginHorizontal: 16, marginTop: 12, marginBottom: 8 },
   section: { marginTop: 20 },
   sectionHeader: {
     fontSize: 13,
@@ -406,18 +422,18 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: radius.card,
     overflow: "hidden",
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.cardPadding,
+    paddingHorizontal: spacing.cardPadding,
   },
   rowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#c6c6c8",
+    borderBottomColor: colors.divider,
   },
   rowIcon: { marginRight: 10 },
   rowLabel: { flex: 1, fontSize: 16 },

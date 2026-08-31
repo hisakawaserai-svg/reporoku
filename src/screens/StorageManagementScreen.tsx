@@ -12,6 +12,9 @@ import {
   totalBytesOf,
   type NoteStorageEntry,
 } from "../utils/storageManagement";
+import * as colors from "../theme/colors";
+import { radius, spacing } from "../theme/spacing";
+import { fontSize } from "../theme/typography";
 
 function noteDisplayTitle(entry: NoteStorageEntry): string {
   return entry.title || `${formatDateSlash(entry.startedAt)} の記録`;
@@ -144,7 +147,7 @@ export default function StorageManagementScreen() {
                     onPress={() => confirmDeleteSessionAudio(entry)}
                   >
                     {deletingSessionId === entry.sessionId ? (
-                      <ActivityIndicator size="small" color="#ff3b30" />
+                      <ActivityIndicator size="small" color={colors.danger.action} />
                     ) : (
                       <Text style={styles.rowActionText}>音声のみ削除</Text>
                     )}
@@ -183,7 +186,7 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 24 },
   totalCard: {
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: radius.card,
     padding: 18,
     alignItems: "center",
     gap: 4,
@@ -197,32 +200,32 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textTransform: "uppercase",
   },
-  card: { backgroundColor: "#fff", borderRadius: 10, overflow: "hidden" },
+  card: { backgroundColor: "#fff", borderRadius: radius.card, overflow: "hidden" },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: spacing.cardPadding,
+    paddingHorizontal: spacing.cardPadding,
     gap: 10,
   },
-  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#c6c6c8" },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
   rowBody: { flex: 1 },
-  rowTitle: { fontSize: 15, fontWeight: "600", color: "#1c1c1e" },
+  rowTitle: { fontSize: fontSize.cardTitle, fontWeight: "600", color: "#1c1c1e" },
   rowMeta: { fontSize: 12, color: "#8e8e93", marginTop: 3 },
   rowAction: { paddingVertical: 6, paddingHorizontal: 10 },
-  rowActionText: { fontSize: 13, color: "#ff3b30", fontWeight: "600" },
+  rowActionText: { fontSize: 13, color: colors.danger.action, fontWeight: "600" },
   rowActionDone: { fontSize: 12, color: "#c7c7cc" },
   placeholder: { alignItems: "center", justifyContent: "center", paddingVertical: 40, gap: 8 },
   placeholderText: { color: "#8e8e93", fontSize: 14 },
   bulkBar: {
     padding: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#c6c6c8",
+    borderTopColor: colors.divider,
     backgroundColor: "#f2f2f7",
   },
   bulkButton: {
-    backgroundColor: "#ff3b30",
-    borderRadius: 10,
+    backgroundColor: colors.danger.action,
+    borderRadius: radius.card,
     paddingVertical: 13,
     alignItems: "center",
   },
