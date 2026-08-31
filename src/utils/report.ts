@@ -63,7 +63,7 @@ function buildSection(heading: string, lines: string[]): string[] {
   return ["", `■ ${heading}`, ...lines.map((line) => `・${line}`)];
 }
 
-// 「要点抜粋」テンプレートの本文(★・📝・❓のみ)。該当0件のセクションは見出しごと省略する
+// 「要点抜粋」テンプレートの本文(★・☑️/✅・❓のみ)。該当0件のセクションは見出しごと省略する
 export function buildExcerptSections(blocks: Block[]): string[] {
   const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
 
@@ -71,8 +71,9 @@ export function buildExcerptSections(blocks: Block[]): string[] {
 
   const todoLines = sorted
     .filter((b) => b.isTodo)
-    .map((b) => (b.text ?? "").trim())
-    .filter(Boolean);
+    .map((b) => ({ mark: b.todoDone ? "✅" : "☑️", text: (b.text ?? "").trim() }))
+    .filter((t) => t.text)
+    .map((t) => `${t.mark} ${t.text}`);
 
   // 保留中(is_deferred)のものは、未解決であっても「確認事項」からは除外する
   const openQuestionLines = sorted
@@ -83,16 +84,19 @@ export function buildExcerptSections(blocks: Block[]): string[] {
   const qaBlocks = sorted.filter((b) => b.isQuestion && isResolvedQuestion(b));
 
   const lines: string[] = [];
-  lines.push(...buildSection("重要なポイント", starLines));
+  // ★・❓は見出し自体にマークを添えるので行ごとには繰り返さない。ToDoは行ごとに完了状態が
+  // 異なりうる(☑️/✅)ため、見出しにはマークを付けず行ごとの表示のままにする
+  lines.push(...buildSection("重要なポイント★", starLines));
   lines.push(...buildSection("今後のアクション", todoLines));
-  lines.push(...buildSection("確認事項", openQuestionLines));
+  lines.push(...buildSection("確認事項 ❓", openQuestionLines));
 
   if (qaBlocks.length > 0) {
     lines.push("", "■ Q&A");
-    for (const block of qaBlocks) {
-      lines.push(`・Q：${(block.text ?? "").trim()}`);
-      lines.push(`  A：${(block.questionTerm ?? "").trim()}`);
-    }
+    qaBlocks.forEach((block, i) => {
+      if (i > 0) lines.push("");
+      lines.push(` Q：${(block.text ?? "").trim()}`);
+      lines.push(` A：${(block.questionTerm ?? "").trim()}`);
+    });
   }
 
   return lines;
@@ -101,7 +105,7 @@ export function buildExcerptSections(blocks: Block[]): string[] {
 function blockMarks(block: Block): string {
   let marks = "";
   if (block.isStarred) marks += "★";
-  if (block.isTodo) marks += "📝";
+  if (block.isTodo) marks += block.todoDone ? "✅" : "☑️";
   if (block.isQuestion) marks += "❓";
   return marks;
 }

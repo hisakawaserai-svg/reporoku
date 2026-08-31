@@ -186,15 +186,30 @@ type IconName = keyof typeof Ionicons.glyphMap;
 // マークが付いていないブロックの、ドット・縦線のデフォルト色
 const UNMARKED_DOT_COLOR = "#8e8e93";
 
-type IconBadge = { key: string; icon: IconName; color: string };
+// colorはバッジのアイコン自体の色(ToDoはtodoDoneで変わる)、lineColorはタイムライン左の
+// ドット・接続線の色(ToDoの未完了/完了にかかわらず常にtodo色のまま固定する)
+type IconBadge = { key: string; icon: IconName; color: string; lineColor: string };
 
 // ★・📝・❓が同じブロックに複数付いている場合、色を1色に混ぜて代表させるのではなく、
 // 該当するアイコンをすべて横に並べたバッジとして返す
 function activeBadges(block: Block): IconBadge[] {
   const badges: IconBadge[] = [];
-  if (block.isStarred) badges.push({ key: "star", icon: "star", color: colors.star.accent });
-  if (block.isTodo) badges.push({ key: "todo", icon: "checkmark-circle", color: colors.todo.accent });
-  if (block.isQuestion) badges.push({ key: "question", icon: "help-circle", color: colors.question.accent });
+  if (block.isStarred)
+    badges.push({ key: "star", icon: "star", color: colors.star.accent, lineColor: colors.star.accent });
+  if (block.isTodo)
+    badges.push({
+      key: "todo",
+      icon: "checkmark-circle",
+      color: block.todoDone ? colors.todo.accent : UNMARKED_DOT_COLOR,
+      lineColor: colors.todo.accent,
+    });
+  if (block.isQuestion)
+    badges.push({
+      key: "question",
+      icon: "help-circle",
+      color: colors.question.accent,
+      lineColor: colors.question.accent,
+    });
   return badges;
 }
 
@@ -1622,7 +1637,7 @@ export default function NoteDetailScreen() {
   // 実際の行と見た目が食い違わないようにする(hasLineBelowはゴーストでは常にfalse)
   const renderTimelineRowContent = (block: Block, hasLineBelow: boolean) => {
     const badges = activeBadges(block);
-    const dotColor = badges[0]?.color ?? UNMARKED_DOT_COLOR;
+    const dotColor = badges[0]?.lineColor ?? UNMARKED_DOT_COLOR;
     return (
       <>
         <View style={styles.timelineDotCol}>
@@ -1630,7 +1645,7 @@ export default function NoteDetailScreen() {
             {badges.length > 1 ? (
               <View style={styles.timelineDotStack}>
                 {badges.map((b) => (
-                  <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.color }]} />
+                  <View key={b.key} style={[styles.timelineDot, { backgroundColor: b.lineColor }]} />
                 ))}
               </View>
             ) : (
