@@ -1624,7 +1624,7 @@ function MiniMicIcon({ running }: { running: boolean }) {
         ]}
       >
         <Svg width={MINI_WAVE_SVG_WIDTH} height={MINI_WAVE_SVG_HEIGHT}>
-          <Path d={MINI_WAVE_PATH_D} fill="rgba(255,255,255,0.55)" />
+          <Path d={MINI_WAVE_PATH_D} fill="rgba(196,196,201,0.7)" />
         </Svg>
       </Animated.View>
     </View>
@@ -1717,7 +1717,7 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
             style={[styles.liveFocusWaveStrip, { transform: [{ translateX: waveAnim }] }]}
           >
             <Svg width={WAVE_SVG_WIDTH} height={WAVE_SVG_HEIGHT}>
-              <Path d={WAVE_PATH_D} fill="rgba(255,255,255,0.55)" />
+              <Path d={WAVE_PATH_D} fill="rgba(196,196,201,0.7)" />
             </Svg>
           </Animated.View>
         </View>
@@ -2007,7 +2007,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "rgba(156,156,163,0.55)",
     overflow: "visible",
   },
   // 液面ゲージの上端に重ねて波打たせるSVGの帯。fillの上端をまたぐように少し上へずらす
