@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   View,
   Text,
   ScrollView,
@@ -17,6 +18,7 @@ import {
   AppStateStatus,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -74,6 +76,25 @@ const LIVE_FOCUS_BAR_COUNT = 5;
 const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
 // バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
 const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
+
+// 円の液面ゲージの水面につける波アニメーション用。1周期(WAVE_PERIOD幅)を3周期分並べたSVGパスを
+// 横方向に1周期分だけ無限ループでずらし続けることで、水面が揺れているように見せる
+const WAVE_PERIOD = 44;
+const WAVE_AMPLITUDE = 3;
+const WAVE_BASELINE = 6;
+const WAVE_SVG_HEIGHT = 14;
+const WAVE_PERIODS = 3;
+const WAVE_SVG_WIDTH = WAVE_PERIOD * WAVE_PERIODS;
+const WAVE_PATH_D = (() => {
+  let d = `M0,${WAVE_BASELINE}`;
+  for (let i = 0; i < WAVE_PERIODS; i++) {
+    const x0 = i * WAVE_PERIOD;
+    d += ` C${x0 + WAVE_PERIOD * 0.25},${WAVE_BASELINE - WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.25},${WAVE_BASELINE - WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.5},${WAVE_BASELINE}`;
+    d += ` C${x0 + WAVE_PERIOD * 0.75},${WAVE_BASELINE + WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD * 0.75},${WAVE_BASELINE + WAVE_AMPLITUDE} ${x0 + WAVE_PERIOD},${WAVE_BASELINE}`;
+  }
+  d += ` L${WAVE_SVG_WIDTH},${WAVE_SVG_HEIGHT} L0,${WAVE_SVG_HEIGHT} Z`;
+  return d;
+})();
 
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
@@ -1570,6 +1591,24 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   const [fillLevel, setFillLevel] = useState(0);
   const fillLevelRef = useRef(0);
 
+  // 水面の波(液面ゲージの塗りつぶし上端)を横に流れ続けさせるアニメーション。
+  // WAVE_PATH_D は1周期分ずらしても同じ形に見えるよう作ってあるので、
+  // 0→-WAVE_PERIODへの移動を繰り返すだけで途切れなくループする
+  const waveAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!running) return;
+    const loop = Animated.loop(
+      Animated.timing(waveAnim, {
+        toValue: -WAVE_PERIOD,
+        duration: 1600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [running, waveAnim]);
+
   useEffect(() => {
     if (!running) {
       barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
@@ -1614,7 +1653,15 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   return (
     <View style={styles.liveFocusCircle}>
       <View style={styles.liveFocusCircleInner}>
-        <View style={[styles.liveFocusCircleFill, { height: Math.round(fillLevel * 88) }]} />
+        <View style={[styles.liveFocusCircleFill, { height: Math.round(fillLevel * 88) }]}>
+          <Animated.View
+            style={[styles.liveFocusWaveStrip, { transform: [{ translateX: waveAnim }] }]}
+          >
+            <Svg width={WAVE_SVG_WIDTH} height={WAVE_SVG_HEIGHT}>
+              <Path d={WAVE_PATH_D} fill="rgba(255,255,255,0.22)" />
+            </Svg>
+          </Animated.View>
+        </View>
         <View style={styles.liveFocusCircleBars}>
           {circleLevels.map((h, i) => (
             <View key={i} style={[styles.liveFocusBar, { height: h }]} />
@@ -1908,6 +1955,13 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: "rgba(255,255,255,0.22)",
+    overflow: "visible",
+  },
+  // 液面ゲージの上端に重ねて波打たせるSVGの帯。fillの上端をまたぐように少し上へずらす
+  liveFocusWaveStrip: {
+    position: "absolute",
+    top: -WAVE_BASELINE,
+    left: 0,
   },
   liveFocusCircleBars: {
     flexDirection: "row",
