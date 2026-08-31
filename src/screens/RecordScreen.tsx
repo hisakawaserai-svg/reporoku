@@ -68,6 +68,11 @@ const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
 // バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
 const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
 
+// ヘッダー左上の音量イコライザー用
+const HEADER_EQ_BAR_COUNT = 9;
+const HEADER_EQ_BAR_SCALE = [0.45, 0.6, 0.75, 0.9, 1, 0.9, 0.75, 0.6, 0.45];
+const HEADER_EQ_BAR_SMOOTHING = [0.5, 0.35, 0.55, 0.4, 0.6, 0.4, 0.55, 0.35, 0.5];
+
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
 const MARK_TILES: {
@@ -1064,6 +1069,10 @@ export default function RecordScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.topSection}>
+        <View style={styles.topLeftGroup}>
+          <HeaderEqualizer running={running && !paused} />
+        </View>
+
         <View style={styles.topRightGroup}>
           <TouchableOpacity
             onPress={() => navigation.navigate("HowToUse", { section: "record" })}
@@ -1444,6 +1453,53 @@ function MarkTile({
   );
 }
 
+// ヘッダー左上に表示する音量イコライザー(LiveFocusBandの円形イコライザーと同じ仕組みで、
+// バーの本数だけ増やしたもの)。
+function HeaderEqualizer({ running }: { running: boolean }) {
+  const [levels, setLevels] = useState<number[]>(new Array(HEADER_EQ_BAR_COUNT).fill(3));
+  const currentRef = useRef<number[]>(new Array(HEADER_EQ_BAR_COUNT).fill(3));
+  const weightRef = useRef<number[]>(new Array(HEADER_EQ_BAR_COUNT).fill(1));
+
+  useEffect(() => {
+    if (!running) {
+      currentRef.current = new Array(HEADER_EQ_BAR_COUNT).fill(3);
+      weightRef.current = new Array(HEADER_EQ_BAR_COUNT).fill(1);
+      setLevels(currentRef.current);
+    }
+  }, [running]);
+
+  useSpeechRecognitionEvent("volumechange", (event) => {
+    if (!running) return;
+    const clamped = Math.max(-2, Math.min(10, event.value));
+    const normalized = (clamped + 2) / 12;
+    const nextLevels = HEADER_EQ_BAR_SCALE.map((scale, i) => {
+      if (Math.random() < 0.5) {
+        const drift = (Math.random() - 0.5) * 0.3;
+        weightRef.current[i] = Math.max(0.5, Math.min(1.6, weightRef.current[i] + drift));
+      }
+      const noise = (Math.random() - 0.5) * 3 * normalized;
+      const spike = Math.random() < 0.08 ? Math.random() * 3 * normalized : 0;
+      const target = 3 + normalized * 10 * scale * weightRef.current[i] + noise + spike;
+      const smoothing = HEADER_EQ_BAR_SMOOTHING[i];
+      const current = currentRef.current[i] + (target - currentRef.current[i]) * smoothing;
+      const clampedCurrent = Math.max(3, Math.min(16, current));
+      currentRef.current[i] = clampedCurrent;
+      return Math.round(clampedCurrent);
+    });
+    setLevels(nextLevels);
+  });
+
+  if (!running) return null;
+
+  return (
+    <View style={styles.headerEqualizer}>
+      {levels.map((h, i) => (
+        <View key={i} style={[styles.headerEqualizerBar, { height: h }]} />
+      ))}
+    </View>
+  );
+}
+
 // 収録中の「今聞き取っている内容」を表示する帯(チャットアプリの「入力中」表示のように、確定済みタイムラインの直後・操作ボタンの直前に置く)。
 // 縮小(1行)⇄展開(円形ビジュアル+複数行テキスト)はタップで切り替える。
 // 無操作による自動縮小は行わない(収録が止まった時だけ強制的に縮小する)。
@@ -1472,11 +1528,17 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
   const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
   const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
 
+  // マイクアイコン(縮小時)の音量ゲージ用。0〜1に正規化した音量を滑らかに追従させる
+  const [micLevel, setMicLevel] = useState(0);
+  const micLevelRef = useRef(0);
+
   useEffect(() => {
     if (!running) {
       barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
       barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
       setCircleLevels(barCurrentRef.current);
+      micLevelRef.current = 0;
+      setMicLevel(0);
     }
   }, [running]);
 
@@ -1485,6 +1547,10 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
     // eventのvalueは概ね-2〜10の範囲(0未満は無音相当)。既存のバー高さレンジ(4〜22、コンテナの高さまで)に写像する
     const clamped = Math.max(-2, Math.min(10, event.value));
     const normalized = (clamped + 2) / 12;
+
+    micLevelRef.current = micLevelRef.current + (normalized - micLevelRef.current) * 0.3;
+    setMicLevel(micLevelRef.current);
+
     const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
       // バーごとの「個性」を少し大きめにランダムドリフトさせる
       if (Math.random() < 0.5) {
@@ -1528,13 +1594,16 @@ function LiveFocusBand({ text, running }: { text: string; running: boolean }) {
           </>
         ) : (
           <View style={styles.liveFocusRow}>
-            <View style={styles.miniEqualizer}>
-              {circleLevels.slice(0, 3).map((h, i) => (
-                <View
-                  key={i}
-                  style={[styles.miniEqualizerBar, { height: Math.min(14, h) }]}
-                />
-              ))}
+            <View style={styles.miniMicIcon}>
+              <Ionicons name="mic-outline" size={16} color="#c7c7cc" />
+              <View
+                style={[
+                  styles.miniMicFillMask,
+                  { height: Math.max(2, Math.round(2 + micLevel * 14)) },
+                ]}
+              >
+                <Ionicons name="mic" size={16} color="#1c1c1e" style={styles.miniMicFillIcon} />
+              </View>
             </View>
             <Text style={styles.liveFocusTextCollapsed} numberOfLines={1} ellipsizeMode="head">
               {text}
@@ -1558,6 +1627,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 14,
   },
+  topLeftGroup: {
+    position: "absolute",
+    top: 0,
+    left: 16,
+    zIndex: 1,
+    height: 22,
+    justifyContent: "center",
+  },
+  headerEqualizer: { flexDirection: "row", alignItems: "center", gap: 2, height: 16 },
+  headerEqualizerBar: { width: 2, borderRadius: 1, backgroundColor: "#9c9ca3" },
 
   topSection: { alignItems: "center", paddingTop: 10, paddingBottom: 4 },
   statusRow: {
@@ -1713,8 +1792,9 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   liveFocusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  miniEqualizer: { flexDirection: "row", alignItems: "center", gap: 2, height: 14 },
-  miniEqualizerBar: { width: 2, borderRadius: 1, backgroundColor: "#9c9ca3" },
+  miniMicIcon: { width: 16, height: 16 },
+  miniMicFillMask: { position: "absolute", left: 0, bottom: 0, width: 16, overflow: "hidden" },
+  miniMicFillIcon: { position: "absolute", left: 0, bottom: 0 },
   liveFocusTextCollapsed: { flex: 1, fontSize: 13, color: "#a0a0a6" },
 
   liveFocusExpanded: {
