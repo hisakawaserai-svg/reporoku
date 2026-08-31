@@ -36,7 +36,13 @@ import { genId } from "../utils/id";
 import { getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
 import { adoptOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecovery";
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
-import { getDefaultSectionGapMs, getSectionGroupingEnabled } from "../utils/settings";
+import {
+  getAllowBluetoothMic,
+  getDefaultSectionGapMs,
+  getPlaybackLeadSec,
+  getRecordingSampleRate,
+  getSectionGroupingEnabled,
+} from "../utils/settings";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import * as colors from "../theme/colors";
@@ -208,7 +214,7 @@ export default function RecordScreen() {
   const failStreak = useRef(0);         // 無限リトライ防止
   const lastResultAt = useRef(0);
   const segStart = useRef<number | null>(null);
-  const [leadSec, setLeadSec] = useState(1.2);
+  const [leadSec, setLeadSec] = useState(getPlaybackLeadSec);
 
   const isRecognizingRef = useRef(false);            // 現在ネイティブ側の音声認識セッションが動いているか(audiostart〜end間)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -610,8 +616,6 @@ export default function RecordScreen() {
     }, 150);
   });
 
-  const useExternalicMic = false; // 外部マイクを使う場合は true にする
-
   const begin = () => {
     // audiostartイベントはネイティブ側の非同期処理を経て発火するため、begin()を呼んでから
     // 実際にisRecognizingRef.current=trueになるまでにわずかなギャップがある。その間に
@@ -630,13 +634,19 @@ export default function RecordScreen() {
       console.warn("[FS] 音声保存ディレクトリの準備に失敗しました。既定のcacheに保存されます", e);
     }
 
+    const useExternalicMic = getAllowBluetoothMic();
+
     ExpoSpeechRecognitionModule.start({
       lang: "ja-JP",
       interimResults: true,
       continuous: true,
       requiresOnDeviceRecognition: true,
       addsPunctuation: true,
-      recordingOptions: { persist: true, outputDirectory: audioOutputDirectory },
+      recordingOptions: {
+        persist: true,
+        outputDirectory: audioOutputDirectory,
+        outputSampleRate: getRecordingSampleRate(),
+      },
       iosCategory: {
         category: "playAndRecord",
         categoryOptions: useExternalicMic ? ["defaultToSpeaker", "allowBluetooth"] : ["defaultToSpeaker"],

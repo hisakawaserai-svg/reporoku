@@ -12,6 +12,12 @@ export interface AppSettings {
   defaultSectionGapMs: number;
   // 初回起動オンボーディングを完了したか。trueなら次回以降は表示しない
   onboardingCompleted: boolean;
+  // タップ再生時に、何秒手前から再生を開始するか(秒)
+  playbackLeadSec: number;
+  // 録音時のサンプルレート(Hz)
+  recordingSampleRate: number;
+  // オンにすると、接続中のBluetoothマイク(ワイヤレスイヤホン等)からの録音を許可する
+  allowBluetoothMic: boolean;
 }
 
 // 選択できるセクション区切りの間隔(ms)。設定画面・録音画面・ノート詳細画面で共通して使う
@@ -22,10 +28,25 @@ export const SECTION_GAP_OPTIONS: { ms: number; label: string }[] = [
   { ms: 12000, label: "12秒" },
 ];
 
+// 再生開始位置(lead秒数)の調整範囲・刻み幅・初期値
+export const PLAYBACK_LEAD_MIN_SEC = 0;
+export const PLAYBACK_LEAD_MAX_SEC = 5;
+export const PLAYBACK_LEAD_STEP_SEC = 0.2;
+export const PLAYBACK_LEAD_DEFAULT_SEC = 1.2;
+
+// 選択できる録音サンプルレート(Hz)。設定画面・録音画面で共通して使う
+export const SAMPLE_RATE_OPTIONS: { hz: number; label: string; hint: string }[] = [
+  { hz: 16000, label: "標準(16000Hz)", hint: "容量を抑える(1時間あたり約115MB)" },
+  { hz: 44100, label: "高音質(44100Hz)", hint: "容量が大きい(1時間あたり約300MB)" },
+];
+
 const DEFAULT_SETTINGS: AppSettings = {
   sectionGroupingEnabled: false,
   defaultSectionGapMs: 5000,
   onboardingCompleted: false,
+  playbackLeadSec: PLAYBACK_LEAD_DEFAULT_SEC,
+  recordingSampleRate: 16000,
+  allowBluetoothMic: false,
 };
 
 // 起動中に何度も呼ばれても毎回ファイルI/Oが走らないよう、読み込み結果を保持する
@@ -81,4 +102,28 @@ export function getOnboardingCompleted(): boolean {
 
 export function setOnboardingCompleted(completed: boolean): void {
   saveSettings({ ...loadSettings(), onboardingCompleted: completed });
+}
+
+export function getPlaybackLeadSec(): number {
+  return loadSettings().playbackLeadSec;
+}
+
+export function setPlaybackLeadSec(sec: number): void {
+  saveSettings({ ...loadSettings(), playbackLeadSec: sec });
+}
+
+export function getRecordingSampleRate(): number {
+  return loadSettings().recordingSampleRate;
+}
+
+export function setRecordingSampleRate(hz: number): void {
+  saveSettings({ ...loadSettings(), recordingSampleRate: hz });
+}
+
+export function getAllowBluetoothMic(): boolean {
+  return loadSettings().allowBluetoothMic;
+}
+
+export function setAllowBluetoothMic(enabled: boolean): void {
+  saveSettings({ ...loadSettings(), allowBluetoothMic: enabled });
 }

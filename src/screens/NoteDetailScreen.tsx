@@ -47,7 +47,7 @@ import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCar
 import GroupSettingForm from "../components/GroupSettingForm";
 import { RowLongPressMenu, useRowLongPressMenu } from "../components/RowLongPressMenu";
 import * as Clipboard from "expo-clipboard";
-import { getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
+import { getPlaybackLeadSec, getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
@@ -71,8 +71,6 @@ const VIEW_MODES: { key: "timeline" | "summary"; label: string }[] = [
 // 「まとめ」タブの区分。上から重要度の高い順に並べる:
 // ★(重要)→❓(質問・用語)→ToDo→写真→メモ
 type SummarySectionKey = "star" | "question" | "todo" | "photo" | "note";
-
-const LEAD_SEC = 1.2;
 
 // タイムラインのセクション分けに使う閾値(ミリ秒)。後で調整しやすいようここにまとめておく。
 // 「間」は前のブロックの推定終了時刻(startMs + 推定継続時間)から次のブロックのstartMsまでの差。
@@ -850,7 +848,7 @@ export default function NoteDetailScreen() {
       const resolved = resolveAudioPosition(targetMs, audioFiles);
       if (!resolved) return;
       const { file, positionMs } = resolved;
-      const leadMs = applyLead ? LEAD_SEC * 1000 : 0;
+      const leadMs = applyLead ? getPlaybackLeadSec() * 1000 : 0;
       const seekSeconds = Math.max(0, positionMs - leadMs) / 1000;
 
       if (file.id !== currentFileId) {

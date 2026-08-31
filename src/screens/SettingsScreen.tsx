@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,10 +19,21 @@ import { Directory } from "expo-file-system";
 import { seedDevTestData } from "../utils/devTestData";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
+  PLAYBACK_LEAD_DEFAULT_SEC,
+  PLAYBACK_LEAD_MAX_SEC,
+  PLAYBACK_LEAD_MIN_SEC,
+  PLAYBACK_LEAD_STEP_SEC,
+  SAMPLE_RATE_OPTIONS,
   SECTION_GAP_OPTIONS,
+  getAllowBluetoothMic,
   getDefaultSectionGapMs,
+  getPlaybackLeadSec,
+  getRecordingSampleRate,
   getSectionGroupingEnabled,
+  setAllowBluetoothMic,
   setDefaultSectionGapMs,
+  setPlaybackLeadSec,
+  setRecordingSampleRate,
   setSectionGroupingEnabled,
 } from "../utils/settings";
 import { createBackupZip } from "../utils/backup";
@@ -49,17 +60,6 @@ type Section = { title: string; rows: Row[] };
 
 const SECTIONS: Section[] = [
   {
-    title: "再生",
-    rows: [{ icon: "play-outline", label: "再生開始位置(lead)", value: "1.2秒" }],
-  },
-  {
-    title: "録音",
-    rows: [
-      { icon: "mic-outline", label: "音声の品質 / サンプルレート", value: "標準" },
-      { icon: "bluetooth-outline", label: "外部マイクを使う", value: "オフ" },
-    ],
-  },
-  {
     title: "アプリ情報",
     rows: [
       { icon: "language-outline", label: "言語", value: "日本語" },
@@ -76,11 +76,34 @@ export default function SettingsScreen() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
   const [defaultSectionGapMs, setDefaultSectionGapMsState] = useState(getDefaultSectionGapMs);
+  const [playbackLeadSec, setPlaybackLeadSecState] = useState(getPlaybackLeadSec);
+  const [recordingSampleRate, setRecordingSampleRateState] = useState(getRecordingSampleRate);
+  const [allowBluetoothMic, setAllowBluetoothMicState] = useState(getAllowBluetoothMic);
   const [totalStorageLabel, setTotalStorageLabel] = useState("—");
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isCheckingOrphans, setIsCheckingOrphans] = useState(false);
   const [isDeletingOrphans, setIsDeletingOrphans] = useState(false);
+
+  // 長押しでの連続変更中、setIntervalのコールバックが最新値を参照できるようにstateと並行して保持する
+  const playbackLeadSecRef = useRef(playbackLeadSec);
+  useEffect(() => {
+    playbackLeadSecRef.current = playbackLeadSec;
+  }, [playbackLeadSec]);
+  const leadRepeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leadRepeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopLeadRepeat = useCallback(() => {
+    if (leadRepeatTimeoutRef.current) {
+      clearTimeout(leadRepeatTimeoutRef.current);
+      leadRepeatTimeoutRef.current = null;
+    }
+    if (leadRepeatIntervalRef.current) {
+      clearInterval(leadRepeatIntervalRef.current);
+      leadRepeatIntervalRef.current = null;
+    }
+  }, []);
+  useEffect(() => stopLeadRepeat, [stopLeadRepeat]);
 
   const refreshTotalStorageLabel = useCallback(() => {
     listNoteStorageEntries()
@@ -241,6 +264,50 @@ export default function SettingsScreen() {
     setDefaultSectionGapMs(ms);
   };
 
+  const applyPlaybackLeadSec = useCallback((value: number) => {
+    const clamped = Math.min(
+      PLAYBACK_LEAD_MAX_SEC,
+      Math.max(PLAYBACK_LEAD_MIN_SEC, Math.round(value * 10) / 10)
+    );
+    playbackLeadSecRef.current = clamped;
+    setPlaybackLeadSecState(clamped);
+    setPlaybackLeadSec(clamped);
+  }, []);
+
+  const handleChangePlaybackLead = useCallback(
+    (delta: number) => {
+      applyPlaybackLeadSec(playbackLeadSecRef.current + delta);
+    },
+    [applyPlaybackLeadSec]
+  );
+
+  const handleResetPlaybackLead = useCallback(() => {
+    stopLeadRepeat();
+    applyPlaybackLeadSec(PLAYBACK_LEAD_DEFAULT_SEC);
+  }, [applyPlaybackLeadSec, stopLeadRepeat]);
+
+  // 長押し中は最初の変更の後、少し待ってから一定間隔で変更を繰り返す
+  const startLeadRepeat = useCallback(
+    (delta: number) => {
+      stopLeadRepeat();
+      handleChangePlaybackLead(delta);
+      leadRepeatTimeoutRef.current = setTimeout(() => {
+        leadRepeatIntervalRef.current = setInterval(() => handleChangePlaybackLead(delta), 120);
+      }, 400);
+    },
+    [handleChangePlaybackLead, stopLeadRepeat]
+  );
+
+  const handleSelectSampleRate = (hz: number) => {
+    setRecordingSampleRateState(hz);
+    setRecordingSampleRate(hz);
+  };
+
+  const handleToggleAllowBluetoothMic = (value: boolean) => {
+    setAllowBluetoothMicState(value);
+    setAllowBluetoothMic(value);
+  };
+
   const handleSeedTestData = async () => {
     if (isSeeding) return;
     setIsSeeding(true);
@@ -280,6 +347,98 @@ export default function SettingsScreen() {
             </View>
           </View>
         ))}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>再生</Text>
+          <View style={styles.card}>
+            <View style={styles.leadRow}>
+              <View style={styles.leadRowHeader}>
+                <Ionicons name="play-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>再生開始位置(lead)</Text>
+              </View>
+              <View style={styles.leadStepperRow}>
+                <TouchableOpacity
+                  style={styles.leadStepperButton}
+                  disabled={playbackLeadSec <= PLAYBACK_LEAD_MIN_SEC}
+                  onPressIn={() => startLeadRepeat(-PLAYBACK_LEAD_STEP_SEC)}
+                  onPressOut={stopLeadRepeat}
+                >
+                  <Ionicons name="remove" size={18} color="#06c" />
+                </TouchableOpacity>
+                <Text style={styles.leadStepperValue}>{playbackLeadSec.toFixed(1)}秒</Text>
+                <TouchableOpacity
+                  style={styles.leadStepperButton}
+                  disabled={playbackLeadSec >= PLAYBACK_LEAD_MAX_SEC}
+                  onPressIn={() => startLeadRepeat(PLAYBACK_LEAD_STEP_SEC)}
+                  onPressOut={stopLeadRepeat}
+                >
+                  <Ionicons name="add" size={18} color="#06c" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.leadResetButton}
+                  disabled={playbackLeadSec === PLAYBACK_LEAD_DEFAULT_SEC}
+                  onPress={handleResetPlaybackLead}
+                >
+                  <Ionicons
+                    name="refresh-outline"
+                    size={14}
+                    color={playbackLeadSec === PLAYBACK_LEAD_DEFAULT_SEC ? "#c7c7cc" : "#06c"}
+                  />
+                  <Text
+                    style={[
+                      styles.leadResetButtonText,
+                      playbackLeadSec === PLAYBACK_LEAD_DEFAULT_SEC && styles.leadResetButtonTextDisabled,
+                    ]}
+                  >
+                    リセット
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.gapHint}>
+                タップ再生時に、何秒手前から再生を開始するかの設定です。ボタンを押し続けると連続して変更できます。
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>録音</Text>
+          <View style={styles.card}>
+            <View style={[styles.gapRow, styles.rowDivider]}>
+              <View style={styles.leadRowHeader}>
+                <Ionicons name="mic-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>音声の品質 / サンプルレート</Text>
+              </View>
+              <View style={styles.gapOptionRow}>
+                {SAMPLE_RATE_OPTIONS.map((opt) => {
+                  const selected = opt.hz === recordingSampleRate;
+                  return (
+                    <TouchableOpacity
+                      key={opt.hz}
+                      style={[styles.gapOption, selected && styles.gapOptionSelected]}
+                      onPress={() => handleSelectSampleRate(opt.hz)}
+                    >
+                      <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.gapHint}>
+                {SAMPLE_RATE_OPTIONS.find((opt) => opt.hz === recordingSampleRate)?.hint}
+              </Text>
+            </View>
+            <View style={styles.row}>
+              <Ionicons name="bluetooth-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>外部マイクを使う</Text>
+              <Switch value={allowBluetoothMic} onValueChange={handleToggleAllowBluetoothMic} />
+            </View>
+            <Text style={styles.bluetoothHint}>
+              オンにすると、接続中のワイヤレスイヤホンやピンマイクから録音します。離れた場所の声を録る場合はオフのままにしてください。
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionHeader}>ストレージ管理</Text>
@@ -451,4 +610,34 @@ const styles = StyleSheet.create({
   gapOptionText: { fontSize: 14, fontWeight: "600", color: "#3c3c43" },
   gapOptionTextSelected: { color: "#fff" },
   gapHint: { fontSize: 12, color: "#8e8e93" },
+  leadRow: { paddingVertical: 12, paddingHorizontal: 12, gap: 10 },
+  leadRowHeader: { flexDirection: "row", alignItems: "center" },
+  leadStepperRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 20 },
+  leadStepperButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f2f2f7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  leadStepperValue: { fontSize: 18, fontWeight: "600", minWidth: 60, textAlign: "center" },
+  leadResetButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: "#f2f2f7",
+  },
+  leadResetButtonText: { fontSize: 13, fontWeight: "600", color: "#06c" },
+  leadResetButtonTextDisabled: { color: "#c7c7cc" },
+  bluetoothHint: {
+    fontSize: 12,
+    color: "#8e8e93",
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
 });
