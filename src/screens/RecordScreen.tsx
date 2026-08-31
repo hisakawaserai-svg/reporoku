@@ -74,9 +74,6 @@ const LIVE_FOCUS_BAR_COUNT = 5;
 const LIVE_FOCUS_BAR_SCALE = [0.7, 0.85, 1, 0.85, 0.7];
 // バーごとの反応の速さ(値が大きいほど素早く音量に追従し、小さいほどゆっくり追従する)
 const LIVE_FOCUS_BAR_SMOOTHING = [0.6, 0.35, 0.5, 0.4, 0.65];
-// 円の背景色(静音時→音量最大時)
-const CIRCLE_BG_QUIET = [28, 28, 30];
-const CIRCLE_BG_LOUD = [255, 59, 48];
 
 type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 
@@ -1554,18 +1551,8 @@ function MiniMicIcon({ running }: { running: boolean }) {
   );
 }
 
-// 円の背景色を、静音時の色(CIRCLE_BG_QUIET)から音量最大時の色(CIRCLE_BG_LOUD)まで
-// 音量に応じて線形補間する
-function mixCircleBackground(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  const r = Math.round(CIRCLE_BG_QUIET[0] + (CIRCLE_BG_LOUD[0] - CIRCLE_BG_QUIET[0]) * clamped);
-  const g = Math.round(CIRCLE_BG_QUIET[1] + (CIRCLE_BG_LOUD[1] - CIRCLE_BG_QUIET[1]) * clamped);
-  const b = Math.round(CIRCLE_BG_QUIET[2] + (CIRCLE_BG_LOUD[2] - CIRCLE_BG_QUIET[2]) * clamped);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-// 展開時に画面上部へ浮かぶ円形イコライザー。バーの動きに加え、円の背景色自体も
-// 音量に応じて変化させる(静かなら暗いグレー、大きいほど赤みが増す)。
+// 展開時に画面上部へ浮かぶ円形イコライザー。バーの動きに加え、円の背景自体も音量に
+// 合わせて拡大・縮小させ、波打つように脈動して見せる。
 // LiveFocusBandの展開パネルの中ではなく、画面全体に重なるオーバーレイとして独立して描画する。
 function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   // 音量バー用のレベル(volumechangeイベントの実測値をもとに更新)。
@@ -1579,17 +1566,17 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   const barCurrentRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(4));
   const barWeightRef = useRef<number[]>(new Array(LIVE_FOCUS_BAR_COUNT).fill(1));
 
-  // 円の背景色用。0〜1に正規化した音量を滑らかに追従させる
-  const [bgLevel, setBgLevel] = useState(0);
-  const bgLevelRef = useRef(0);
+  // 円の拡大・縮小(脈動)用。0〜1に正規化した音量を滑らかに追従させる
+  const [pulseLevel, setPulseLevel] = useState(0);
+  const pulseLevelRef = useRef(0);
 
   useEffect(() => {
     if (!running) {
       barCurrentRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(4);
       barWeightRef.current = new Array(LIVE_FOCUS_BAR_COUNT).fill(1);
       setCircleLevels(barCurrentRef.current);
-      bgLevelRef.current = 0;
-      setBgLevel(0);
+      pulseLevelRef.current = 0;
+      setPulseLevel(0);
     }
   }, [running]);
 
@@ -1599,8 +1586,8 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
     const clamped = Math.max(-2, Math.min(10, event.value));
     const normalized = (clamped + 2) / 12;
 
-    bgLevelRef.current = bgLevelRef.current + (normalized - bgLevelRef.current) * 0.3;
-    setBgLevel(bgLevelRef.current);
+    pulseLevelRef.current = pulseLevelRef.current + (normalized - pulseLevelRef.current) * 0.3;
+    setPulseLevel(pulseLevelRef.current);
 
     const nextLevels = LIVE_FOCUS_BAR_SCALE.map((scale, i) => {
       // バーごとの「個性」を少し大きめにランダムドリフトさせる
@@ -1625,7 +1612,7 @@ function ExpandedFocusEqualizer({ running }: { running: boolean }) {
   if (!running) return null;
 
   return (
-    <View style={[styles.liveFocusCircle, { backgroundColor: mixCircleBackground(bgLevel) }]}>
+    <View style={[styles.liveFocusCircle, { transform: [{ scale: 1 + pulseLevel * 0.2 }] }]}>
       <View style={styles.liveFocusCircleBars}>
         {circleLevels.map((h, i) => (
           <View key={i} style={[styles.liveFocusBar, { height: h }]} />
