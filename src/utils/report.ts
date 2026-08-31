@@ -63,7 +63,7 @@ function buildSection(heading: string, lines: string[]): string[] {
   return ["", `■ ${heading}`, ...lines.map((line) => `・${line}`)];
 }
 
-// 「要点抜粋」テンプレートの本文(★・☑️/✅・❓のみ)。該当0件のセクションは見出しごと省略する
+// 「要点抜粋」テンプレートの本文(★・☑️/✅・❓・メモのみ)。該当0件のセクションは見出しごと省略する
 export function buildExcerptSections(blocks: Block[]): string[] {
   const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs);
 
@@ -83,12 +83,18 @@ export function buildExcerptSections(blocks: Block[]): string[] {
 
   const qaBlocks = sorted.filter((b) => b.isQuestion && isResolvedQuestion(b));
 
+  const memoLines = sorted
+    .filter((b) => b.kind === "note")
+    .map((b) => (b.text ?? "").trim())
+    .filter(Boolean);
+
   const lines: string[] = [];
-  // ★・❓は見出し自体にマークを添えるので行ごとには繰り返さない。ToDoは行ごとに完了状態が
+  // ★・❓・メモは見出し自体にマークを添えるので行ごとには繰り返さない。ToDoは行ごとに完了状態が
   // 異なりうる(☑️/✅)ため、見出しにはマークを付けず行ごとの表示のままにする
   lines.push(...buildSection("重要なポイント★", starLines));
   lines.push(...buildSection("今後のアクション", todoLines));
   lines.push(...buildSection("確認事項 ❓", openQuestionLines));
+  lines.push(...buildSection("メモ 📝", memoLines));
 
   if (qaBlocks.length > 0) {
     lines.push("", "■ Q&A");
