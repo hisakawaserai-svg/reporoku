@@ -1,0 +1,3 @@
+# アイコンの生成物。gen_reporoku_assets.py から再生成できるので追跡しない。
+# 本番アセットは assets/ 側にコミットされる。
+icons/out/
