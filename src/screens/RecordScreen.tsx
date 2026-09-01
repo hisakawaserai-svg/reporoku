@@ -7,6 +7,7 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
   StyleSheet,
   TouchableOpacity,
   Modal,
@@ -63,6 +64,8 @@ type Block = {
   isQuestion?: boolean;
 };
 
+type SleepDisplayItem = { key: string; kind: "interim"; text: string } | { key: string; kind: "block"; block: Block; active: boolean };
+
 const KEEP_AWAKE_TAG = "record-screen";
 
 // ヘッダー左上・ライブフォーカス縮小時の音量イコライザー用
@@ -101,7 +104,6 @@ const MARK_TILES: {
 // 調整はノート詳細画面に一本化しているため、この画面では開始時に読み込んだ値を録音中ずっと使う
 const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として行間を詰める
 const MS_PER_CHAR = 150; // 1文字あたりの推定発話時間(ms)。ノート詳細画面と同じ概算値
-const SLEEP_VISIBLE_LINES = 15; // スリープモードでスクロールして遡れる直近ログの件数
 
 // expo-speech-recognitionのエラーコードは開発者向けの英語表記(例: "audio-capture")のため、
 // ユーザーが読んでも状況が分かるよう日本語の説明文に置き換える(native側のe.messageは
@@ -298,13 +300,15 @@ export default function RecordScreen() {
   const [diag, setDiag] = useState("");
   const [restarts, setRestarts] = useState(0);
 
-  // スリープモードのログ表示は直近数行だけをスクロール可能にし、通常モードと同じく
-  // 最新の発言が画面下部に来るよう新しい行が増えるたびに末尾へ自動スクロールする
-  const sleepScrollRef = useRef<ScrollView>(null);
+  // スリープモードのログ表示はFlatList+invertedで、画面に見えていない行は
+  // 描画されない(仮想化される)ようにする。通常モードと同じく最新の発言が
+  // 画面下部に来るよう、新しい行が増えるたびに先頭(=inverted下では画面下端)へ
+  // 自動スクロールする
+  const sleepScrollRef = useRef<FlatList<SleepDisplayItem>>(null);
   const sleepTextBlockCount = blocks.filter((b) => b.kind === "text").length;
   useEffect(() => {
     if (!sleepMode) return;
-    sleepScrollRef.current?.scrollToEnd({ animated: true });
+    sleepScrollRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, [sleepMode, sleepTextBlockCount, interim]);
 
   const startedAt = useRef(0);
@@ -1229,7 +1233,16 @@ export default function RecordScreen() {
   const transcriptOverflowing = transcriptContentHeight > transcriptViewportHeight;
 
   if (sleepMode) {
-    const sleepLines = blocks.filter((b) => b.kind === "text").slice(-SLEEP_VISIBLE_LINES);
+    const sleepLines = blocks.filter((b) => b.kind === "text");
+    const sleepItems: SleepDisplayItem[] = [
+      ...(interim ? [{ key: "interim", kind: "interim" as const, text: interim }] : []),
+      ...[...sleepLines].reverse().map((b, i) => ({
+        key: b.id ?? `sleep-${sleepLines.length - 1 - i}`,
+        kind: "block" as const,
+        block: b,
+        active: i === 0 && !interim,
+      })),
+    ];
     return (
       <SafeAreaView style={[styles.container, styles.sleepContainer]} edges={["top"]}>
         <Pressable
@@ -1256,33 +1269,31 @@ export default function RecordScreen() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView
+          <FlatList
             ref={sleepScrollRef}
             style={styles.sleepTimeline}
             contentContainerStyle={styles.sleepTimelineContent}
             showsVerticalScrollIndicator={false}
-          >
-            {sleepLines.map((b, i) => {
-              const isLast = i === sleepLines.length - 1;
-              const active = isLast && !interim;
-              const badges = recordBlockBadges(b);
+            inverted
+            data={sleepItems}
+            keyExtractor={(item) => item.key}
+            renderItem={({ item }) => {
+              if (item.kind === "interim") {
+                return <Text style={[styles.sleepLine, styles.sleepLineActive]}>{item.text}</Text>;
+              }
+              const badges = recordBlockBadges(item.block);
               return (
-                <View key={b.id ?? `sleep-${i}`} style={styles.sleepLineRow}>
+                <View style={styles.sleepLineRow}>
                   {badges.map((badge) => (
                     <Ionicons key={badge.key} name={badge.icon} size={13} color={badge.color} />
                   ))}
-                  <Text style={[styles.sleepLine, active && styles.sleepLineActive]} numberOfLines={2}>
-                    {fmt(b.ms)}　{b.text}
+                  <Text style={[styles.sleepLine, item.active && styles.sleepLineActive]}>
+                    {fmt(item.block.ms)}　{item.block.text}
                   </Text>
                 </View>
               );
-            })}
-            {interim ? (
-              <Text style={[styles.sleepLine, styles.sleepLineActive]} numberOfLines={2}>
-                {interim}
-              </Text>
-            ) : null}
-          </ScrollView>
+            }}
+          />
         </Pressable>
 
         {/* ボタン行は「長押しで閉じる」Pressableの外(兄弟要素)に置く。Pressable配下に
@@ -2012,13 +2023,8 @@ const styles = StyleSheet.create({
   sleepTimeline: {
     flex: 1,
   },
-  // flexGrow: 1 + justifyContent: "flex-end" は、行数が少なく画面いっぱいに
-  // 満たない間だけログを下端に寄せ、行数が増えてスクロールが必要になったら
-  // 通常のScrollViewとして自然に振る舞わせるための定番の組み合わせ
   sleepTimelineContent: {
-    flexGrow: 1,
-    justifyContent: "flex-end",
-    paddingBottom: 28,
+    paddingTop: 28,
     gap: 10,
   },
   sleepLineRow: { flexDirection: "row", alignItems: "center", gap: 4 },
