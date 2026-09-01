@@ -314,6 +314,7 @@ export default function RecordScreen() {
   const startedAt = useRef(0);
   const shouldRun = useRef(false);      // ユーザーが「止めたい」のか判別
   const failStreak = useRef(0);         // 無限リトライ防止
+  const lastErrorWasNoSpeechRef = useRef(false); // 直前の再起動がno-speech(無音)由来か。failStreakの誤カウント防止用
   const lastResultAt = useRef(0);
   const segStart = useRef<number | null>(null);
   const [leadSec, setLeadSec] = useState(getPlaybackLeadSec);
@@ -703,6 +704,7 @@ export default function RecordScreen() {
     startedAt.current = Date.now(); // このセグメント(音声ファイル)の0秒を表す実時刻
     segStart.current = null; // 新しい認識セッションでは未確定の発話区間をリセットする(prevEndはセッション全体の時系列を保つため、ここではリセットしない)
     isRecognizingRef.current = true;
+    lastErrorWasNoSpeechRef.current = false; // 新しいセグメントが実際に始まったので、直前のno-speechフラグは持ち越さない
   });
 
   useSpeechRecognitionEvent("audioend", (e) => {
@@ -726,7 +728,11 @@ export default function RecordScreen() {
   useSpeechRecognitionEvent("error", (e) => {
     // no-speech は無音が続いた際に毎回発生する想定内のエラーで、
     // end イベント側で自動再開されるため画面には表示しない(ノイズになるだけのため)
-    if (e.error === "no-speech") return;
+    if (e.error === "no-speech") {
+      lastErrorWasNoSpeechRef.current = true;
+      return;
+    }
+    lastErrorWasNoSpeechRef.current = false;
     // continuousモードでは直後に自動再開されるため、その旨も併記して不安にさせないようにする
     push(`⚠️ ${describeSpeechRecognitionError(e.error)}(自動的に再開します)`, "sys");
   });
@@ -764,6 +770,17 @@ export default function RecordScreen() {
       // バックグラウンド中(他アプリへの切替による音声セッション割り込みなど)のendは、
       // すぐに再起動しても失敗するだけなので、ここではリトライせず
       // フォアグラウンド復帰時にまとめて再開する(AppStateの変化を監視するuseEffect側で処理)
+      return;
+    }
+    // 無音による正常な再起動(no-speech)は失敗として数えない。話者が黙っている時間が
+    // 続くと本来は何も壊れていないのに再起動サイクルだけが積み上がり、failStreakが
+    // 閾値を超えて録音が強制終了してしまっていたため、ここで区別する
+    if (lastErrorWasNoSpeechRef.current) {
+      lastErrorWasNoSpeechRef.current = false;
+      setRestarts((n) => n + 1);
+      setTimeout(() => {
+        if (shouldRun.current) begin();
+      }, 150);
       return;
     }
     failStreak.current += 1;
@@ -996,7 +1013,11 @@ export default function RecordScreen() {
   const resume = () => {
     shouldRun.current = true;
     setPaused(false);
-    begin(); // audiostartでstartedAt.currentが更新され、経過時間はcontentMsRefからの続きとして計測される
+    // begin()呼び出しから実際にaudiostartが発火するまでの間もrunning=true・paused=falseで
+    // 経過時間のティッカーが動くため、ここで先に実時刻を入れておく(入れないと一時停止前の
+    // 古いstartedAt.currentがそのまま使われ、一時停止していた時間分が一瞬上乗せされて見える)
+    startedAt.current = Date.now();
+    begin(); // audiostartで改めて更新され、経過時間はcontentMsRefからの続きとして計測される
   };
 
   // 一時停止中は音声認識が既に止まっているため、endイベントを待たずにここで終了処理を行う
