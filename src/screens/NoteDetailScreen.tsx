@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Dimensions,
   GestureResponderEvent,
   Image,
@@ -265,6 +266,18 @@ export default function NoteDetailScreen() {
   // 分割位置を選んでいる最中のブロックと、選択中のカーソル位置(文字インデックス)
   const [splittingBlockId, setSplittingBlockId] = useState<string | null>(null);
   const [splitIndex, setSplitIndex] = useState(0);
+  // 分割用TextInputへのフォーカスは、autoFocusで即座に行うとまだレイアウト・親の
+  // 長押しメニューを閉じるアニメーションの途中で(画面のwindowにまだ正しく載っていない
+  // 状態で)ネイティブ側のfocusが呼ばれてクラッシュすることがあるため、マウント後に
+  // 1フレーム遅らせて明示的にfocus()する
+  const splitInputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (!splittingBlockId) return;
+    const timer = setTimeout(() => {
+      splitInputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [splittingBlockId]);
   // 「メモを追加」もInlineEditCardで統一。afterBlockIdがnullなら「ブロックが1つも無いセッション」
   // への追加(先頭に挿入)で、その場合は空状態のボックス内にインライン展開する
   const [newBlockDraft, setNewBlockDraft] = useState<{ afterBlockId: string | null; text: string } | null>(
@@ -543,6 +556,48 @@ export default function NoteDetailScreen() {
   // 「↓ 新着N件」バッジをタップしたときの再開。自動追従を再開するだけで、実際のスクロールは
   // activeBlockId/scrollPausedを見ているuseEffect(下記)がまとめて行う
   const resumeAutoFollow = () => setScrollPaused(false);
+
+  // 「一番上へ/一番下へ」ジャンプボタン。手動でスクロールしたときと同様、
+  // 自動追従(再生位置への自動スクロール)は一時停止したままにする
+  const pauseAutoFollow = () => {
+    if (!scrollPaused) {
+      pauseBaselineIndexRef.current = filtered.findIndex((b) => b.id === activeBlockId);
+      setScrollPaused(true);
+    }
+  };
+  const jumpToTop = () => {
+    pauseAutoFollow();
+    timelineScrollRef.current?.scrollTo({ y: 0, animated: true });
+    showJumpButtonsTemporarily();
+  };
+  const jumpToBottom = () => {
+    pauseAutoFollow();
+    timelineScrollRef.current?.scrollToEnd({ animated: true });
+    showJumpButtonsTemporarily();
+  };
+
+  // 「一番上へ/一番下へ」ボタンは常時表示だと読んでいる邪魔になるため、
+  // タイムラインをスワイプ操作している間だけ表示し、操作が止まってしばらくしたら
+  // フェードアウトさせる(iOSのスクロールバーと同じような一時表示の考え方)
+  const JUMP_BUTTONS_HIDE_DELAY_MS = 1500;
+  const jumpButtonsOpacity = useRef(new Animated.Value(0)).current;
+  const [jumpButtonsVisible, setJumpButtonsVisible] = useState(false);
+  const jumpButtonsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showJumpButtonsTemporarily = () => {
+    if (jumpButtonsHideTimerRef.current) clearTimeout(jumpButtonsHideTimerRef.current);
+    setJumpButtonsVisible(true);
+    Animated.timing(jumpButtonsOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+    jumpButtonsHideTimerRef.current = setTimeout(() => {
+      Animated.timing(jumpButtonsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+        setJumpButtonsVisible(false);
+      });
+    }, JUMP_BUTTONS_HIDE_DELAY_MS);
+  };
+  useEffect(() => {
+    return () => {
+      if (jumpButtonsHideTimerRef.current) clearTimeout(jumpButtonsHideTimerRef.current);
+    };
+  }, []);
 
   const openPhotoViewer = (block: Block) => setViewerBlockId(block.id);
   const closePhotoViewer = () => setViewerBlockId(null);
@@ -1706,12 +1761,12 @@ export default function NoteDetailScreen() {
             <View>
               <Text style={styles.splitHintText}>分割したい位置をタップしてください</Text>
               <TextInput
+                ref={splitInputRef}
                 style={styles.timelineTextInput}
                 value={block.text ?? ""}
                 onChangeText={() => {}}
                 onSelectionChange={(e) => setSplitIndex(e.nativeEvent.selection.start)}
                 showSoftInputOnFocus={false}
-                autoFocus
                 multiline
               />
               <View style={styles.editActionsRow}>
@@ -1966,11 +2021,27 @@ export default function NoteDetailScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
+      {filtered.length > 0 && jumpButtonsVisible ? (
+        <Animated.View
+          style={[styles.jumpButtonColumn, { opacity: jumpButtonsOpacity }]}
+          pointerEvents="box-none"
+        >
+          <TouchableOpacity style={styles.jumpButton} activeOpacity={0.7} onPress={jumpToTop}>
+            <Ionicons name="chevron-up" size={18} color="#3c3c43" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.jumpButton} activeOpacity={0.7} onPress={jumpToBottom}>
+            <Ionicons name="chevron-down" size={18} color="#3c3c43" />
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
       <ScrollView
         ref={timelineScrollRef}
         style={styles.timeline}
         onLayout={(e) => setTimelineViewportHeight(e.nativeEvent.layout.height)}
-        onScroll={(e) => setTimelineScrollY(e.nativeEvent.contentOffset.y)}
+        onScroll={(e) => {
+          setTimelineScrollY(e.nativeEvent.contentOffset.y);
+          showJumpButtonsTemporarily();
+        }}
         scrollEventThrottle={32}
         // 行内編集カード(InlineEditCard)のキャンセル/決定ボタンが、キーボード表示中は
         // 1回目のタップでキーボードを閉じるだけになってしまい(ボタン自体は反応しない)、
@@ -2507,6 +2578,27 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   followBadgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  // 「一番上へ/一番下へ」ジャンプボタン。控えめに、画面右下に縦に並べて浮かせる
+  jumpButtonColumn: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    gap: 8,
+    zIndex: 5,
+  },
+  jumpButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
+  },
   timeline: { flex: 1, paddingHorizontal: 16 },
   // セクション(発言間の「間」が5秒以上)の区切り。見出しの上に薄い罫線を入れて、
   // 余白だけでなく視覚的にもセクションの境目とわかるようにする
@@ -2579,17 +2671,15 @@ const styles = StyleSheet.create({
   editedBadgeText: { fontSize: 10, color: "#8e8e93" },
   timelineText: { fontSize: fontSize.body, color: "#1c1c1e", lineHeight: 21 },
   timelineTextPlaceholder: { fontSize: 15, color: "#b0b0b6", lineHeight: 21, fontStyle: "italic" },
+  // 通常表示のtimelineTextと完全に同じ折り返しになるよう、フォント指定を揃えた上で
+  // 枠線・背景・paddingなど見た目に関わるスタイルは一切足さない(行の背景色は
+  // timelineRowEditingで示すため、ここで箱っぽく見せる必要はない)
   timelineTextInput: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     color: "#1c1c1e",
     lineHeight: 21,
-    minHeight: 60,
-    textAlignVertical: "top",
-    borderWidth: 1,
-    borderColor: "#06c",
-    borderRadius: 8,
-    padding: 8,
-    backgroundColor: "#fff",
+    padding: 0,
+    margin: 0,
   },
   editActionsRow: {
     flexDirection: "row",

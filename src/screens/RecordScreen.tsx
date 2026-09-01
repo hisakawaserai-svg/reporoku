@@ -101,6 +101,7 @@ const MARK_TILES: {
 // 調整はノート詳細画面に一本化しているため、この画面では開始時に読み込んだ値を録音中ずっと使う
 const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として行間を詰める
 const MS_PER_CHAR = 150; // 1文字あたりの推定発話時間(ms)。ノート詳細画面と同じ概算値
+const SLEEP_VISIBLE_LINES = 15; // スリープモードでスクロールして遡れる直近ログの件数
 
 // expo-speech-recognitionのエラーコードは開発者向けの英語表記(例: "audio-capture")のため、
 // ユーザーが読んでも状況が分かるよう日本語の説明文に置き換える(native側のe.messageは
@@ -296,6 +297,15 @@ export default function RecordScreen() {
   const [audioUris, setAudioUris] = useState<string[]>([]);
   const [diag, setDiag] = useState("");
   const [restarts, setRestarts] = useState(0);
+
+  // スリープモードのログ表示は直近数行だけをスクロール可能にし、通常モードと同じく
+  // 最新の発言が画面下部に来るよう新しい行が増えるたびに末尾へ自動スクロールする
+  const sleepScrollRef = useRef<ScrollView>(null);
+  const sleepTextBlockCount = blocks.filter((b) => b.kind === "text").length;
+  useEffect(() => {
+    if (!sleepMode) return;
+    sleepScrollRef.current?.scrollToEnd({ animated: true });
+  }, [sleepMode, sleepTextBlockCount, interim]);
 
   const startedAt = useRef(0);
   const shouldRun = useRef(false);      // ユーザーが「止めたい」のか判別
@@ -1219,7 +1229,7 @@ export default function RecordScreen() {
   const transcriptOverflowing = transcriptContentHeight > transcriptViewportHeight;
 
   if (sleepMode) {
-    const sleepLines = blocks.filter((b) => b.kind === "text").slice(-6);
+    const sleepLines = blocks.filter((b) => b.kind === "text").slice(-SLEEP_VISIBLE_LINES);
     return (
       <SafeAreaView style={[styles.container, styles.sleepContainer]} edges={["top"]}>
         <Pressable
@@ -1246,7 +1256,12 @@ export default function RecordScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.sleepTimeline}>
+          <ScrollView
+            ref={sleepScrollRef}
+            style={styles.sleepTimeline}
+            contentContainerStyle={styles.sleepTimelineContent}
+            showsVerticalScrollIndicator={false}
+          >
             {sleepLines.map((b, i) => {
               const isLast = i === sleepLines.length - 1;
               const active = isLast && !interim;
@@ -1267,7 +1282,7 @@ export default function RecordScreen() {
                 {interim}
               </Text>
             ) : null}
-          </View>
+          </ScrollView>
         </Pressable>
 
         {/* ボタン行は「長押しで閉じる」Pressableの外(兄弟要素)に置く。Pressable配下に
@@ -1996,6 +2011,12 @@ const styles = StyleSheet.create({
   },
   sleepTimeline: {
     flex: 1,
+  },
+  // flexGrow: 1 + justifyContent: "flex-end" は、行数が少なく画面いっぱいに
+  // 満たない間だけログを下端に寄せ、行数が増えてスクロールが必要になったら
+  // 通常のScrollViewとして自然に振る舞わせるための定番の組み合わせ
+  sleepTimelineContent: {
+    flexGrow: 1,
     justifyContent: "flex-end",
     paddingBottom: 28,
     gap: 10,

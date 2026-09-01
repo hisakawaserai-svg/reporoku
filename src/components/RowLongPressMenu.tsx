@@ -1,5 +1,15 @@
 import { useRef, useState } from "react";
-import { Animated, Dimensions, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Animated,
+  Dimensions,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as colors from "../theme/colors";
 
@@ -60,6 +70,9 @@ const MENU_ITEM_HEIGHT = 44;
 const MENU_GAP = 28;
 const MENU_WIDTH = 230;
 const MENU_SCREEN_MARGIN = 40;
+// styles.highlightのpaddingHorizontalと同じ値。ゴーストの幅・位置を計算する際に、
+// この内側余白の分だけ元の行より外側に広げるための補正に使う
+const HIGHLIGHT_PADDING_H = 16;
 
 // 長押しメニュー本体。「持ち上げた」ゴーストカードでタップした行のプレビューを見せつつ、
 // その近くに選択肢メニューを吹き出し表示する(ノート詳細画面のブロックメニューと同じ見た目)
@@ -98,6 +111,12 @@ export function RowLongPressMenu<T>({
   let top = 0;
   let left = 0;
   let highlightTop = 0;
+  // ゴーストカード(styles.highlight)自体がpaddingHorizontal分の内側余白を持つため、
+  // 元の行とまったく同じ位置でテキストを折り返させるには、その分だけカードを
+  // 外側に広げてやる必要がある(行の内容側には余白が無いのに、ゴースト側にだけ
+  // paddingを足すと、その分だけ実効幅が狭くなり元の行より早く折り返されてしまう)
+  let ghostLeft = 0;
+  let ghostWidth = 0;
   if (anchor && !menuOverride) {
     const windowHeight = Dimensions.get("window").height;
     const windowWidth = Dimensions.get("window").width;
@@ -113,10 +132,14 @@ export function RowLongPressMenu<T>({
   }
   if (anchor) {
     const windowHeight = Dimensions.get("window").height;
+    const windowWidth = Dimensions.get("window").width;
     highlightTop = Math.max(
       MENU_SCREEN_MARGIN,
       Math.min(anchor.y, windowHeight - anchor.height - MENU_SCREEN_MARGIN)
     );
+    ghostLeft = Math.max(0, anchor.x - HIGHLIGHT_PADDING_H);
+    const ghostRight = Math.min(windowWidth, anchor.x + anchor.width + HIGHLIGHT_PADDING_H);
+    ghostWidth = ghostRight - ghostLeft;
   }
 
   return (
@@ -125,21 +148,19 @@ export function RowLongPressMenu<T>({
         {anchor ? (
           <>
             <Animated.View
-              pointerEvents="none"
+              pointerEvents={highlightOverride ? "box-none" : "none"}
               style={[
                 styles.highlight,
                 highlightOverride
                   ? {
                       top: highlightOverride.top,
-                      left: anchor.x,
-                      width: anchor.width,
-                      height: highlightOverride.height,
-                      overflow: "hidden",
+                      left: ghostLeft,
+                      width: ghostWidth,
                     }
                   : {
                       top: highlightTop,
-                      left: anchor.x,
-                      width: anchor.width,
+                      left: ghostLeft,
+                      width: ghostWidth,
                       minHeight: anchor.height,
                     },
                 { transform: [{ scale }] },
@@ -148,7 +169,19 @@ export function RowLongPressMenu<T>({
               {accentBarColor ? (
                 <View style={[styles.accentBar, { backgroundColor: accentBarColor }]} />
               ) : null}
-              {renderPreview(anchor.data)}
+              {highlightOverride ? (
+                // 実測の高さがhighlightOverride.heightを超える(=長文で収まらない)場合だけ、
+                // 中身をスクロール可能にする。overflow:hiddenで切り詰めていた旧実装だと
+                // 長いテキストの下部が読めなくなってしまうため
+                <ScrollView
+                  style={{ maxHeight: highlightOverride.height }}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {renderPreview(anchor.data)}
+                </ScrollView>
+              ) : (
+                renderPreview(anchor.data)
+              )}
             </Animated.View>
             {menuOverride ? (
               <View
