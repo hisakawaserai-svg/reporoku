@@ -1014,7 +1014,17 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "-3deg" }],
   },
   monthHeaderPillText: { fontSize: 13, fontWeight: "700", color: "#1c1c1e" },
-  monthHeaderYear: { fontSize: 13, color: "#8e8e93" },
+  // 月の見出しと同じくスティッキーヘッダーとして画面上部に固定されるため、背景が無いと
+  // スクロールしてくるカードの上に文字だけが乗り、視認性が落ちてしまう。月のピルに合わせて
+  // 背景を付けておく(色は月のピルと区別が付くよう、控えめなグレーにする)
+  monthHeaderYear: {
+    fontSize: 13,
+    color: "#8e8e93",
+    backgroundColor: "#e5e5ea",
+    borderRadius: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
 
   // ノートカード(リスト・カレンダー共通)
   card: {
