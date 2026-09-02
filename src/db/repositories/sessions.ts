@@ -10,6 +10,7 @@ interface SessionRow {
   created_at: number;
   updated_at: number;
   section_gap_ms: number;
+  paragraph_gap_ms: number;
   is_quick: number;
   is_pinned: number;
 }
@@ -23,6 +24,7 @@ function mapRow(row: SessionRow): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     sectionGapMs: row.section_gap_ms,
+    paragraphGapMs: row.paragraph_gap_ms,
     isQuick: row.is_quick === 1,
     isPinned: row.is_pinned === 1,
   };
@@ -41,6 +43,7 @@ export interface CreateSessionInput {
   startedAt: number;
   durationMs?: number;
   sectionGapMs?: number;
+  paragraphGapMs?: number;
   isQuick?: boolean;
 }
 
@@ -50,12 +53,13 @@ export async function create(input: CreateSessionInput): Promise<Session> {
   const title = input.title ?? '';
   const durationMs = input.durationMs ?? 0;
   const sectionGapMs = input.sectionGapMs ?? 5000;
+  const paragraphGapMs = input.paragraphGapMs ?? 1500;
   const isQuick = input.isQuick ?? false;
 
   await db.runAsync(
-    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at, section_gap_ms, is_quick)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-    [input.id, title, input.startedAt, durationMs, now, now, sectionGapMs, isQuick ? 1 : 0]
+    `INSERT INTO sessions (id, title, started_at, duration_ms, created_at, updated_at, section_gap_ms, paragraph_gap_ms, is_quick)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [input.id, title, input.startedAt, durationMs, now, now, sectionGapMs, paragraphGapMs, isQuick ? 1 : 0]
   );
 
   return {
@@ -66,6 +70,7 @@ export async function create(input: CreateSessionInput): Promise<Session> {
     createdAt: now,
     updatedAt: now,
     sectionGapMs,
+    paragraphGapMs,
     isQuick,
     isPinned: false,
   };
@@ -156,6 +161,16 @@ export async function updateSectionGapMs(id: string, sectionGapMs: number): Prom
   const now = Date.now();
   await db.runAsync('UPDATE sessions SET section_gap_ms = ?, updated_at = ? WHERE id = ?;', [
     sectionGapMs,
+    now,
+    id,
+  ]);
+}
+
+export async function updateParagraphGapMs(id: string, paragraphGapMs: number): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.runAsync('UPDATE sessions SET paragraph_gap_ms = ?, updated_at = ? WHERE id = ?;', [
+    paragraphGapMs,
     now,
     id,
   ]);

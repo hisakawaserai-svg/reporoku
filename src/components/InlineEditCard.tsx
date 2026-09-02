@@ -1,4 +1,5 @@
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
@@ -68,6 +69,7 @@ export default function InlineEditCard({
   onConfirm: () => void;
   confirmDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const kindStyle = KIND_STYLE[kind];
   return (
     <View style={styles.card}>
@@ -110,7 +112,7 @@ export default function InlineEditCard({
 
       <View style={styles.footer}>
         <TouchableOpacity onPress={onCancel}>
-          <Text style={styles.cancelText}>キャンセル</Text>
+          <Text style={styles.cancelText}>{t("common.cancel")}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[

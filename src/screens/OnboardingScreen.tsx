@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useNavigation } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
 
@@ -26,31 +27,32 @@ type Phase = "intro" | "consent" | "permission";
 
 type Slide = {
   icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
 };
 
 const SLIDES: Slide[] = [
   {
     icon: "mic-outline",
-    title: "話した内容を、そのまま記録",
-    description: "音声を認識してテキスト化し、ノートとして残します。",
+    titleKey: "onboarding.slides.record.title",
+    descriptionKey: "onboarding.slides.record.description",
   },
   {
     icon: "git-commit-outline",
-    title: "★・写真・音声が1本のタイムラインに",
-    description: "重要な発言に★を付けたり写真を挟んだりしながら、時系列でまとめて振り返れます。",
+    titleKey: "onboarding.slides.timeline.title",
+    descriptionKey: "onboarding.slides.timeline.description",
   },
   {
     icon: "cloud-offline-outline",
-    title: "完全ローカルで動作、通信ゼロ",
-    description: "録音も文字起こしもすべて端末内で完結します。データが外部に送信されることはありません。",
+    titleKey: "onboarding.slides.local.title",
+    descriptionKey: "onboarding.slides.local.description",
   },
 ];
 
 // 初回起動時のオンボーディング。概要説明→注意事項への同意→マイク権限リクエストの3段階を
 // 1画面の中でphase切り替えとして実装している(遷移をStackに増やさないため)
 export default function OnboardingScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [phase, setPhase] = useState<Phase>("intro");
   const [slideIndex, setSlideIndex] = useState(0);
@@ -79,9 +81,9 @@ export default function OnboardingScreen() {
       const result = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
       if (!result.granted) {
         Alert.alert(
-          "マイクへのアクセスが許可されませんでした",
-          "後で「設定」アプリからいつでも許可できます。",
-          [{ text: "続ける", onPress: finishOnboarding }],
+          t("onboarding.permission.deniedTitle"),
+          t("onboarding.permission.deniedMessage"),
+          [{ text: t("onboarding.permission.continue"), onPress: finishOnboarding }],
         );
         return;
       }
@@ -96,18 +98,14 @@ export default function OnboardingScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.content}>
-          <Text style={styles.heading}>利用上の注意</Text>
+          <Text style={styles.heading}>{t("onboarding.consent.heading")}</Text>
           <View style={styles.noticeCard}>
             <Ionicons name="alert-circle-outline" size={22} color="#c98a00" style={styles.noticeIcon} />
-            <Text style={styles.noticeText}>
-              録音・撮影は、必ず主催者の許可やその場のルールに従ってください。
-            </Text>
+            <Text style={styles.noticeText}>{t("onboarding.consent.notice1")}</Text>
           </View>
           <View style={styles.noticeCard}>
             <Ionicons name="alert-circle-outline" size={22} color="#c98a00" style={styles.noticeIcon} />
-            <Text style={styles.noticeText}>
-              録音・撮影した内容の取り扱いは、利用者ご自身の責任となります。
-            </Text>
+            <Text style={styles.noticeText}>{t("onboarding.consent.notice2")}</Text>
           </View>
         </View>
         <View style={styles.footer}>
@@ -116,7 +114,7 @@ export default function OnboardingScreen() {
             activeOpacity={0.85}
             onPress={() => setPhase("permission")}
           >
-            <Text style={styles.primaryButtonText}>同意して始める</Text>
+            <Text style={styles.primaryButtonText}>{t("onboarding.consent.agreeButton")}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -130,10 +128,8 @@ export default function OnboardingScreen() {
           <View style={styles.iconCircle}>
             <Ionicons name="mic" size={36} color="#06c" />
           </View>
-          <Text style={styles.heading}>マイクへのアクセス</Text>
-          <Text style={styles.subheading}>
-            音声を認識してテキスト化するために、マイクへのアクセスを許可してください。
-          </Text>
+          <Text style={styles.heading}>{t("onboarding.permission.heading")}</Text>
+          <Text style={styles.subheading}>{t("onboarding.permission.description")}</Text>
         </View>
         <View style={styles.footer}>
           <TouchableOpacity
@@ -141,7 +137,7 @@ export default function OnboardingScreen() {
             activeOpacity={0.85}
             onPress={handleRequestMicPermission}
           >
-            <Text style={styles.primaryButtonText}>マイクへのアクセスを許可する</Text>
+            <Text style={styles.primaryButtonText}>{t("onboarding.permission.allowButton")}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -159,25 +155,25 @@ export default function OnboardingScreen() {
         style={styles.slidesScroll}
       >
         {SLIDES.map((slide) => (
-          <View key={slide.title} style={[styles.slide, { width: SCREEN_WIDTH }]}>
+          <View key={slide.titleKey} style={[styles.slide, { width: SCREEN_WIDTH }]}>
             <View style={styles.iconCircle}>
               <Ionicons name={slide.icon} size={36} color="#06c" />
             </View>
-            <Text style={styles.heading}>{slide.title}</Text>
-            <Text style={styles.subheading}>{slide.description}</Text>
+            <Text style={styles.heading}>{t(slide.titleKey)}</Text>
+            <Text style={styles.subheading}>{t(slide.descriptionKey)}</Text>
           </View>
         ))}
       </ScrollView>
 
       <View style={styles.dotsRow}>
         {SLIDES.map((slide, i) => (
-          <View key={slide.title} style={[styles.dot, i === slideIndex && styles.dotActive]} />
+          <View key={slide.titleKey} style={[styles.dot, i === slideIndex && styles.dotActive]} />
         ))}
       </View>
 
       <View style={styles.footer}>
         <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={goToNextSlide}>
-          <Text style={styles.primaryButtonText}>次へ</Text>
+          <Text style={styles.primaryButtonText}>{t("onboarding.nextButton")}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

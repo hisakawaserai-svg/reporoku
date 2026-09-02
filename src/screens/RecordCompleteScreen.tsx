@@ -4,6 +4,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
@@ -12,20 +14,20 @@ import * as blocksRepo from "../db/repositories/blocks";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
 
-function formatTime(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+function formatTime(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
 }
 
-function formatDuration(durationMs: number): string {
-  const totalMinutes = Math.round(durationMs / 60000);
-  return `${totalMinutes}分`;
+function formatDuration(durationMs: number, t: TFunction): string {
+  return t("notes.durationMinutes", { count: Math.round(durationMs / 60000) });
 }
 
 // 録音終了時の確認画面。
 // モーダルではなく通常の画面として遷移させることで、閉じてしまって二度と
 // タイトル入力やノートへの導線に戻れなくなる、という問題を避けている。
 export default function RecordCompleteScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "RecordComplete">>();
   const sessionId = route.params.noteId;
@@ -51,7 +53,7 @@ export default function RecordCompleteScreen() {
           question: blocks.filter((b) => b.isQuestion).length,
         });
       } catch (e) {
-        console.warn("[DB] 録音完了画面の読み込みに失敗しました", e);
+          console.warn("[DB] 録音完了画面の読み込みに失敗しました", e);
       }
     })();
   }, [sessionId]);
@@ -72,7 +74,7 @@ export default function RecordCompleteScreen() {
     navigation.goBack();
   };
 
-  const defaultTitle = startedAt ? `${formatTime(startedAt)} の記録` : "";
+  const defaultTitle = startedAt ? t("recordComplete.defaultTitle", { time: formatTime(startedAt, lang) }) : "";
 
   return (
     <SafeAreaView style={styles.container}>
@@ -80,12 +82,14 @@ export default function RecordCompleteScreen() {
         <View style={styles.checkCircle}>
           <Ionicons name="checkmark" size={36} color={colors.todo.accent} />
         </View>
-        <Text style={styles.heading}>記録が完了しました</Text>
+        <Text style={styles.heading}>{t("recordComplete.heading")}</Text>
         <Text style={styles.subheading}>
-          {startedAt ? `${formatTime(startedAt)} 開始 ・ ${formatDuration(durationMs)}` : ""}
+          {startedAt
+            ? `${t("notes.cardMeta.startedAt", { time: formatTime(startedAt, lang) })} ・ ${formatDuration(durationMs, t)}`
+            : ""}
         </Text>
 
-        <Text style={styles.fieldLabel}>名前(任意)</Text>
+        <Text style={styles.fieldLabel}>{t("recordComplete.nameLabel")}</Text>
         <TextInput
           style={styles.titleInput}
           value={title}
@@ -119,10 +123,10 @@ export default function RecordCompleteScreen() {
 
       <View style={styles.footer}>
         <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={handleViewNote}>
-          <Text style={styles.primaryButtonText}>今すぐ確認</Text>
+          <Text style={styles.primaryButtonText}>{t("recordComplete.viewNow")}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.7} onPress={handleClose}>
-          <Text style={styles.secondaryButtonText}>あとで</Text>
+          <Text style={styles.secondaryButtonText}>{t("recordComplete.later")}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

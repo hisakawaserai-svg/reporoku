@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
 import * as colors from "../theme/colors";
@@ -15,7 +16,7 @@ export default function GroupSettingForm({
   existingGroups,
   onCancel,
   onConfirm,
-  confirmLabel = "保存",
+  confirmLabel,
 }: {
   value: string;
   onChangeText: (text: string) => void;
@@ -24,42 +25,43 @@ export default function GroupSettingForm({
   onConfirm: () => void;
   confirmLabel?: string;
 }) {
+  const { t, i18n } = useTranslation();
   const [search, setSearch] = useState("");
 
   const filteredGroups = useMemo(() => {
-    const sorted = [...existingGroups].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+    const sorted = [...existingGroups].sort((a, b) => a.name.localeCompare(b.name, i18n.language));
     const query = search.trim().toLowerCase();
     return query ? sorted.filter((g) => g.name.toLowerCase().includes(query)) : sorted;
-  }, [existingGroups, search]);
+  }, [existingGroups, search, i18n.language]);
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>グループを設定</Text>
+      <Text style={styles.title}>{t("noteDetail.group.set")}</Text>
 
       <TextInput
         style={styles.input}
         value={value}
         onChangeText={onChangeText}
-        placeholder="新しいグループ名(例: 朝の出勤時にやること)"
+        placeholder={t("groupSettingForm.newGroupPlaceholder")}
         autoFocus
       />
 
       {existingGroups.length > 0 ? (
         <>
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>既存のグループから選ぶ</Text>
+          <Text style={styles.sectionLabel}>{t("groupSettingForm.chooseExisting")}</Text>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={16} color="#8e8e93" />
             <TextInput
               style={styles.searchInput}
               value={search}
               onChangeText={setSearch}
-              placeholder="グループ名で検索"
+              placeholder={t("groupSettingForm.searchPlaceholder")}
               placeholderTextColor="#8e8e93"
             />
           </View>
           {filteredGroups.length === 0 ? (
-            <Text style={styles.emptyText}>一致するグループがありません</Text>
+            <Text style={styles.emptyText}>{t("groupSettingForm.noMatch")}</Text>
           ) : (
             <ScrollView
               style={styles.radioList}
@@ -81,7 +83,9 @@ export default function GroupSettingForm({
                     <View style={styles.radioTextArea}>
                       <View style={styles.radioTitleRow}>
                         <Text style={styles.radioLabel}>{group.name}</Text>
-                        <Text style={styles.radioCount}>{group.count}件</Text>
+                        <Text style={styles.radioCount}>
+                          {t("groupSettingForm.itemCount", { count: group.count })}
+                        </Text>
                       </View>
                       {group.latestSample ? (
                         <Text style={styles.radioPreview} numberOfLines={1}>
@@ -99,10 +103,10 @@ export default function GroupSettingForm({
 
       <View style={styles.footer}>
         <TouchableOpacity onPress={onCancel}>
-          <Text style={styles.cancelText}>キャンセル</Text>
+          <Text style={styles.cancelText}>{t("common.cancel")}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.saveButton} onPress={onConfirm}>
-          <Text style={styles.saveButtonText}>{confirmLabel}</Text>
+          <Text style={styles.saveButtonText}>{confirmLabel ?? t("common.save")}</Text>
         </TouchableOpacity>
       </View>
     </View>

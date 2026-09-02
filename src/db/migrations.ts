@@ -160,4 +160,12 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE blocks ADD COLUMN important_group TEXT;
     `,
   },
+  {
+    // ノート詳細画面のタイムラインで、セクション内の発言同士を同じ段落として詰めるかの閾値。
+    // section_gap_msと同じくセッションごとに個別調整できるようにする(常にsection_gap_msより小さい値)
+    version: 11,
+    sql: `
+      ALTER TABLE sessions ADD COLUMN paragraph_gap_ms INTEGER NOT NULL DEFAULT 1500;
+    `,
+  },
 ];

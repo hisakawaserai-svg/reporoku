@@ -1,0 +1,681 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "save": "Save",
+    "close": "Close",
+    "done": "Done",
+    "required": "Required"
+  },
+  "navigation": {
+    "tabRecord": "Record",
+    "tabNotes": "Notes",
+    "tabSummary": "Summary",
+    "tabSettings": "Settings",
+    "noteDetailTitle": "Note",
+    "reportTitle": "Report",
+    "storageManagementTitle": "Storage",
+    "howToUseTitle": "How to Use"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": {
+      "rowLabel": "Display Language",
+      "system": "Match Device Settings",
+      "japanese": "日本語",
+      "english": "English",
+      "promptTitle": "Select Language"
+    },
+    "sampleRate": {
+      "standard": {
+        "label": "Standard (16000Hz)",
+        "hint": "Smaller file size (~115MB per hour)"
+      },
+      "high": {
+        "label": "High Quality (44100Hz)",
+        "hint": "Larger file size (~300MB per hour)"
+      }
+    },
+    "playback": {
+      "sectionHeader": "Playback",
+      "leadRowLabel": "Playback Lead Time",
+      "leadValue": "{{sec}}s",
+      "resetButton": "Reset",
+      "leadHint": "How many seconds before the tapped point playback starts. Hold the button to change continuously."
+    },
+    "recording": {
+      "sectionHeader": "Recording",
+      "sampleRateLabel": "Audio Quality / Sample Rate",
+      "bluetoothLabel": "Use External Microphone",
+      "bluetoothHint": "When on, recording uses a connected wireless earpiece or pin mic. Leave this off when recording a voice from a distance."
+    },
+    "timeline": {
+      "sectionHeader": "Timeline Display",
+      "defaultGapLabel": "Default Interval for New Recordings",
+      "defaultGapHint": "This is the starting value for new recordings only. It doesn't affect existing notes.",
+      "defaultParagraphGapLabel": "Paragraph Line-Spacing Threshold",
+      "defaultParagraphGapHint": "The default setting for whether lines are shown close together as the same paragraph. Can only be set smaller than the section-break interval. Doesn't affect existing notes."
+    },
+    "storage": {
+      "sectionHeader": "Storage",
+      "deleting": "Deleting…",
+      "checking": "Checking…",
+      "deleteOrphans": "Delete Unused Files",
+      "checkFailed": "Check failed",
+      "noOrphans": "No unused files found",
+      "deleteFailed": "Delete failed",
+      "deleteConfirm": {
+        "title": "Delete unused files?",
+        "message": "Found {{count}} file(s) ({{size}}) not referenced by any note. Deleting them won't affect any note's content. This can't be undone."
+      }
+    },
+    "backup": {
+      "sectionHeader": "Backup",
+      "creating": "Creating backup…",
+      "create": "Create Backup",
+      "restoring": "Restoring…",
+      "restoreFromBackup": "Restore from Backup",
+      "restoreButton": "Restore",
+      "savedTitle": "Saved",
+      "createFailed": "Failed to create backup",
+      "invalidFile": "This backup file isn't valid",
+      "restoreConfirm": {
+        "title": "Restore this backup?",
+        "message": "Restoring will overwrite all current data. Are you sure?"
+      },
+      "restoreDone": {
+        "title": "Restore complete",
+        "message": "Please restart the app for the changes to take effect."
+      },
+      "restoreFailedTitle": "Restore failed",
+      "restoreFailed": {
+        "rollbackMessage": "The restore failed, and the data may be in an unstable state. Please try restoring from a backup again, or contact support.",
+        "keptMessage": "Your original data has been kept."
+      }
+    },
+    "help": {
+      "sectionHeader": "Help"
+    },
+    "appInfo": {
+      "sectionHeader": "About",
+      "terms": "Terms of Service",
+      "privacyPolicy": "Privacy Policy",
+      "openSourceLicenses": "Open Source Licenses",
+      "contact": "Contact Us"
+    },
+    "dev": {
+      "sectionHeader": "Developer",
+      "seeding": "Seeding…",
+      "seedButton": "Insert Test Data",
+      "seedDone": "Test data added",
+      "seedFailed": "Failed to insert test data"
+    },
+    "languageSection": {
+      "sectionHeader": "Language"
+    },
+    "speechLanguage": {
+      "rowLabel": "Speech Recognition Language",
+      "japanese": "日本語",
+      "english": "English",
+      "promptTitle": "Select Speech Recognition Language",
+      "hint": "This is the language used to transcribe your speech. It's independent from the Display Language setting above.",
+      "restartConfirm": {
+        "title": "Change language?",
+        "message": "Changing the language will briefly restart the current recording session. Are you sure?",
+        "confirm": "Change"
+      }
+    }
+  },
+  "record": {
+    "markLabel": {
+      "star": "Important",
+      "todo": "To-Do",
+      "question": "Question",
+      "photo": "Photo",
+      "memo": "Memo"
+    },
+    "error": {
+      "audioCapture": "Couldn't capture audio from the microphone",
+      "interrupted": "Recording was interrupted by another audio source (a call, notification sound, etc.)",
+      "network": "Speech recognition failed due to a network issue",
+      "notAllowed": "Microphone access isn't allowed",
+      "serviceNotAllowed": "The speech recognition service isn't available",
+      "busy": "Speech recognition is currently busy",
+      "languageNotSupported": "This language isn't supported",
+      "speechTimeout": "No speech was detected",
+      "generic": "An error occurred during speech recognition",
+      "autoRestartMessage": "⚠️ {{message}} (restarting automatically)",
+      "repeatedFailure": "⚠️ Recording was stopped because speech recognition failed repeatedly. Please check your microphone and press \"Start\" again."
+    },
+    "status": {
+      "restoring": "Restoring",
+      "paused": "Paused",
+      "recording": "Recording",
+      "idle": "Idle"
+    },
+    "markSelect": {
+      "star": "Tap the line you want to mark as important",
+      "todo": "Tap the line you want to add as a to-do",
+      "question": "Tap the line you want to record as a question"
+    },
+    "newArrival": "{{count}} new",
+    "hint": {
+      "running": "Start speaking and the transcript will appear here",
+      "idle": "Press \"Start\" to begin recording"
+    },
+    "button": {
+      "resume": "Resume",
+      "pause": "Pause",
+      "start": "Start",
+      "stop": "Stop"
+    },
+    "memoModal": {
+      "title": "Memo",
+      "placeholder": "Type a memo"
+    },
+    "resetConfirm": {
+      "title": "Reset this recording?",
+      "message": "All transcripts, memos, photos, and audio from this session will be permanently deleted.",
+      "confirm": "Reset"
+    },
+    "deleteBlockConfirm": {
+      "title": "Delete this block?",
+      "message": "This can't be undone."
+    },
+    "menu": {
+      "editText": "Edit Text",
+      "addMemo": "Add Memo",
+      "addPhoto": "Add Photo"
+    },
+    "log": {
+      "memo": "📝 Memo: {{text}}",
+      "cameraPermissionDenied": "[Camera permission denied]",
+      "micPermissionDenied": "[Microphone permission denied]"
+    },
+    "debug": {
+      "title": "Debug Info (Testing)",
+      "restartsAndFiles": "{{restarts}} restarts / {{count}} audio files",
+      "leadSeconds": "{{sec}}s lead",
+      "showRawLog": "Show Raw Log"
+    },
+    "section": {
+      "header": "Section {{index}} ({{range}})"
+    },
+    "playback": {
+      "duration": "{{sec}}s",
+      "leadFrom": "Playing from {{sec}}s before",
+      "tapToPlay": "Tap to play from this point"
+    }
+  },
+  "notes": {
+    "mode": {
+      "list": "List",
+      "calendar": "Calendar"
+    },
+    "searchPlaceholder": "Search notes",
+    "editButton": "Edit",
+    "untitledNote": "Untitled Note",
+    "untitledRecordOn": "Recording on {{date}}",
+    "durationMinutes": "{{count}} min",
+    "photoCountOne": "1 photo",
+    "photoCountMore": "+{{count}} photos",
+    "cardMeta": {
+      "startedAt": "Started {{time}}"
+    },
+    "deleteConfirm": {
+      "title": "Delete this note?",
+      "message": "The recording, photos, and memos will all be permanently deleted."
+    },
+    "bulkDeleteConfirm": {
+      "title": "This will delete {{count}} note(s). Are you sure?"
+    },
+    "bulkDeleteButton": "Delete Selected ({{count}})",
+    "menu": {
+      "open": "Open Note"
+    },
+    "search": {
+      "tooShort": "Please enter a few more characters",
+      "noResults": "No results found"
+    },
+    "empty": {
+      "noNotes": "No recordings yet"
+    },
+    "calendar": {
+      "selectDate": "Select a date",
+      "noNotesForDay": "No recordings on this day"
+    },
+    "monthPicker": {
+      "title": "Select Month"
+    }
+  },
+  "noteDetail": {
+    "filter": {
+      "all": "All"
+    },
+    "viewMode": {
+      "timeline": "Timeline",
+      "summary": "Summary"
+    },
+    "summarySection": {
+      "star": "Important",
+      "question": "Questions",
+      "photo": "Photos",
+      "note": "Memos"
+    },
+    "photoFallbackLabel": "Photo",
+    "timeRange": "{{start}} – {{end}}",
+    "editedBadge": "Edited",
+    "tapToTakePhoto": "Tap to take a photo",
+    "tapToAddMemo": "Tap to add a memo",
+    "split": {
+      "hint": "Tap the point where you want to split",
+      "confirm": "Split Here"
+    },
+    "todo": {
+      "markDone": "Mark as Done",
+      "markUndone": "Mark as Not Done"
+    },
+    "answer": {
+      "add": "Add an Answer",
+      "edit": "Edit Answer",
+      "placeholder": "What you found out or were told",
+      "caption": "Optional — you can fill this in later"
+    },
+    "summaryNote": {
+      "add": "Add a Short Note",
+      "edit": "Edit Short Note",
+      "placeholder": "Sum it up in a line (e.g. Don't reuse passwords)",
+      "caption": "Leave blank to show the original text instead"
+    },
+    "group": {
+      "set": "Set Group",
+      "labelWithValue": "Group: {{group}}"
+    },
+    "menu": {
+      "editText": "Edit Text",
+      "copy": "Copy",
+      "addMemo": "Add Memo",
+      "addPhoto": "Add Photo",
+      "mergePrev": "Merge with Previous",
+      "mergeNext": "Merge with Next",
+      "split": "Split"
+    },
+    "audioMissing": {
+      "crash": "This note has no audio (lost due to a force quit). The text record is still intact.",
+      "generic": "This note has no audio. The text record is still intact."
+    },
+    "summary": {
+      "empty": "Nothing to summarize yet"
+    },
+    "itemCount": "{{count}}",
+    "newArrival": "{{count}} new",
+    "empty": {
+      "noBlocks": "Nothing recorded yet",
+      "noVisibleBlocks": "No blocks to show"
+    },
+    "sectionLabel": "Section {{index}}",
+    "settingsSheet": {
+      "title": "Settings for This Note",
+      "sectionGroupingLabel": "Show section breaks",
+      "groupingDisabledHint": "Section breaks are off, so the spacing can't be adjusted."
+    }
+  },
+  "summaryScreen": {
+    "tab": {
+      "all": "All",
+      "star": "Important",
+      "todo": "To-Do",
+      "question": "Questions"
+    },
+    "noteSubtitle": "{{title}} · {{date}}",
+    "searchPlaceholder": "Search to-dos, questions, and important items",
+    "defer": {
+      "release": "Undefer",
+      "set": "Defer"
+    },
+    "empty": {
+      "hint": "Items you mark with ★, 📝, or ❓ will show up here"
+    },
+    "section": {
+      "starPill": "★ Important",
+      "todoPill": "✓ To-Do",
+      "questionPill": "? Questions"
+    },
+    "none": "None",
+    "todo": {
+      "noMatch": "No matching to-dos",
+      "noPending": "No pending to-dos",
+      "hideDone": "Hide completed ▲",
+      "showDone": "Show completed ▼",
+      "doneCount": "{{count}} done",
+      "markPending": "Mark as Pending"
+    },
+    "question": {
+      "noMatch": "No matching questions",
+      "noUnresolved": "No unresolved questions",
+      "hideMore": "Hide ▲",
+      "showMore": "Show resolved & deferred ▼",
+      "deferredCount": "{{count}} deferred",
+      "resolvedCount": "{{count}} resolved"
+    },
+    "todoEdit": {
+      "title": "Edit To-Do",
+      "placeholder": "To-do content"
+    },
+    "answerEdit": {
+      "title": "Edit Question",
+      "placeholder": "Question content",
+      "caption": "Q · Required",
+      "secondaryCaption": "A · Optional"
+    },
+    "quickAdd": {
+      "titleTodo": "Add a To-Do",
+      "titleQuestion": "Add a Question",
+      "subtitle": "Quick Add",
+      "secondaryCaption": "A · Optional — you can fill this in later"
+    }
+  },
+  "howToUse": {
+    "diagramLabel": "Diagram",
+    "tabs": {
+      "record": "Record",
+      "notesList": "Notes List"
+    },
+    "record": {
+      "title": "Using the Record Screen",
+      "intro": "<star/>, <check/>, and <question/> can be marked with a single tap, without looking at the screen.\nLong-press to pick from a list of recent lines and mark one instead.\nUse <camera/> to take a slide photo, and <pencil/> to leave a short memo.",
+      "diagramTapLabel": "Tap once to mark",
+      "diagramLongPressCaption": "Long-press → choose from recent lines",
+      "sections": {
+        "pauseVsEnd": {
+          "heading": "Pause vs. Stop",
+          "bullet1": "\"Pause\" means the recording is still in progress. It's only saved as a note once you press \"Stop\".",
+          "bullet2": "The elapsed-time timer also pauses. It resumes counting from where it left off."
+        },
+        "multipleMarks": {
+          "heading": "You can add more than one mark",
+          "bullet1": "Important, To-Do, and Question marks can all be added to the same line. Marked lines are shown with distinct colors and icons.",
+          "bullet2": "In the long-press \"choose from recent lines\" mode, auto-scrolling stops, so you can calmly pick an earlier line."
+        },
+        "autoScroll": {
+          "heading": "Auto-Scroll and the New Arrivals Badge",
+          "bullet1": "The timeline normally auto-scrolls to the bottom every time a new line appears.",
+          "bullet2": "Auto-scrolling pauses while a long-press menu is open, and a \"↓ N new\" badge appears if there's anything new off-screen."
+        },
+        "sectionGrouping": {
+          "heading": "Section Breaks (Paragraphs)",
+          "bullet1": "A gap between lines longer than a set amount of time automatically starts a new section. You can turn this on/off and adjust the interval in Settings.",
+          "bullet2": "The setting in effect when a recording starts is used for that whole recording, and can't be changed mid-recording."
+        },
+        "interruptedRecording": {
+          "heading": "If a Recording Ends Unexpectedly",
+          "bullet1": "If the app is force-quit, the next time you open it you can choose to \"resume the previous recording,\" \"just view its contents,\" or \"discard it\".",
+          "bullet2": "A recording with no lines, marks, photos, or audio at all is discarded automatically, without asking."
+        },
+        "sleepMode": {
+          "heading": "Sleep Mode",
+          "bullet1": "Tap the moon icon in the top right to switch to a power-saving mode that dims the screen and shows only the most recent lines. Useful when recording with the phone in your pocket.",
+          "bullet2": "To exit, long-press the screen. The screen gradually brightens as you hold, and returns to normal once you've held it long enough (a light accidental touch won't exit it). Tapping the moon icon in the header exits it immediately.",
+          "bullet3": "Pause, stop, marking as important, and taking photos can still be done from the buttons at the bottom, even in Sleep Mode."
+        },
+        "resetButton": {
+          "heading": "The Reset Button",
+          "bullet1": "The \"Reset\" button shown while recording discards everything recorded so far (transcript, memos, photos, audio) without saving it, and returns to the idle state. Useful if you started recording by mistake.",
+          "bullet2": "Choosing \"Reset\" in the confirmation dialog can't be undone. If you want to keep what you've recorded, use \"Stop\" instead."
+        },
+        "audioInterference": {
+          "heading": "About Interfering with Other Apps' Audio",
+          "bullet1": "This app may briefly interrupt other apps' audio in order to record and recognize speech. Regular phone calls aren't affected, but in some special situations — like Split View on iPad or Picture-in-Picture playback — video or music playback may be interrupted intermittently."
+        }
+      }
+    },
+    "noteDetail": {
+      "title": "Using the Note Detail Screen",
+      "intro": "Tap a line to play the audio from that point.\nLong-press to edit the text, or to merge or split it with a neighboring line.\nUse the filter at the top to show only <star/> or <question/> items.",
+      "diagramTapCaption": "Tap → play audio from that point",
+      "diagramLongPressCaption": "Long-press → edit, or merge/split",
+      "diagramFilterCaption": "Filter using the bar at the top",
+      "sections": {
+        "longPressMenu": {
+          "heading": "The Long-Press Menu Changes by Line Type",
+          "bullet1": "Depending on the type of line, extra options appear: \"Short Note\" and \"Set Group\" for important lines, \"Add an Answer\" for questions, \"Mark as Done\" for to-dos, and so on.",
+          "bullet2": "You can also copy the text from here."
+        },
+        "mergeSplit": {
+          "heading": "Merge and Split",
+          "bullet1": "\"Merge with Previous\" and \"Merge with Next\" combine neighboring lines into one (photo entries can't be merged).",
+          "bullet2": "When merging, Important, To-Do, and Question marks carry over from both lines.",
+          "bullet3": "\"Split\" divides the text into two at the character position you tap (only for lines with 2 or more characters)."
+        },
+        "summaryTab": {
+          "heading": "The \"Summary\" Tab on This Screen",
+          "bullet1": "The \"Summary\" tab at the top is separate from the Summary screen (the one in the tab bar). It shows only this note's important lines, questions, to-dos, photos, and memos, grouped by type."
+        },
+        "noAudioNotice": {
+          "heading": "The \"No Audio\" Notice",
+          "bullet1": "This appears if the audio was lost because the app was force-quit, or if you deleted just the audio via Storage Management. Either way, the text record itself is still intact."
+        },
+        "export": {
+          "heading": "Export",
+          "bullet1": "Use the export icon in the top right to choose \"Excerpt (Important, To-Do, and Questions only)\" or \"Full Text,\" then copy, share, or save it as a file.",
+          "bullet2": "What the symbols mean in the exported text: ★ = an important line, ❓ = a question, 📝 = a memo. To-dos use two symbols, ☑️ (not done) and ✅ (done), to show completion status.",
+          "bullet3": "In the Excerpt version, ★, ❓, and 📝 appear only once, as section headings (not repeated per line). Only the To-Do ☑️/✅ appears on each line, since its completion status can differ line by line. Photos are shown as the text \"(Photo)\" rather than an emoji."
+        }
+      }
+    },
+    "summary": {
+      "title": "Using the Summary Screen",
+      "intro": "See pending to-dos, unresolved questions, and important lines\ngathered across all your training sessions and meetings.",
+      "diagramConvergeCaption": "Gathered across sessions and meetings",
+      "diagramPendingTodo": "Pending to-dos",
+      "diagramUnresolvedQuestion": "Unresolved questions",
+      "diagramImportant": "Important lines",
+      "sections": {
+        "hiddenByDefault": {
+          "heading": "Completed and Resolved Items Are Hidden by Default",
+          "bullet1": "Completed to-dos stay hidden until you open \"Show completed\".",
+          "bullet2": "Only unresolved questions show at first, too. Open \"Show resolved & deferred\" to see the rest."
+        },
+        "deferQuestion": {
+          "heading": "Questions Can Be Deferred",
+          "bullet1": "If you want to keep a question without deleting it but get it out of the list for now, use \"Defer\"."
+        },
+        "groupedStars": {
+          "heading": "Important Items Can Be Grouped",
+          "bullet1": "Important lines given the same group name are combined into a single card, even across different notes."
+        },
+        "itemToNote": {
+          "heading": "From an Item to Its Original Note",
+          "bullet1": "Tap an item to edit its content, or tap the note icon to jump to that spot in the original note.",
+          "bullet2": "On the To-Do and Question tabs, use the + button in the bottom left to add one on the spot, without recording."
+        }
+      }
+    },
+    "notesList": {
+      "title": "Using the Notes List",
+      "intro": "Browse your past recordings as a list or a calendar. The search bar\nalso searches line content (searches of 2 characters or fewer aren't supported).",
+      "diagramSearchPlaceholder": "Search line content…",
+      "diagramSearchHint": "Searches of 2 characters or fewer aren't supported",
+      "sections": {
+        "bulkSelect": {
+          "heading": "Select Multiple Notes to Delete",
+          "bullet1": "Long-press a card in the List tab to enter selection mode (or use \"Edit\" in the top right).",
+          "bullet2": "While in selection mode, each note's storage usage (audio + photos) is shown.",
+          "bullet3": "Deleting a note removes its audio, photos, and memos completely — this can't be undone."
+        },
+        "calendarView": {
+          "heading": "Calendar View",
+          "bullet1": "A blue dot under a date means there's a recording that day.",
+          "bullet2": "Tap the month label to pick a year and month directly (months with recordings are shown in bold).",
+          "bullet3": "Bulk selection isn't available in the Calendar tab, but long-press to open or delete still works."
+        }
+      }
+    },
+    "settings": {
+      "title": "Settings & Backup",
+      "intro": "An overview of what you can adjust from the Settings screen — playback\nbehavior, recording quality, backups — and what each one means.",
+      "diagramLeadTime": "Playback lead time",
+      "diagramSampleRate": "Recording sample rate",
+      "diagramExternalMic": "External microphone",
+      "sections": {
+        "leadTime": {
+          "heading": "Playback Lead Time",
+          "bullet1": "How many seconds before a line playback starts when you tap to play in Note Detail, so you don't miss the beginning of what was said."
+        },
+        "sampleRate": {
+          "heading": "Recording Sample Rate",
+          "bullet1": "Choose between Standard (smaller files) and High Quality (larger files).",
+          "bullet2": "Changes take effect starting with your next recording, and don't affect notes you've already recorded."
+        },
+        "bluetoothMic": {
+          "heading": "Use External Microphone",
+          "bullet1": "Turn this on when using Bluetooth earbuds or a pin mic.",
+          "bullet2": "Leave it off if you want to pick up sound broadly from the room, using the phone's own mic."
+        },
+        "sectionGroupingSettings": {
+          "heading": "Show Section Breaks / Default Interval for New Recordings",
+          "bullet1": "Whether the Record screen automatically starts a new paragraph when there's a gap between lines, and the default length of that gap.",
+          "bullet2": "Changing this doesn't affect the breaks in existing notes — it only applies the next time you start a recording."
+        },
+        "storageManagement": {
+          "heading": "Storage Management",
+          "bullet1": "Check how much storage each note is using.",
+          "bullet2": "\"Delete Audio Only\" removes just the audio while keeping the text record (can't be undone).",
+          "bullet3": "There's also a cleanup feature that removes unused files that aren't referenced by any note."
+        },
+        "backupRestore": {
+          "heading": "Creating and Restoring Backups",
+          "bullet1": "A backup includes the database, audio, and photos (exported report files are not included).",
+          "bullet2": "Restoring overwrites all current data in the app. You'll always be asked to confirm before it happens.",
+          "bullet3": "After a restore finishes, restart the app for the changes to take effect."
+        }
+      }
+    }
+  },
+  "recordComplete": {
+    "heading": "Recording Complete",
+    "nameLabel": "Name (optional)",
+    "defaultTitle": "Recording on {{time}}",
+    "viewNow": "View Now",
+    "later": "Later"
+  },
+  "onboarding": {
+    "slides": {
+      "record": {
+        "title": "Say It, and It's Recorded",
+        "description": "Speech is recognized and turned into text, saved as a note."
+      },
+      "timeline": {
+        "title": "★, Photos, and Audio in One Timeline",
+        "description": "Mark important lines with ★ and drop in photos as you go, then look back at everything together in order."
+      },
+      "local": {
+        "title": "Fully Local, Zero Network Use",
+        "description": "Recording and transcription both happen entirely on your device. No data is ever sent anywhere."
+      }
+    },
+    "nextButton": "Next",
+    "consent": {
+      "heading": "Before You Start",
+      "notice1": "Always follow the organizer's permission and any rules for recording or taking photos at an event.",
+      "notice2": "You're responsible for how you use anything you record or photograph.",
+      "agreeButton": "Agree and Continue"
+    },
+    "permission": {
+      "heading": "Microphone Access",
+      "description": "Please allow microphone access so speech can be recognized and turned into text.",
+      "allowButton": "Allow Microphone Access",
+      "deniedTitle": "Microphone Access Denied",
+      "deniedMessage": "You can allow it anytime later from the Settings app.",
+      "continue": "Continue"
+    }
+  },
+  "storageManagement": {
+    "totalLabel": "Storage Used (Audio + Photos)",
+    "perNoteHeader": "Storage by Note",
+    "empty": "No notes with audio or photos",
+    "deleteAudioOnly": "Delete Audio Only",
+    "noAudio": "No Audio",
+    "bulkDeleteButton": "Delete All Audio",
+    "bulkDeleteFailed": "Bulk delete failed",
+    "deleteAudioConfirm": {
+      "title": "Delete this note's audio?",
+      "message": "This will delete the audio file for \"{{title}}\". The text record (transcript, etc.) will remain. This can't be undone."
+    },
+    "bulkDeleteConfirm": {
+      "title": "Delete all audio data?",
+      "message": "This will delete the audio files for every note. Text records (transcripts, etc.) will remain. This can't be undone.",
+      "confirm": "Delete All"
+    }
+  },
+  "report": {
+    "template": {
+      "summary": {
+        "label": "Excerpt",
+        "description": " only (default)"
+      },
+      "full": {
+        "label": "Full Text",
+        "description": "Includes the entire transcript"
+      }
+    },
+    "templateHeader": "Template",
+    "previewHeader": "Preview",
+    "loading": "Loading…",
+    "preview": {
+      "collapse": "Collapse ▲",
+      "expand": "Show more ({{count}} lines total) ▼"
+    },
+    "exportHeader": "Export As",
+    "export": {
+      "copy": "Copy to Clipboard",
+      "share": "Share Sheet",
+      "saveFile": "Save as Text File"
+    },
+    "copy": {
+      "doneTitle": "Copied",
+      "doneMessage": "The report has been copied to your clipboard.",
+      "failed": "Copy failed"
+    },
+    "saveFailed": "Save failed",
+    "pdfHeader": "PDF with Photos",
+    "pdf": {
+      "exportButton": "Export as PDF",
+      "generateFailed": "Failed to generate PDF",
+      "caption": "Regardless of the template selected, this exports the excerpt (Important, To-Do, Questions, and Q&A) with photos added in chronological order."
+    },
+    "section": {
+      "stars": "Important Points ★",
+      "todos": "Action Items",
+      "questions": "Questions ❓",
+      "memos": "Memos 📝",
+      "qa": "Q&A",
+      "transcript": "Full Transcript",
+      "photos": "Photos 📷"
+    },
+    "qa": {
+      "questionPrefix": "Q: ",
+      "answerPrefix": "A: "
+    },
+    "meta": {
+      "dateTimeLine": "Date: {{date}} {{start}}–{{end}}"
+    },
+    "transcript": {
+      "photoLabel": "(Photo)"
+    },
+    "fileNameFallback": "Report"
+  },
+  "groupSettingForm": {
+    "newGroupPlaceholder": "New group name (e.g. Morning routine)",
+    "chooseExisting": "Choose from existing groups",
+    "searchPlaceholder": "Search group names",
+    "noMatch": "No matching groups",
+    "itemCount": "{{count}}"
+  },
+  "gapSlider": {
+    "sectionLabel": "Break sensitivity: {{sec}}s",
+    "paragraphLabel": "Line spacing: {{sec}}s",
+    "fine": "More breaks",
+    "coarse": "Fewer breaks"
+  }
+}

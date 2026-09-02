@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Switch,
@@ -12,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
@@ -19,23 +21,41 @@ import { Directory } from "expo-file-system";
 import { seedDevTestData } from "../utils/devTestData";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
+  PARAGRAPH_GAP_FACTORY_DEFAULT_MS,
+  PARAGRAPH_GAP_MIN_MS,
+  PARAGRAPH_GAP_STEP_MS,
   PLAYBACK_LEAD_DEFAULT_SEC,
   PLAYBACK_LEAD_MAX_SEC,
   PLAYBACK_LEAD_MIN_SEC,
   PLAYBACK_LEAD_STEP_SEC,
   SAMPLE_RATE_OPTIONS,
-  SECTION_GAP_OPTIONS,
+  SECTION_GAP_FACTORY_DEFAULT_MS,
+  SECTION_GAP_MAX_MS,
+  SECTION_GAP_MIN_MS,
+  SECTION_GAP_STEP_MS,
+  SPEECH_RECOGNITION_LANGUAGE_OPTIONS,
+  type LanguagePreference,
   getAllowBluetoothMic,
+  getDefaultParagraphGapMs,
   getDefaultSectionGapMs,
+  getLanguagePreference,
   getPlaybackLeadSec,
   getRecordingSampleRate,
   getSectionGroupingEnabled,
+  getSpeechRecognitionLanguage,
+  paragraphGapMaxMs,
   setAllowBluetoothMic,
+  setDefaultParagraphGapMs,
   setDefaultSectionGapMs,
+  setLanguagePreference,
   setPlaybackLeadSec,
   setRecordingSampleRate,
   setSectionGroupingEnabled,
+  setSpeechRecognitionLanguage,
 } from "../utils/settings";
+import { applyLanguagePreference } from "../i18n";
+import { getIsRecordingActive } from "../utils/recordingStatus";
+import GapSlider from "../components/GapSlider";
 import { createBackupZip } from "../utils/backup";
 import {
   InvalidBackupError,
@@ -55,27 +75,33 @@ import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
 
-type Row = { icon: keyof typeof Ionicons.glyphMap; label: string; value?: string };
-type Section = { title: string; rows: Row[] };
+type Row = { icon: keyof typeof Ionicons.glyphMap; labelKey: string; value?: string };
+type Section = { titleKey: string; rows: Row[] };
 
 const SECTIONS: Section[] = [
   {
-    title: "アプリ情報",
+    titleKey: "settings.appInfo.sectionHeader",
     rows: [
-      { icon: "language-outline", label: "言語", value: "日本語" },
-      { icon: "document-text-outline", label: "利用規約" },
-      { icon: "shield-checkmark-outline", label: "プライバシーポリシー" },
-      { icon: "code-slash-outline", label: "オープンソースライセンス" },
-      { icon: "mail-outline", label: "お問い合わせ" },
+      { icon: "document-text-outline", labelKey: "settings.appInfo.terms" },
+      { icon: "shield-checkmark-outline", labelKey: "settings.appInfo.privacyPolicy" },
+      { icon: "code-slash-outline", labelKey: "settings.appInfo.openSourceLicenses" },
+      { icon: "mail-outline", labelKey: "settings.appInfo.contact" },
     ],
   },
 ];
 
 export default function SettingsScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [isSeeding, setIsSeeding] = useState(false);
+  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>(getLanguagePreference);
+  const [speechRecognitionLanguage, setSpeechRecognitionLanguageState] = useState(getSpeechRecognitionLanguage);
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
   const [defaultSectionGapMs, setDefaultSectionGapMsState] = useState(getDefaultSectionGapMs);
+  const [defaultParagraphGapMs, setDefaultParagraphGapMsState] = useState(getDefaultParagraphGapMs);
+  // GapSliderは画面全体のScrollView内に置いているため、ドラッグ中はスクロールに
+  // 操作を取られないよう一時的にスクロールを無効化する
+  const [isGapSliderDragging, setIsGapSliderDragging] = useState(false);
   const [playbackLeadSec, setPlaybackLeadSecState] = useState(getPlaybackLeadSec);
   const [recordingSampleRate, setRecordingSampleRateState] = useState(getRecordingSampleRate);
   const [allowBluetoothMic, setAllowBluetoothMicState] = useState(getAllowBluetoothMic);
@@ -125,7 +151,7 @@ export default function SettingsScreen() {
       summary = await findOrphanFiles();
     } catch (e) {
       console.warn("[Storage] 不要なファイルの確認に失敗しました", e);
-      Alert.alert("確認に失敗しました");
+      Alert.alert(t("settings.storage.checkFailed"));
       return;
     } finally {
       setIsCheckingOrphans(false);
@@ -133,19 +159,17 @@ export default function SettingsScreen() {
 
     const count = summary.audioUris.length + summary.photoUris.length;
     if (count === 0) {
-      Alert.alert("不要なファイルは見つかりませんでした");
+      Alert.alert(t("settings.storage.noOrphans"));
       return;
     }
 
     Alert.alert(
-      "不要なファイルを削除しますか？",
-      `どのノートからも参照されていないファイルが${count}件(${formatBytes(
-        summary.bytes
-      )})見つかりました。削除してもノートの内容には影響しません。この操作は元に戻せません。`,
+      t("settings.storage.deleteConfirm.title"),
+      t("settings.storage.deleteConfirm.message", { count, size: formatBytes(summary.bytes) }),
       [
-        { text: "キャンセル", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "削除",
+          text: t("common.delete"),
           style: "destructive",
           onPress: async () => {
             setIsDeletingOrphans(true);
@@ -154,7 +178,7 @@ export default function SettingsScreen() {
               refreshTotalStorageLabel();
             } catch (e) {
               console.warn("[Storage] 不要なファイルの削除に失敗しました", e);
-              Alert.alert("削除に失敗しました");
+              Alert.alert(t("settings.storage.deleteFailed"));
             } finally {
               setIsDeletingOrphans(false);
             }
@@ -176,11 +200,11 @@ export default function SettingsScreen() {
           dialogTitle: zipFile.name,
         });
       } else {
-        Alert.alert("保存しました", zipFile.uri);
+        Alert.alert(t("settings.backup.savedTitle"), zipFile.uri);
       }
     } catch (e) {
       console.warn("[Backup] バックアップの作成に失敗しました", e);
-      Alert.alert("バックアップの作成に失敗しました");
+      Alert.alert(t("settings.backup.createFailed"));
     } finally {
       setIsBackingUp(false);
     }
@@ -204,20 +228,20 @@ export default function SettingsScreen() {
     } catch (e) {
       setIsRestoring(false);
       if (e instanceof InvalidBackupError) {
-        Alert.alert("バックアップファイルが正しくありません");
+        Alert.alert(t("settings.backup.invalidFile"));
       } else {
         console.warn("[Restore] バックアップの検証に失敗しました", e);
-        Alert.alert("バックアップファイルが正しくありません");
+        Alert.alert(t("settings.backup.invalidFile"));
       }
       return;
     }
 
     Alert.alert(
-      "バックアップを復元しますか？",
-      "バックアップを復元すると、現在のデータは全て上書きされます。よろしいですか？",
+      t("settings.backup.restoreConfirm.title"),
+      t("settings.backup.restoreConfirm.message"),
       [
         {
-          text: "キャンセル",
+          text: t("common.cancel"),
           style: "cancel",
           onPress: () => {
             discardExtractedBackup(extractDir);
@@ -225,25 +249,25 @@ export default function SettingsScreen() {
           },
         },
         {
-          text: "復元",
+          text: t("settings.backup.restoreButton"),
           style: "destructive",
           onPress: async () => {
             try {
               await applyBackup(extractDir);
               refreshTotalStorageLabel();
               Alert.alert(
-                "復元が完了しました",
-                "変更を反映するため、アプリを再起動してください。"
+                t("settings.backup.restoreDone.title"),
+                t("settings.backup.restoreDone.message")
               );
             } catch (e) {
               console.warn("[Restore] 復元に失敗しました", e);
               if (e instanceof RestoreRollbackFailedError) {
                 Alert.alert(
-                  "復元に失敗しました",
-                  "復元に失敗し、データの状態が不安定になっている可能性があります。バックアップから再度復元をお試しいただくか、お手数ですがサポートにご連絡ください。"
+                  t("settings.backup.restoreFailedTitle"),
+                  t("settings.backup.restoreFailed.rollbackMessage")
                 );
               } else {
-                Alert.alert("復元に失敗しました", "元のデータは保持されています。");
+                Alert.alert(t("settings.backup.restoreFailedTitle"), t("settings.backup.restoreFailed.keptMessage"));
               }
             } finally {
               setIsRestoring(false);
@@ -259,9 +283,27 @@ export default function SettingsScreen() {
     setSectionGroupingEnabled(value);
   };
 
+  // スライダーのドラッグ中は毎フレームstateを直接更新して即座に表示へ反映し、指を離した時にだけ
+  // 保存する(NoteDetailScreenのGapSliderと同じ考え方)。セクション側を縮めて改行側の値が
+  // 新しい上限を超えた場合は、setDefaultSectionGapMs内で改行側もクランプ・保存されるため、
+  // ここではローカルstateをその結果に合わせるだけでよい
   const handleSelectDefaultSectionGap = (ms: number) => {
     setDefaultSectionGapMsState(ms);
+  };
+
+  const handleDefaultSectionGapChangeComplete = (ms: number) => {
+    setDefaultSectionGapMsState(ms);
     setDefaultSectionGapMs(ms);
+    setDefaultParagraphGapMsState((prev) => paragraphGapMaxMs(ms) < prev ? paragraphGapMaxMs(ms) : prev);
+  };
+
+  const handleSelectDefaultParagraphGap = (ms: number) => {
+    setDefaultParagraphGapMsState(ms);
+  };
+
+  const handleDefaultParagraphGapChangeComplete = (ms: number) => {
+    setDefaultParagraphGapMsState(ms);
+    setDefaultParagraphGapMs(ms);
   };
 
   const applyPlaybackLeadSec = useCallback((value: number) => {
@@ -308,15 +350,78 @@ export default function SettingsScreen() {
     setAllowBluetoothMic(value);
   };
 
+  const languagePreferenceLabel = (pref: LanguagePreference) =>
+    pref === "system"
+      ? t("settings.language.system")
+      : pref === "ja"
+      ? t("settings.language.japanese")
+      : t("settings.language.english");
+
+  const handleChangeLanguagePreference = (pref: LanguagePreference) => {
+    setLanguagePreferenceState(pref);
+    setLanguagePreference(pref);
+    applyLanguagePreference(pref);
+  };
+
+  const handlePressLanguageRow = () => {
+    Alert.alert(t("settings.language.promptTitle"), undefined, [
+      { text: t("settings.language.system"), onPress: () => handleChangeLanguagePreference("system") },
+      { text: t("settings.language.japanese"), onPress: () => handleChangeLanguagePreference("ja") },
+      { text: t("settings.language.english"), onPress: () => handleChangeLanguagePreference("en") },
+      { text: t("common.cancel"), style: "cancel" },
+    ]);
+  };
+
+  const speechRecognitionLanguageLabel = (code: string) => {
+    const option = SPEECH_RECOGNITION_LANGUAGE_OPTIONS.find((opt) => opt.code === code);
+    return option ? t(option.labelKey) : code;
+  };
+
+  const handleChangeSpeechRecognitionLanguage = (code: string) => {
+    setSpeechRecognitionLanguageState(code);
+    setSpeechRecognitionLanguage(code);
+  };
+
+  // 録音中(一時停止していない)に変更する場合は、現在のセッションが一瞬再起動される旨を
+  // 確認してから反映する。待機中・一時停止中はそのまま変更してよい
+  const confirmSpeechRecognitionLanguageChange = (code: string) => {
+    if (code === speechRecognitionLanguage) return;
+    if (!getIsRecordingActive()) {
+      handleChangeSpeechRecognitionLanguage(code);
+      return;
+    }
+    Alert.alert(
+      t("settings.speechLanguage.restartConfirm.title"),
+      t("settings.speechLanguage.restartConfirm.message"),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("settings.speechLanguage.restartConfirm.confirm"),
+          onPress: () => handleChangeSpeechRecognitionLanguage(code),
+        },
+      ]
+    );
+  };
+
+  const handlePressSpeechLanguageRow = () => {
+    Alert.alert(t("settings.speechLanguage.promptTitle"), undefined, [
+      ...SPEECH_RECOGNITION_LANGUAGE_OPTIONS.map((opt) => ({
+        text: t(opt.labelKey),
+        onPress: () => confirmSpeechRecognitionLanguageChange(opt.code),
+      })),
+      { text: t("common.cancel"), style: "cancel" as const },
+    ]);
+  };
+
   const handleSeedTestData = async () => {
     if (isSeeding) return;
     setIsSeeding(true);
     try {
       await seedDevTestData();
-      Alert.alert("テストデータを追加しました");
+      Alert.alert(t("settings.dev.seedDone"));
     } catch (e) {
       console.warn("[Dev] テストデータの投入に失敗しました", e);
-      Alert.alert("テストデータの投入に失敗しました");
+      Alert.alert(t("settings.dev.seedFailed"));
     } finally {
       setIsSeeding(false);
     }
@@ -324,16 +429,16 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>設定</Text>
+      <ScrollView contentContainerStyle={styles.content} scrollEnabled={!isGapSliderDragging}>
+        <Text style={styles.title}>{t("settings.title")}</Text>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>再生</Text>
+          <Text style={styles.sectionHeader}>{t("settings.playback.sectionHeader")}</Text>
           <View style={styles.card}>
             <View style={styles.leadRow}>
               <View style={styles.leadRowHeader}>
                 <Ionicons name="play-outline" size={20} color="#06c" style={styles.rowIcon} />
-                <Text style={styles.rowLabel}>再生開始位置(lead)</Text>
+                <Text style={styles.rowLabel}>{t("settings.playback.leadRowLabel")}</Text>
               </View>
               <View style={styles.leadStepperRow}>
                 <TouchableOpacity
@@ -344,7 +449,9 @@ export default function SettingsScreen() {
                 >
                   <Ionicons name="remove" size={18} color="#06c" />
                 </TouchableOpacity>
-                <Text style={styles.leadStepperValue}>{playbackLeadSec.toFixed(1)}秒</Text>
+                <Text style={styles.leadStepperValue}>
+                  {t("settings.playback.leadValue", { sec: playbackLeadSec.toFixed(1) })}
+                </Text>
                 <TouchableOpacity
                   style={styles.leadStepperButton}
                   disabled={playbackLeadSec >= PLAYBACK_LEAD_MAX_SEC}
@@ -369,24 +476,22 @@ export default function SettingsScreen() {
                       playbackLeadSec === PLAYBACK_LEAD_DEFAULT_SEC && styles.leadResetButtonTextDisabled,
                     ]}
                   >
-                    リセット
+                    {t("settings.playback.resetButton")}
                   </Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.gapHint}>
-                タップ再生時に、何秒手前から再生を開始するかの設定です。ボタンを押し続けると連続して変更できます。
-              </Text>
+              <Text style={styles.gapHint}>{t("settings.playback.leadHint")}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>録音</Text>
+          <Text style={styles.sectionHeader}>{t("settings.recording.sectionHeader")}</Text>
           <View style={styles.card}>
             <View style={[styles.gapRow, styles.rowDivider]}>
               <View style={styles.leadRowHeader}>
                 <Ionicons name="mic-outline" size={20} color="#06c" style={styles.rowIcon} />
-                <Text style={styles.rowLabel}>音声の品質 / サンプルレート</Text>
+                <Text style={styles.rowLabel}>{t("settings.recording.sampleRateLabel")}</Text>
               </View>
               <View style={styles.gapOptionRow}>
                 {SAMPLE_RATE_OPTIONS.map((opt) => {
@@ -398,69 +503,81 @@ export default function SettingsScreen() {
                       onPress={() => handleSelectSampleRate(opt.hz)}
                     >
                       <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
-                        {opt.label}
+                        {t(opt.labelKey)}
                       </Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
               <Text style={styles.gapHint}>
-                {SAMPLE_RATE_OPTIONS.find((opt) => opt.hz === recordingSampleRate)?.hint}
+                {t(SAMPLE_RATE_OPTIONS.find((opt) => opt.hz === recordingSampleRate)?.hintKey ?? "")}
               </Text>
             </View>
             <View style={styles.row}>
               <Ionicons name="bluetooth-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>外部マイクを使う</Text>
+              <Text style={styles.rowLabel}>{t("settings.recording.bluetoothLabel")}</Text>
               <Switch value={allowBluetoothMic} onValueChange={handleToggleAllowBluetoothMic} />
             </View>
-            <Text style={styles.bluetoothHint}>
-              オンにすると、接続中のワイヤレスイヤホンやピンマイクから録音します。離れた場所の声を録る場合はオフのままにしてください。
-            </Text>
+            <Text style={styles.bluetoothHint}>{t("settings.recording.bluetoothHint")}</Text>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>タイムライン表示</Text>
+          <Text style={styles.sectionHeader}>{t("settings.timeline.sectionHeader")}</Text>
           <View style={styles.card}>
             <View style={[styles.row, styles.rowDivider]}>
               <Ionicons name="layers-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>セクション分けを表示する</Text>
+              <Text style={styles.rowLabel}>{t("noteDetail.settingsSheet.sectionGroupingLabel")}</Text>
               <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
             </View>
             <View style={styles.gapRow}>
-              <Text style={styles.rowLabel}>新しい録音のデフォルト間隔</Text>
-              <View style={styles.gapOptionRow}>
-                {SECTION_GAP_OPTIONS.map((opt) => {
-                  const selected = opt.ms === defaultSectionGapMs;
-                  return (
-                    <TouchableOpacity
-                      key={opt.ms}
-                      style={[styles.gapOption, selected && styles.gapOptionSelected]}
-                      onPress={() => handleSelectDefaultSectionGap(opt.ms)}
-                    >
-                      <Text style={[styles.gapOptionText, selected && styles.gapOptionTextSelected]}>
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <Text style={styles.gapHint}>
-                新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。
-              </Text>
+              <Text style={styles.rowLabel}>{t("settings.timeline.defaultGapLabel")}</Text>
+              <GapSlider
+                valueMs={defaultSectionGapMs}
+                minMs={SECTION_GAP_MIN_MS}
+                maxMs={SECTION_GAP_MAX_MS}
+                stepMs={SECTION_GAP_STEP_MS}
+                label={t("gapSlider.sectionLabel", { sec: (defaultSectionGapMs / 1000).toFixed(1) })}
+                fineLabel={t("gapSlider.fine")}
+                coarseLabel={t("gapSlider.coarse")}
+                defaultValueMs={SECTION_GAP_FACTORY_DEFAULT_MS}
+                onChange={handleSelectDefaultSectionGap}
+                onChangeComplete={handleDefaultSectionGapChangeComplete}
+                onDragStart={() => setIsGapSliderDragging(true)}
+                onDragEnd={() => setIsGapSliderDragging(false)}
+              />
+              <Text style={styles.gapHint}>{t("settings.timeline.defaultGapHint")}</Text>
+            </View>
+            <View style={styles.gapRow}>
+              <Text style={styles.rowLabel}>{t("settings.timeline.defaultParagraphGapLabel")}</Text>
+              <GapSlider
+                valueMs={defaultParagraphGapMs}
+                minMs={PARAGRAPH_GAP_MIN_MS}
+                maxMs={paragraphGapMaxMs(defaultSectionGapMs)}
+                stepMs={PARAGRAPH_GAP_STEP_MS}
+                label={t("gapSlider.paragraphLabel", { sec: (defaultParagraphGapMs / 1000).toFixed(1) })}
+                fineLabel={t("gapSlider.fine")}
+                coarseLabel={t("gapSlider.coarse")}
+                defaultValueMs={PARAGRAPH_GAP_FACTORY_DEFAULT_MS}
+                onChange={handleSelectDefaultParagraphGap}
+                onChangeComplete={handleDefaultParagraphGapChangeComplete}
+                onDragStart={() => setIsGapSliderDragging(true)}
+                onDragEnd={() => setIsGapSliderDragging(false)}
+              />
+              <Text style={styles.gapHint}>{t("settings.timeline.defaultParagraphGapHint")}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>ストレージ管理</Text>
+          <Text style={styles.sectionHeader}>{t("settings.storage.sectionHeader")}</Text>
           <View style={styles.card}>
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               onPress={() => navigation.navigate("StorageManagement")}
             >
               <Ionicons name="server-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>ストレージ管理</Text>
+              <Text style={styles.rowLabel}>{t("navigation.storageManagementTitle")}</Text>
               <Text style={styles.rowValue}>{totalStorageLabel}</Text>
               <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
             </TouchableOpacity>
@@ -472,10 +589,10 @@ export default function SettingsScreen() {
               <Ionicons name="trash-outline" size={20} color="#06c" style={styles.rowIcon} />
               <Text style={styles.rowLabel}>
                 {isDeletingOrphans
-                  ? "削除中…"
+                  ? t("settings.storage.deleting")
                   : isCheckingOrphans
-                  ? "確認中…"
-                  : "不要なファイルを削除"}
+                  ? t("settings.storage.checking")
+                  : t("settings.storage.deleteOrphans")}
               </Text>
               {isCheckingOrphans || isDeletingOrphans ? (
                 <ActivityIndicator size="small" color="#06c" />
@@ -485,7 +602,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>バックアップ</Text>
+          <Text style={styles.sectionHeader}>{t("settings.backup.sectionHeader")}</Text>
           <View style={styles.card}>
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
@@ -494,7 +611,7 @@ export default function SettingsScreen() {
             >
               <Ionicons name="share-outline" size={20} color="#06c" style={styles.rowIcon} />
               <Text style={styles.rowLabel}>
-                {isBackingUp ? "バックアップを作成中…" : "バックアップを作成"}
+                {isBackingUp ? t("settings.backup.creating") : t("settings.backup.create")}
               </Text>
               {isBackingUp ? <ActivityIndicator size="small" color="#06c" /> : null}
             </TouchableOpacity>
@@ -505,7 +622,7 @@ export default function SettingsScreen() {
             >
               <Ionicons name="cloud-upload-outline" size={20} color="#06c" style={styles.rowIcon} />
               <Text style={styles.rowLabel}>
-                {isRestoring ? "復元中…" : "バックアップから復元"}
+                {isRestoring ? t("settings.backup.restoring") : t("settings.backup.restoreFromBackup")}
               </Text>
               {isRestoring ? <ActivityIndicator size="small" color="#06c" /> : null}
             </TouchableOpacity>
@@ -513,30 +630,49 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionHeader}>ヘルプ</Text>
+          <Text style={styles.sectionHeader}>{t("settings.help.sectionHeader")}</Text>
           <View style={styles.card}>
             <TouchableOpacity style={styles.row} onPress={() => navigation.navigate("HowToUse", { section: "settings" })}>
               <Ionicons name="help-circle-outline" size={20} color="#06c" style={styles.rowIcon} />
-              <Text style={styles.rowLabel}>使い方</Text>
+              <Text style={styles.rowLabel}>{t("navigation.howToUseTitle")}</Text>
               <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
             </TouchableOpacity>
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionHeader}>{t("settings.languageSection.sectionHeader")}</Text>
+          <View style={styles.card}>
+            <TouchableOpacity style={[styles.row, styles.rowDivider]} onPress={handlePressLanguageRow}>
+              <Ionicons name="language-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>{t("settings.language.rowLabel")}</Text>
+              <Text style={styles.rowValue}>{languagePreferenceLabel(languagePreference)}</Text>
+              <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.row} onPress={handlePressSpeechLanguageRow}>
+              <Ionicons name="mic-circle-outline" size={20} color="#06c" style={styles.rowIcon} />
+              <Text style={styles.rowLabel}>{t("settings.speechLanguage.rowLabel")}</Text>
+              <Text style={styles.rowValue}>{speechRecognitionLanguageLabel(speechRecognitionLanguage)}</Text>
+              <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+            </TouchableOpacity>
+            <Text style={styles.bluetoothHint}>{t("settings.speechLanguage.hint")}</Text>
+          </View>
+        </View>
+
         {SECTIONS.map((section) => (
-          <View key={section.title} style={styles.section}>
-            <Text style={styles.sectionHeader}>{section.title}</Text>
+          <View key={section.titleKey} style={styles.section}>
+            <Text style={styles.sectionHeader}>{t(section.titleKey)}</Text>
             <View style={styles.card}>
               {section.rows.map((row, i) => (
                 <TouchableOpacity
-                  key={row.label}
+                  key={row.labelKey}
                   style={[
                     styles.row,
                     i < section.rows.length - 1 && styles.rowDivider,
                   ]}
                 >
                   <Ionicons name={row.icon} size={20} color="#06c" style={styles.rowIcon} />
-                  <Text style={styles.rowLabel}>{row.label}</Text>
+                  <Text style={styles.rowLabel}>{t(row.labelKey)}</Text>
                   {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
                   <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
                 </TouchableOpacity>
@@ -547,7 +683,7 @@ export default function SettingsScreen() {
 
         {__DEV__ ? (
           <View style={styles.section}>
-            <Text style={styles.sectionHeader}>開発者向け</Text>
+            <Text style={styles.sectionHeader}>{t("settings.dev.sectionHeader")}</Text>
             <View style={styles.card}>
               <TouchableOpacity
                 style={styles.row}
@@ -556,13 +692,26 @@ export default function SettingsScreen() {
               >
                 <Ionicons name="flask-outline" size={20} color="#06c" style={styles.rowIcon} />
                 <Text style={styles.rowLabel}>
-                  {isSeeding ? "投入中…" : "テストデータを投入する"}
+                  {isSeeding ? t("settings.dev.seeding") : t("settings.dev.seedButton")}
                 </Text>
               </TouchableOpacity>
             </View>
           </View>
         ) : null}
       </ScrollView>
+
+      {/* バックアップ作成・復元は途中でデータ変更や画面遷移が起きると整合性が崩れうるため、
+          処理中は画面全体を覆って一切操作できないようにする(スピナー表示だけでは不十分) */}
+      <Modal visible={isBackingUp || isRestoring} transparent animationType="fade" onRequestClose={() => {}}>
+        <View style={styles.blockingOverlay}>
+          <View style={styles.blockingCard}>
+            <ActivityIndicator size="large" color="#06c" />
+            <Text style={styles.blockingText}>
+              {isRestoring ? t("settings.backup.restoring") : t("settings.backup.creating")}
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -641,4 +790,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 12,
   },
+  // バックアップ作成・復元中に画面全体を覆う操作不可オーバーレイ
+  blockingOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  blockingCard: {
+    backgroundColor: "#fff",
+    borderRadius: radius.card,
+    paddingVertical: 28,
+    paddingHorizontal: 36,
+    alignItems: "center",
+    gap: 14,
+  },
+  blockingText: { fontSize: 15, color: "#1c1c1e", fontWeight: "600" },
 });

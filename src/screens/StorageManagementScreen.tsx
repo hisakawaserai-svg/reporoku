@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 
 import {
@@ -16,18 +18,17 @@ import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
 
-function noteDisplayTitle(entry: NoteStorageEntry): string {
-  return entry.title || `${formatDateSlash(entry.startedAt)} の記録`;
+function noteDisplayTitle(entry: NoteStorageEntry, lang: string, t: TFunction): string {
+  return entry.title || t("notes.untitledRecordOn", { date: formatDateSlash(entry.startedAt, lang) });
 }
 
-function formatDateSlash(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+function formatDateSlash(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "2-digit", day: "2-digit" }).format(unixMs);
 }
 
 export default function StorageManagementScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const [entries, setEntries] = useState<NoteStorageEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
@@ -56,12 +57,12 @@ export default function StorageManagementScreen() {
 
   const confirmDeleteSessionAudio = (entry: NoteStorageEntry) => {
     Alert.alert(
-      "このノートの音声を削除しますか？",
-      `「${noteDisplayTitle(entry)}」の音声ファイルを削除します。文字起こしなどのテキスト記録は残ります。この操作は元に戻せません。`,
+      t("storageManagement.deleteAudioConfirm.title"),
+      t("storageManagement.deleteAudioConfirm.message", { title: noteDisplayTitle(entry, lang, t) }),
       [
-        { text: "キャンセル", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "削除",
+          text: t("common.delete"),
           style: "destructive",
           onPress: async () => {
             setDeletingSessionId(entry.sessionId);
@@ -70,7 +71,7 @@ export default function StorageManagementScreen() {
               await load();
             } catch (e) {
               console.warn("[Storage] 音声の削除に失敗しました", e);
-              Alert.alert("削除に失敗しました");
+              Alert.alert(t("settings.storage.deleteFailed"));
             } finally {
               setDeletingSessionId(null);
             }
@@ -83,12 +84,12 @@ export default function StorageManagementScreen() {
   const confirmDeleteAllAudio = () => {
     if (totalAudioAndPhotoCount === 0) return;
     Alert.alert(
-      "音声データを一括削除しますか？",
-      "全てのノートの音声ファイルを削除します。文字起こしなどのテキスト記録は残ります。この操作は元に戻せません。",
+      t("storageManagement.bulkDeleteConfirm.title"),
+      t("storageManagement.bulkDeleteConfirm.message"),
       [
-        { text: "キャンセル", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "一括削除",
+          text: t("storageManagement.bulkDeleteConfirm.confirm"),
           style: "destructive",
           onPress: async () => {
             setIsBulkDeleting(true);
@@ -97,7 +98,7 @@ export default function StorageManagementScreen() {
               await load();
             } catch (e) {
               console.warn("[Storage] 音声の一括削除に失敗しました", e);
-              Alert.alert("一括削除に失敗しました");
+              Alert.alert(t("storageManagement.bulkDeleteFailed"));
             } finally {
               setIsBulkDeleting(false);
             }
@@ -111,11 +112,11 @@ export default function StorageManagementScreen() {
     <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>使用容量(音声・写真の合計)</Text>
+          <Text style={styles.totalLabel}>{t("storageManagement.totalLabel")}</Text>
           <Text style={styles.totalValue}>{formatBytes(totalBytes)}</Text>
         </View>
 
-        <Text style={styles.sectionHeader}>ノートごとの容量</Text>
+        <Text style={styles.sectionHeader}>{t("storageManagement.perNoteHeader")}</Text>
         {isLoading ? (
           <View style={styles.placeholder}>
             <ActivityIndicator />
@@ -123,7 +124,7 @@ export default function StorageManagementScreen() {
         ) : entries.length === 0 ? (
           <View style={styles.placeholder}>
             <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-            <Text style={styles.placeholderText}>音声・写真のあるノートはありません</Text>
+            <Text style={styles.placeholderText}>{t("storageManagement.empty")}</Text>
           </View>
         ) : (
           <View style={styles.card}>
@@ -134,10 +135,10 @@ export default function StorageManagementScreen() {
               >
                 <View style={styles.rowBody}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
-                    {noteDisplayTitle(entry)}
+                    {noteDisplayTitle(entry, lang, t)}
                   </Text>
                   <Text style={styles.rowMeta}>
-                    {formatDateSlash(entry.startedAt)} ・ {formatBytes(entry.bytes)}
+                    {formatDateSlash(entry.startedAt, lang)} ・ {formatBytes(entry.bytes)}
                   </Text>
                 </View>
                 {entry.hasAudio ? (
@@ -149,11 +150,11 @@ export default function StorageManagementScreen() {
                     {deletingSessionId === entry.sessionId ? (
                       <ActivityIndicator size="small" color={colors.danger.action} />
                     ) : (
-                      <Text style={styles.rowActionText}>音声のみ削除</Text>
+                      <Text style={styles.rowActionText}>{t("storageManagement.deleteAudioOnly")}</Text>
                     )}
                   </TouchableOpacity>
                 ) : (
-                  <Text style={styles.rowActionDone}>音声なし</Text>
+                  <Text style={styles.rowActionDone}>{t("storageManagement.noAudio")}</Text>
                 )}
               </View>
             ))}
@@ -173,7 +174,7 @@ export default function StorageManagementScreen() {
           {isBulkDeleting ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.bulkButtonText}>音声データを一括削除</Text>
+            <Text style={styles.bulkButtonText}>{t("storageManagement.bulkDeleteButton")}</Text>
           )}
         </TouchableOpacity>
       </View>

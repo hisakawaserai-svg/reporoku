@@ -1,14 +1,21 @@
+import type { TFunction } from "i18next";
 import { File } from "expo-file-system";
 import type { Block, Session } from "../db/types";
 import { toAbsoluteUri } from "./files";
-import { buildReportText } from "./report";
+import { REPORT_HEADING_TRANSLATION_KEYS, type ReportItem, type StructuredReport } from "./report";
 
-// 「要点抜粋」テキスト(buildReportText)をそのままHTML化し、写真だけは別セクションとして
-// 末尾に追加する。テキスト出力側の組み立てロジック(report.ts)には一切手を加えない
+const PHOTOS_HEADING_TRANSLATION_KEY = "report.section.photos";
 
-function formatHHMM(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+// buildStructuredReport(template: "summary")が返す構造化データを直接HTML化する。写真だけは
+// 別セクションとして末尾に追加する(構造化データ側のphotoEntryは「(写真)」プレースホルダの
+// 位置情報のみを持ち、実画像はここで別途ファイルを読み込んで埋め込む)
+
+function formatHHMM(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
+}
+
+function formatDateSlash(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "2-digit", day: "2-digit" }).format(unixMs);
 }
 
 function escapeHtml(text: string): string {
@@ -22,44 +29,62 @@ function escapeHtml(text: string): string {
 // ★・☑️・✅・❓・📷・📝が日本語本文と同じ行に混在すると、expo-print(WebViewベースのPDF化)の
 // フォント選択でJPフォント側のグリフが優先され、色無しの記号にフォールバックすることがある
 // (実機で確認済み: ❓が赤い色無しの記号になり、Apple Color Emojiの絵文字が使われない)。
-// 該当の記号だけを明示的にfont-family: "Apple Color Emoji"のspanで囲み、確実に絵文字を使わせる。
-// テキスト出力(report.ts)の文字列自体は書き換えず、PDF描画のHTML化の時だけ行う
+// 該当の記号だけを明示的にfont-family: "Apple Color Emoji"のspanで囲み、確実に絵文字を使わせる
 const EMOJI_MARK_PATTERN = /(☑️|✅|❓️?|📷|📝)/g;
 
 function wrapEmojiSpans(escapedText: string): string {
   return escapedText.replace(EMOJI_MARK_PATTERN, '<span class="emoji">$1</span>');
 }
 
-// buildReportText(template: "summary")が返す行を、行頭の記号(■見出し・・箇条書き・Q/A)から
-// 判定してそれぞれのHTMLタグに変換する。空行はセクション間の余白として扱う(CSSのmarginに置き換える)
-function renderTextAsHtml(text: string): string {
-  const lines = text.split("\n");
-  const htmlParts: string[] = [];
-  let isFirstLine = true;
+function escapeAndWrapEmoji(text: string): string {
+  return wrapEmojiSpans(escapeHtml(text));
+}
 
-  for (const line of lines) {
-    if (line === "") continue;
-    const escaped = wrapEmojiSpans(escapeHtml(line));
-
-    if (isFirstLine) {
-      htmlParts.push(`<h1 class="title">${escaped}</h1>`);
-      isFirstLine = false;
-    } else if (line.startsWith("日時：")) {
-      htmlParts.push(`<p class="meta">${escaped}</p>`);
-    } else if (line.startsWith("■ ")) {
-      htmlParts.push(`<h2 class="heading">${wrapEmojiSpans(escapeHtml(line.slice(2)))}</h2>`);
-    } else if (line.startsWith("・")) {
-      htmlParts.push(`<p class="bullet">${wrapEmojiSpans(escapeHtml(line.slice(1)))}</p>`);
-    } else if (line.startsWith(" Q：")) {
-      htmlParts.push(`<p class="qa-q">${wrapEmojiSpans(escapeHtml(line.slice(1)))}</p>`);
-    } else if (line.startsWith(" A：")) {
-      htmlParts.push(`<p class="qa-a">${wrapEmojiSpans(escapeHtml(line.slice(1)))}</p>`);
-    } else {
-      htmlParts.push(`<p>${escaped}</p>`);
+// 構造化データの各行(ReportItem)を、その種別タグに基づいてHTMLタグへ変換する。
+// 見出し文言(t())とレイアウト決定(行タイプ)が分離されているため、見出し文言を
+// 変更してもここのHTML化ロジックには影響しない
+function renderItemHtml(item: ReportItem, t: TFunction, lang: string): string {
+  switch (item.kind) {
+    case "bullet":
+      return `<p class="bullet">${escapeAndWrapEmoji(item.text)}</p>`;
+    case "qaPair":
+      return [
+        `<p class="qa-q">${escapeAndWrapEmoji(`${t("report.qa.questionPrefix")}${item.question}`)}</p>`,
+        `<p class="qa-a">${escapeAndWrapEmoji(`${t("report.qa.answerPrefix")}${item.answer}`)}</p>`,
+      ].join("\n");
+    case "transcriptEntry": {
+      const time = formatHHMM(item.time, lang);
+      const prefix = item.marks ? `${item.marks} ` : "";
+      const lines = [`<p>${escapeAndWrapEmoji(`[${time}] ${prefix}${item.text}`)}</p>`];
+      if (item.answerText) {
+        lines.push(`<p class="qa-a">${escapeAndWrapEmoji(`${t("report.qa.answerPrefix")}${item.answerText}`)}</p>`);
+      }
+      return lines.join("\n");
+    }
+    case "photoEntry": {
+      const time = formatHHMM(item.time, lang);
+      const prefix = item.marks ? `${item.marks} ` : "";
+      return `<p>${escapeAndWrapEmoji(`[${time}] ${prefix}${t("report.transcript.photoLabel")}`)}</p>`;
     }
   }
+}
 
-  return htmlParts.join("\n");
+function renderStructuredAsHtml(structured: StructuredReport, t: TFunction, lang: string): string {
+  const title = structured.header.titleText || t("notes.untitledNote");
+  const dateTimeLine = t("report.meta.dateTimeLine", {
+    date: formatDateSlash(structured.header.startedAt, lang),
+    start: formatHHMM(structured.header.startedAt, lang),
+    end: formatHHMM(structured.header.endedAt, lang),
+  });
+
+  const parts = [`<h1 class="title">${escapeHtml(title)}</h1>`, `<p class="meta">${escapeAndWrapEmoji(dateTimeLine)}</p>`];
+
+  for (const section of structured.sections) {
+    parts.push(`<h2 class="heading">${escapeAndWrapEmoji(t(REPORT_HEADING_TRANSLATION_KEYS[section.heading]))}</h2>`);
+    section.items.forEach((item) => parts.push(renderItemHtml(item, t, lang)));
+  }
+
+  return parts.join("\n");
 }
 
 const EXTENSION_MIME_TYPES: Record<string, string> = {
@@ -79,7 +104,7 @@ function guessMimeType(uri: string): string {
 // 写真ブロックを時系列順(startMs順)に並べ、base64のdata URIとして埋め込む。
 // file://等のローカルURIをそのまま<img src>に渡すとPDF生成環境によっては読み込めないことがあるため、
 // 確実に埋め込めるbase64化を選ぶ(1件読み込みに失敗しても他の写真はそのまま出力を続ける)
-async function renderPhotosSection(photoBlocks: Block[], session: Session): Promise<string> {
+async function renderPhotosSection(photoBlocks: Block[], session: Session, t: TFunction, lang: string): Promise<string> {
   if (photoBlocks.length === 0) return "";
 
   const items = await Promise.all(
@@ -91,7 +116,7 @@ async function renderPhotosSection(photoBlocks: Block[], session: Session): Prom
         if (!file.exists) return null;
         const base64 = await file.base64();
         const mime = guessMimeType(absoluteUri);
-        const time = formatHHMM(session.startedAt + block.startMs);
+        const time = formatHHMM(session.startedAt + block.startMs, lang);
         return `<div class="photo-item">
           <p class="photo-time">[${time}]</p>
           <img class="photo-img" src="data:${mime};base64,${base64}" />
@@ -106,7 +131,7 @@ async function renderPhotosSection(photoBlocks: Block[], session: Session): Prom
   const photoHtml = items.filter((html): html is string => !!html);
   if (photoHtml.length === 0) return "";
 
-  return `<h2 class="heading">${wrapEmojiSpans("写真 📷")}</h2>\n<div class="photo-grid">${photoHtml.join("\n")}</div>`;
+  return `<h2 class="heading">${escapeAndWrapEmoji(t(PHOTOS_HEADING_TRANSLATION_KEY))}</h2>\n<div class="photo-grid">${photoHtml.join("\n")}</div>`;
 }
 
 // 本文は日本語表示用のシステムフォントに任せる。★・☑️・✅・❓・📷・📝(.emojiクラス、
@@ -134,16 +159,22 @@ const STYLE = `
   .photo-img { width: 100%; border-radius: 6px; }
 `;
 
-export async function buildReportPdfHtml(session: Session, blocks: Block[]): Promise<string> {
-  const bodyHtml = renderTextAsHtml(buildReportText(session, blocks, "summary"));
+export async function buildReportPdfHtml(
+  structured: StructuredReport,
+  blocks: Block[],
+  session: Session,
+  t: TFunction,
+  lang: string
+): Promise<string> {
+  const bodyHtml = renderStructuredAsHtml(structured, t, lang);
 
   const photoBlocks = [...blocks]
     .filter((b) => b.kind === "photo" && b.photoUri)
     .sort((a, b) => a.startMs - b.startMs);
-  const photosHtml = await renderPhotosSection(photoBlocks, session);
+  const photosHtml = await renderPhotosSection(photoBlocks, session, t, lang);
 
   return `<!doctype html>
-<html lang="ja">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8" />
   <style>${STYLE}</style>
@@ -155,7 +186,7 @@ export async function buildReportPdfHtml(session: Session, blocks: Block[]): Pro
 </html>`;
 }
 
-export function reportPdfFileName(session: Session): string {
-  const safeTitle = session.title.trim().replace(/[\\/:*?"<>|]/g, "_") || "レポート";
+export function reportPdfFileName(session: Session, t: TFunction): string {
+  const safeTitle = session.title.trim().replace(/[\\/:*?"<>|]/g, "_") || t("report.fileNameFallback");
   return `${safeTitle}.pdf`;
 }

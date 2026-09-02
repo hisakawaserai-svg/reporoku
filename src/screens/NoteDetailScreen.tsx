@@ -30,6 +30,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import * as ImagePicker from "expo-image-picker";
@@ -46,17 +48,31 @@ import { deleteStoredFile, persistPhotoFile } from "../utils/files";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCard";
 import GroupSettingForm from "../components/GroupSettingForm";
+import GapSlider from "../components/GapSlider";
 import { RowLongPressMenu, useRowLongPressMenu } from "../components/RowLongPressMenu";
 import * as Clipboard from "expo-clipboard";
-import { getPlaybackLeadSec, getSectionGroupingEnabled, setSectionGroupingEnabled } from "../utils/settings";
+import {
+  PARAGRAPH_GAP_MIN_MS,
+  PARAGRAPH_GAP_STEP_MS,
+  SECTION_GAP_MAX_MS,
+  SECTION_GAP_MIN_MS,
+  SECTION_GAP_STEP_MS,
+  clampParagraphGapMs,
+  getDefaultParagraphGapMs,
+  getDefaultSectionGapMs,
+  getPlaybackLeadSec,
+  getSectionGroupingEnabled,
+  paragraphGapMaxMs,
+  setSectionGroupingEnabled,
+} from "../utils/settings";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
 
 type FilterKey = "all" | "star" | "todo" | "question" | "photo" | "note";
 
-const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; tint?: string }[] = [
-  { key: "all", label: "すべて" },
+const FILTERS: { key: FilterKey; labelKey?: string; label?: string; icon?: IconName; bg?: string; tint?: string }[] = [
+  { key: "all", labelKey: "noteDetail.filter.all" },
   { key: "star", label: "★", bg: colors.star.background, tint: colors.star.accent },
   { key: "todo", label: "✓", bg: colors.todo.background, tint: colors.todo.accent },
   { key: "question", label: "?", bg: colors.question.background, tint: colors.question.accent },
@@ -64,24 +80,22 @@ const FILTERS: { key: FilterKey; label?: string; icon?: IconName; bg?: string; t
   { key: "note", icon: "document-text-outline", bg: "#f5ecdd", tint: "#8a6d3b" },
 ];
 
-const VIEW_MODES: { key: "timeline" | "summary"; label: string }[] = [
-  { key: "timeline", label: "タイムライン" },
-  { key: "summary", label: "まとめ" },
+const VIEW_MODES: { key: "timeline" | "summary"; labelKey: string }[] = [
+  { key: "timeline", labelKey: "noteDetail.viewMode.timeline" },
+  { key: "summary", labelKey: "noteDetail.viewMode.summary" },
 ];
 
 // 「まとめ」タブの区分。上から重要度の高い順に並べる:
 // ★(重要)→❓(質問・用語)→ToDo→写真→メモ
 type SummarySectionKey = "star" | "question" | "todo" | "photo" | "note";
 
-// タイムラインのセクション分けに使う閾値(ミリ秒)。後で調整しやすいようここにまとめておく。
+// タイムラインのセクション分け・段落の閾値(ミリ秒)。
 // 「間」は前のブロックの推定終了時刻(startMs + 推定継続時間)から次のブロックのstartMsまでの差。
-// セクションの閾値(旧SECTION_GAP_MS)はノートごとにsessions.section_gap_msとして持つようになったため、
-// ここには「新しい発言として改行するかどうか」の段落閾値と、スライダーの可動範囲だけを残す
-const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として改行なしで自然に繋げて表示する
-const SECTION_GAP_MIN_MS = 2000; // スライダーの下限(細かく分ける)
-const SECTION_GAP_MAX_MS = 8000; // スライダーの上限(まとめる)
-const SECTION_GAP_STEP_MS = 500;
-const SECTION_GAP_FALLBACK_MS = 5000; // sessionsに値が無い場合のフォールバック
+// 閾値自体はノートごとにsessions.section_gap_ms/paragraph_gap_msとして持つ(調整可能範囲は
+// src/utils/settings.tsの定数に集約し、設定画面のスライダーと共通化している)。
+// ここにはsessionsに値が無い場合のフォールバックだけを残す
+const SECTION_GAP_FALLBACK_MS = 5000;
+const PARAGRAPH_GAP_FALLBACK_MS = 1500;
 
 // 1文字あたりの推定発話時間(ミリ秒)。block.endMs(実測の発話終了時刻)が無い古いデータの
 // フォールバックとしてのみ使う、テキスト長からのおおまかな発話継続時間の見積もり
@@ -105,27 +119,20 @@ function fmt(ms: number) {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-function formatHHMM(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+function formatHHMM(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
 }
 
-function formatDateSlash(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+function formatDateSlash(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "2-digit", day: "2-digit" }).format(unixMs);
 }
 
-function formatMinutes(durationMs: number): string {
-  return `${Math.round(durationMs / 60000)}分`;
+function formatMinutes(durationMs: number, t: TFunction): string {
+  return t("notes.durationMinutes", { count: Math.round(durationMs / 60000) });
 }
 
-function defaultTitle(session: Session): string {
-  const d = new Date(session.startedAt);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-    d.getDate()
-  ).padStart(2, "0")} の記録`;
+function defaultTitle(session: Session, lang: string, t: TFunction): string {
+  return t("notes.untitledRecordOn", { date: formatDateSlash(session.startedAt, lang) });
 }
 
 function matchesFilter(block: Block, filter: FilterKey): boolean {
@@ -162,9 +169,9 @@ function groupByGap(blocks: Block[], sectionGapMs: number): TimelineGroup[] {
 
 // セクション内でのブロック同士の行間隔。「間」が短いほど、同じ段落として詰めて表示する
 type RowSpacing = "paragraph" | "line";
-function rowSpacingFor(prev: Block | undefined, block: Block): RowSpacing {
+function rowSpacingFor(prev: Block | undefined, block: Block, paragraphGapMs: number): RowSpacing {
   if (!prev) return "line";
-  return gapMsBetween(prev, block) < PARAGRAPH_GAP_MS ? "paragraph" : "line";
+  return gapMsBetween(prev, block) < paragraphGapMs ? "paragraph" : "line";
 }
 
 // 指定したブロックが属するセクション(グループ)のkeyを探す
@@ -175,11 +182,11 @@ function findSectionKeyForBlock(groups: TimelineGroup[], blockId: string): strin
   return null;
 }
 
-function formatSectionRange(blocks: Block[], session: Session | null): string {
+function formatSectionRange(blocks: Block[], session: Session | null, lang: string, t: TFunction): string {
   if (!session || blocks.length === 0) return "";
-  const start = formatHHMM(session.startedAt + blocks[0].startMs);
-  const end = formatHHMM(session.startedAt + blocks[blocks.length - 1].startMs);
-  return start === end ? start : `${start} 〜 ${end}`;
+  const start = formatHHMM(session.startedAt + blocks[0].startMs, lang);
+  const end = formatHHMM(session.startedAt + blocks[blocks.length - 1].startMs, lang);
+  return start === end ? start : t("noteDetail.timeRange", { start, end });
 }
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -224,6 +231,8 @@ function blockPrimaryInlineKind(block: Block): InlineEditKind {
 }
 
 export default function NoteDetailScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "NoteDetail">>();
   const sessionId = route.params.noteId;
@@ -237,9 +246,10 @@ export default function NoteDetailScreen() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [session, setSession] = useState<Session | null>(null);
-  // このノート(セッション)のセクション区切り閾値。sessions.section_gap_msと連動し、
-  // スライダー操作中はDB保存を待たずに即座にここを更新してタイムラインへ反映する
+  // このノート(セッション)のセクション区切り・段落の閾値。sessions.section_gap_ms/
+  // paragraph_gap_msと連動し、スライダー操作中はDB保存を待たずに即座にここを更新してタイムラインへ反映する
   const [sectionGapMs, setSectionGapMs] = useState(SECTION_GAP_FALLBACK_MS);
+  const [paragraphGapMs, setParagraphGapMs] = useState(PARAGRAPH_GAP_FALLBACK_MS);
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   // クラッシュ復旧由来の通知に加え、ストレージ管理画面で音声のみ削除された場合も
   // 同じバナーを表示する(session読み込み前のちらつきを避けるため、取得済みになってから判定する)
@@ -382,7 +392,10 @@ export default function NoteDetailScreen() {
     try {
       const row = await sessionsRepo.getById(sessionId);
       setSession(row);
-      if (row) setSectionGapMs(row.sectionGapMs);
+      if (row) {
+        setSectionGapMs(row.sectionGapMs);
+        setParagraphGapMs(row.paragraphGapMs);
+      }
     } catch (e) {
       console.warn("[DB] セッションの取得に失敗しました", e);
     }
@@ -495,12 +508,30 @@ export default function NoteDetailScreen() {
   }, [titleDraft, session, sessionId, loadSession]);
 
   // スライダーのドラッグ中は毎フレームsectionGapMsを直接更新して即座に表示へ反映し(下のuseState経由)、
-  // 指を離した時にだけDBへ保存する(ドラッグ中に毎回書き込むと無駄が多いため)
+  // 指を離した時にだけDBへ保存する(ドラッグ中に毎回書き込むと無駄が多いため)。
+  // セクションを縮めたことで現在の改行の値が新しい上限を超えた場合は、一緒に切り詰めて保存する
+  // (「改行は常にセクションより小さい値」という制約をDB側でも保つため)
   const handleSectionGapChangeComplete = useCallback(
     (ms: number) => {
       sessionsRepo
         .updateSectionGapMs(sessionId, ms)
         .catch((e) => console.warn("[DB] セクション間隔の保存に失敗しました", e));
+      const clampedParagraphGapMs = clampParagraphGapMs(paragraphGapMs, ms);
+      if (clampedParagraphGapMs !== paragraphGapMs) {
+        setParagraphGapMs(clampedParagraphGapMs);
+        sessionsRepo
+          .updateParagraphGapMs(sessionId, clampedParagraphGapMs)
+          .catch((e) => console.warn("[DB] 改行間隔の保存に失敗しました", e));
+      }
+    },
+    [sessionId, paragraphGapMs]
+  );
+
+  const handleParagraphGapChangeComplete = useCallback(
+    (ms: number) => {
+      sessionsRepo
+        .updateParagraphGapMs(sessionId, ms)
+        .catch((e) => console.warn("[DB] 改行間隔の保存に失敗しました", e));
     },
     [sessionId]
   );
@@ -890,10 +921,10 @@ export default function NoteDetailScreen() {
   const confirmDeleteBlock = useCallback(
     (block: Block) => {
       rowMenu.close();
-      Alert.alert("このブロックを削除しますか？", "元に戻せません。", [
-        { text: "キャンセル", style: "cancel" },
+      Alert.alert(t("record.deleteBlockConfirm.title"), t("record.deleteBlockConfirm.message"), [
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "削除",
+          text: t("common.delete"),
           style: "destructive",
           onPress: async () => {
             try {
@@ -1286,7 +1317,7 @@ export default function NoteDetailScreen() {
     menuBlock && menuBlock.isTodo
       ? {
           key: "todoDone",
-          label: menuBlock.todoDone ? "未完了に戻す" : "完了にする",
+          label: menuBlock.todoDone ? t("noteDetail.todo.markUndone") : t("noteDetail.todo.markDone"),
           icon: "checkmark-done-outline",
           color: colors.todo.accent,
           onPress: () => toggleBlockTodoDone(menuBlock),
@@ -1298,7 +1329,7 @@ export default function NoteDetailScreen() {
     menuBlock && menuBlock.isQuestion
       ? {
           key: "answer",
-          label: menuBlock.questionTerm?.trim() ? "回答を編集" : "回答を記入",
+          label: menuBlock.questionTerm?.trim() ? t("noteDetail.answer.edit") : t("noteDetail.answer.add"),
           icon: "chatbubble-ellipses-outline",
           color: colors.question.accent,
           onPress: () => startInlineField(menuBlock, "answer"),
@@ -1310,7 +1341,7 @@ export default function NoteDetailScreen() {
     menuBlock && menuBlock.isStarred
       ? {
           key: "summaryNote",
-          label: menuBlock.summaryNote?.trim() ? "一言メモを編集" : "一言メモを書く",
+          label: menuBlock.summaryNote?.trim() ? t("noteDetail.summaryNote.edit") : t("noteDetail.summaryNote.add"),
           icon: "create-outline",
           color: colors.star.accent,
           onPress: () => startInlineField(menuBlock, "summaryNote"),
@@ -1323,8 +1354,8 @@ export default function NoteDetailScreen() {
       ? {
           key: "group",
           label: menuBlock.importantGroup?.trim()
-            ? `グループ: ${menuBlock.importantGroup}`
-            : "グループを設定",
+            ? t("noteDetail.group.labelWithValue", { group: menuBlock.importantGroup })
+            : t("noteDetail.group.set"),
           icon: "albums-outline",
           color: colors.star.accent,
           onPress: () => startInlineField(menuBlock, "group"),
@@ -1338,28 +1369,28 @@ export default function NoteDetailScreen() {
         ...(groupItem ? [groupItem] : []),
         {
           key: "edit",
-          label: "テキスト編集",
+          label: t("noteDetail.menu.editText"),
           icon: "create-outline",
           color: "#8e8e93",
           onPress: () => startEditingBlock(menuBlock),
         },
         {
           key: "copy",
-          label: "コピー",
+          label: t("noteDetail.menu.copy"),
           icon: "copy-outline",
           color: "#8e8e93",
           onPress: () => copyBlockText(menuBlock),
         },
         {
           key: "memo",
-          label: "メモを追加",
+          label: t("noteDetail.menu.addMemo"),
           icon: "document-text-outline",
           color: "#8e8e93",
           onPress: () => startMemoPrompt(menuBlock),
         },
         {
           key: "photo",
-          label: "写真を追加",
+          label: t("noteDetail.menu.addPhoto"),
           icon: "camera-outline",
           color: "#8e8e93",
           onPress: () => addPhotoAfter(menuBlock),
@@ -1371,14 +1402,14 @@ export default function NoteDetailScreen() {
     ? ([
         canMergePrev && {
           key: "mergePrev",
-          label: "前と結合",
+          label: t("noteDetail.menu.mergePrev"),
           icon: "arrow-up" as IconName,
           color: "#8e8e93",
           onPress: () => mergeWithNeighbor(menuBlock, "prev"),
         },
         canMergeNext && {
           key: "mergeNext",
-          label: "次と結合",
+          label: t("noteDetail.menu.mergeNext"),
           icon: "arrow-down" as IconName,
           color: "#8e8e93",
           onPress: () => mergeWithNeighbor(menuBlock, "next"),
@@ -1390,7 +1421,7 @@ export default function NoteDetailScreen() {
     menuBlock && canSplit
       ? {
           key: "split",
-          label: "分割",
+          label: t("noteDetail.menu.split"),
           icon: "swap-horizontal",
           color: "#8e8e93",
           onPress: () => startSplitting(menuBlock),
@@ -1400,7 +1431,7 @@ export default function NoteDetailScreen() {
   const deleteItem: MenuItem | null = menuBlock
     ? {
         key: "delete",
-        label: "削除",
+        label: t("common.delete"),
         icon: "trash-outline",
         color: colors.danger.action,
         onPress: () => confirmDeleteBlock(menuBlock),
@@ -1610,11 +1641,11 @@ export default function NoteDetailScreen() {
     tint: string;
     items: Block[];
   }[] = [
-    { key: "star", label: "重要", icon: "star", bg: colors.star.background, tint: colors.star.accent, items: blocks.filter((b) => b.isStarred) },
-    { key: "question", label: "質問", icon: "help-circle", bg: colors.question.background, tint: colors.question.accent, items: blocks.filter((b) => b.isQuestion) },
+    { key: "star", label: t("noteDetail.summarySection.star"), icon: "star", bg: colors.star.background, tint: colors.star.accent, items: blocks.filter((b) => b.isStarred) },
+    { key: "question", label: t("noteDetail.summarySection.question"), icon: "help-circle", bg: colors.question.background, tint: colors.question.accent, items: blocks.filter((b) => b.isQuestion) },
     { key: "todo", label: "Todo", icon: "checkmark-circle", bg: colors.todo.background, tint: colors.todo.accent, items: blocks.filter((b) => b.isTodo) },
-    { key: "photo", label: "写真", icon: "camera", bg: "#eef1f4", tint: "#57575c", items: blocks.filter((b) => b.kind === "photo") },
-    { key: "note", label: "メモ", icon: "document-text", bg: "#f5ecdd", tint: "#8a6d3b", items: blocks.filter((b) => b.kind === "note") },
+    { key: "photo", label: t("noteDetail.summarySection.photo"), icon: "camera", bg: "#eef1f4", tint: "#57575c", items: blocks.filter((b) => b.kind === "photo") },
+    { key: "note", label: t("noteDetail.summarySection.note"), icon: "document-text", bg: "#f5ecdd", tint: "#8a6d3b", items: blocks.filter((b) => b.kind === "note") },
   ];
 
   const renderSummaryRow = (sectionKey: SummarySectionKey, block: Block) => {
@@ -1677,7 +1708,7 @@ export default function NoteDetailScreen() {
               </View>
             )}
             <Text style={styles.summaryText} numberOfLines={2}>
-              {block.text || "写真"}
+              {block.text || t("noteDetail.photoFallbackLabel")}
             </Text>
           </View>
         ) : (
@@ -1719,7 +1750,7 @@ export default function NoteDetailScreen() {
               {fmt(block.startMs)}
               {session ? (
                 <Text style={styles.timelineTimeWallClock}>
-                  {` ・ ${formatHHMM(session.startedAt + block.startMs)}`}
+                  {` ・ ${formatHHMM(session.startedAt + block.startMs, lang)}`}
                 </Text>
               ) : null}
             </Text>
@@ -1733,7 +1764,7 @@ export default function NoteDetailScreen() {
             {block.isEdited ? (
               <View style={styles.editedBadge}>
                 <Ionicons name="pencil" size={10} color="#8e8e93" />
-                <Text style={styles.editedBadgeText}>編集済み</Text>
+                <Text style={styles.editedBadgeText}>{t("noteDetail.editedBadge")}</Text>
               </View>
             ) : null}
           </View>
@@ -1753,13 +1784,13 @@ export default function NoteDetailScreen() {
                 onPress={() => attachPhotoToBlock(block)}
                 onLongPress={() => openBlockMenu(block)}
               >
-                <Text style={styles.timelinePhotoLabel}>タップして写真を撮る</Text>
+                <Text style={styles.timelinePhotoLabel}>{t("noteDetail.tapToTakePhoto")}</Text>
               </TouchableOpacity>
             )
           ) : null}
           {splittingBlockId === block.id ? (
             <View>
-              <Text style={styles.splitHintText}>分割したい位置をタップしてください</Text>
+              <Text style={styles.splitHintText}>{t("noteDetail.split.hint")}</Text>
               <TextInput
                 ref={splitInputRef}
                 style={styles.timelineTextInput}
@@ -1771,13 +1802,13 @@ export default function NoteDetailScreen() {
               />
               <View style={styles.editActionsRow}>
                 <TouchableOpacity style={styles.editActionButton} onPress={cancelSplitting}>
-                  <Text style={styles.editActionButtonText}>キャンセル</Text>
+                  <Text style={styles.editActionButtonText}>{t("common.cancel")}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.editActionButton, styles.editActionButtonPrimary]}
                   onPress={confirmSplit}
                 >
-                  <Text style={styles.editActionButtonPrimaryText}>この位置で分割</Text>
+                  <Text style={styles.editActionButtonPrimaryText}>{t("noteDetail.split.confirm")}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1800,19 +1831,19 @@ export default function NoteDetailScreen() {
           ) : inlineFieldBlockId === block.id && inlineFieldMode ? (
             <InlineEditCard
               kind={inlineFieldMode === "answer" ? "question" : "star"}
-              title={inlineFieldMode === "answer" ? "回答を記入" : "一言メモを編集"}
+              title={inlineFieldMode === "answer" ? t("noteDetail.answer.add") : t("noteDetail.summaryNote.edit")}
               subtitle={inlineFieldMode === "answer" ? block.text ?? undefined : undefined}
               value={inlineFieldDraft}
               onChangeText={setInlineFieldDraft}
               placeholder={
                 inlineFieldMode === "answer"
-                  ? "わかったこと・聞いた答えなど"
-                  : "一言でまとめる(例: パスワードを使い回さない)"
+                  ? t("noteDetail.answer.placeholder")
+                  : t("noteDetail.summaryNote.placeholder")
               }
               caption={
                 inlineFieldMode === "answer"
-                  ? "任意・あとで記入してもOK"
-                  : "空にすると元の発言テキストがそのまま表示されます"
+                  ? t("noteDetail.answer.caption")
+                  : t("noteDetail.summaryNote.caption")
               }
               onCancel={cancelInlineField}
               onConfirm={confirmInlineField}
@@ -1826,7 +1857,7 @@ export default function NoteDetailScreen() {
               onLongPress={() => openBlockMenu(block)}
             >
               <Text style={block.text ? styles.timelineText : styles.timelineTextPlaceholder}>
-                {block.text || "タップしてメモを追加"}
+                {block.text || t("noteDetail.tapToAddMemo")}
               </Text>
             </TouchableOpacity>
           )}
@@ -1860,7 +1891,7 @@ export default function NoteDetailScreen() {
         </TouchableOpacity>
         {isHeaderCollapsed ? (
           <Text style={styles.topBarCompactTitle} numberOfLines={1}>
-            {session ? session.title || defaultTitle(session) : ""}
+            {session ? session.title || defaultTitle(session, lang, t) : ""}
           </Text>
         ) : (
           <View style={styles.topBarRightGroup}>
@@ -1896,16 +1927,17 @@ export default function NoteDetailScreen() {
             ) : (
               <TouchableOpacity style={styles.titleRow} activeOpacity={0.6} onPress={startEditingTitle}>
                 <Text style={styles.titleText} numberOfLines={1}>
-                  {session ? session.title || defaultTitle(session) : ""}
+                  {session ? session.title || defaultTitle(session, lang, t) : ""}
                 </Text>
                 <Ionicons name="create-outline" size={16} color="#c7c7cc" />
               </TouchableOpacity>
             )}
             {session ? (
               <Text style={styles.titleMeta}>
-                {formatDateSlash(session.startedAt)} ・ {formatHHMM(session.startedAt)} 開始
+                {formatDateSlash(session.startedAt, lang)} ・{" "}
+                {t("notes.cardMeta.startedAt", { time: formatHHMM(session.startedAt, lang) })}
                 {audioFiles.length > 0
-                  ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs)}`
+                  ? ` ・ ${formatMinutes(totalDurationMs || session.durationMs, t)}`
                   : ""}
               </Text>
             ) : null}
@@ -1924,7 +1956,7 @@ export default function NoteDetailScreen() {
                     viewMode === v.key && styles.viewModeSegmentTextSelected,
                   ]}
                 >
-                  {v.label}
+                  {t(v.labelKey)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1935,8 +1967,8 @@ export default function NoteDetailScreen() {
               <Ionicons name="alert-circle-outline" size={18} color="#c98a00" style={styles.audioNoticeIcon} />
               <Text style={styles.audioNoticeText}>
                 {audioMissingByCrash
-                  ? "このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。"
-                  : "このノートには音声がありません。テキストの記録は残っています。"}
+                  ? t("noteDetail.audioMissing.crash")
+                  : t("noteDetail.audioMissing.generic")}
               </Text>
             </View>
           ) : null}
@@ -1950,7 +1982,7 @@ export default function NoteDetailScreen() {
       {viewMode === "summary" ? (
         <ScrollView style={styles.summaryScroll}>
           {SUMMARY_SECTIONS.every((s) => s.items.length === 0) ? (
-            <Text style={styles.emptyText}>まとめられる項目がありません</Text>
+            <Text style={styles.emptyText}>{t("noteDetail.summary.empty")}</Text>
           ) : (
             SUMMARY_SECTIONS.map((section) =>
               section.items.length === 0 ? null : (
@@ -1962,7 +1994,9 @@ export default function NoteDetailScreen() {
                         {section.label}
                       </Text>
                     </View>
-                    <Text style={styles.summarySectionCount}>{section.items.length}件</Text>
+                    <Text style={styles.summarySectionCount}>
+                      {t("noteDetail.itemCount", { count: section.items.length })}
+                    </Text>
                   </View>
                   {section.items.map((block) => renderSummaryRow(section.key, block))}
                 </View>
@@ -1997,7 +2031,7 @@ export default function NoteDetailScreen() {
                     isSelected && styles.chipTextSelected,
                   ]}
                 >
-                  {f.label}
+                  {f.labelKey ? t(f.labelKey) : f.label}
                 </Text>
               )}
             </TouchableOpacity>
@@ -2017,7 +2051,7 @@ export default function NoteDetailScreen() {
         <View style={styles.followBadgeContainer} pointerEvents="box-none">
           <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoFollow}>
             <Ionicons name="arrow-down" size={13} color="#fff" />
-            <Text style={styles.followBadgeText}>{`新着 ${newArrivalCount}件`}</Text>
+            <Text style={styles.followBadgeText}>{t("noteDetail.newArrival", { count: newArrivalCount })}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -2052,16 +2086,16 @@ export default function NoteDetailScreen() {
         {filtered.length === 0 ? (
           blocks.length === 0 ? (
             <View style={styles.emptyStateBox}>
-              <Text style={styles.emptyText}>まだ何も記録されていません</Text>
+              <Text style={styles.emptyText}>{t("noteDetail.empty.noBlocks")}</Text>
               {newBlockDraft && newBlockDraft.afterBlockId === null ? (
                 <InlineEditCard
                   kind="neutral"
-                  title="メモを追加"
+                  title={t("noteDetail.menu.addMemo")}
                   value={newBlockDraft.text}
                   onChangeText={(text) =>
                     setNewBlockDraft((d) => (d ? { ...d, text } : d))
                   }
-                  placeholder="メモを入力"
+                  placeholder={t("record.memoModal.placeholder")}
                   onCancel={cancelMemoPrompt}
                   onConfirm={confirmMemoPrompt}
                 />
@@ -2069,17 +2103,17 @@ export default function NoteDetailScreen() {
                 <View style={styles.emptyStateActions}>
                   <TouchableOpacity style={styles.emptyStateButton} onPress={startMemoPromptForEmpty}>
                     <Ionicons name="document-text-outline" size={18} color="#06c" />
-                    <Text style={styles.emptyStateButtonText}>メモを追加</Text>
+                    <Text style={styles.emptyStateButtonText}>{t("noteDetail.menu.addMemo")}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.emptyStateButton} onPress={() => addPhotoAfter(null)}>
                     <Ionicons name="camera-outline" size={18} color="#06c" />
-                    <Text style={styles.emptyStateButtonText}>写真を追加</Text>
+                    <Text style={styles.emptyStateButtonText}>{t("noteDetail.menu.addPhoto")}</Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
           ) : (
-            <Text style={styles.emptyText}>表示できるブロックがありません</Text>
+            <Text style={styles.emptyText}>{t("noteDetail.empty.noVisibleBlocks")}</Text>
           )
         ) : (
           timelineGroups.map((group, groupIndex) => {
@@ -2099,9 +2133,13 @@ export default function NoteDetailScreen() {
                 >
                   <View style={styles.sectionHeaderPillRow}>
                     <View style={styles.sectionHeaderPill}>
-                      <Text style={styles.sectionHeaderPillText}>セクション{groupIndex + 1}</Text>
+                      <Text style={styles.sectionHeaderPillText}>
+                        {t("noteDetail.sectionLabel", { index: groupIndex + 1 })}
+                      </Text>
                     </View>
-                    <Text style={styles.sectionHeaderMeta}>{formatSectionRange(group.blocks, session)}</Text>
+                    <Text style={styles.sectionHeaderMeta}>
+                      {formatSectionRange(group.blocks, session, lang, t)}
+                    </Text>
                   </View>
                 </TouchableOpacity>
               ) : null}
@@ -2109,11 +2147,17 @@ export default function NoteDetailScreen() {
                 ? null
                 : group.blocks.map((block, blockIndex) => {
                 const hasLineBelow = blockIndex < group.blocks.length - 1;
+                // 「間」が短いほど、同じ段落として行間を詰めて自然に繋げて見せる。
+                // セクション分けをオフにしている間はこの判定自体を行わない(RecordScreenと同じ考え方)
+                const rowSpacing = sectionGroupingEnabled
+                  ? rowSpacingFor(group.blocks[blockIndex - 1], block, paragraphGapMs)
+                  : "line";
                 return (
                   <Fragment key={block.id}>
                   <TouchableOpacity
                     style={[
                       styles.timelineRow,
+                      rowSpacing === "paragraph" && styles.timelineRowParagraph,
                       block.id === activeBlockId && styles.timelineRowActive,
                       block.id === effectiveJumpBlockId && styles.timelineRowJumped,
                       block.id === editingBlockId && styles.timelineRowEditing,
@@ -2144,12 +2188,12 @@ export default function NoteDetailScreen() {
                   {newBlockDraft && newBlockDraft.afterBlockId === block.id ? (
                     <InlineEditCard
                       kind="neutral"
-                      title="メモを追加"
+                      title={t("noteDetail.menu.addMemo")}
                       value={newBlockDraft.text}
                       onChangeText={(text) =>
                         setNewBlockDraft((d) => (d ? { ...d, text } : d))
                       }
-                      placeholder="メモを入力"
+                      placeholder={t("record.memoModal.placeholder")}
                       onCancel={cancelMemoPrompt}
                       onConfirm={confirmMemoPrompt}
                     />
@@ -2262,20 +2306,43 @@ export default function NoteDetailScreen() {
       >
         <Pressable style={styles.debugOverlay} onPress={() => setNoteSettingsVisible(false)}>
           <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.promptTitle}>このノートの設定</Text>
+            <Text style={styles.promptTitle}>{t("noteDetail.settingsSheet.title")}</Text>
             <View style={styles.noteSettingsRow}>
-              <Text style={styles.noteSettingsRowLabel}>セクション分けを表示する</Text>
+              <Text style={styles.noteSettingsRowLabel}>
+                {t("noteDetail.settingsSheet.sectionGroupingLabel")}
+              </Text>
               <Switch value={sectionGroupingEnabled} onValueChange={handleToggleSectionGrouping} />
             </View>
             {sectionGroupingEnabled ? (
-              <SectionGapSlider
-                valueMs={sectionGapMs}
-                onChange={setSectionGapMs}
-                onChangeComplete={handleSectionGapChangeComplete}
-              />
+              <View style={styles.gapSlidersCol}>
+                <GapSlider
+                  valueMs={sectionGapMs}
+                  minMs={SECTION_GAP_MIN_MS}
+                  maxMs={SECTION_GAP_MAX_MS}
+                  stepMs={SECTION_GAP_STEP_MS}
+                  label={t("gapSlider.sectionLabel", { sec: (sectionGapMs / 1000).toFixed(1) })}
+                  fineLabel={t("gapSlider.fine")}
+                  coarseLabel={t("gapSlider.coarse")}
+                  defaultValueMs={getDefaultSectionGapMs()}
+                  onChange={setSectionGapMs}
+                  onChangeComplete={handleSectionGapChangeComplete}
+                />
+                <GapSlider
+                  valueMs={paragraphGapMs}
+                  minMs={PARAGRAPH_GAP_MIN_MS}
+                  maxMs={paragraphGapMaxMs(sectionGapMs)}
+                  stepMs={PARAGRAPH_GAP_STEP_MS}
+                  label={t("gapSlider.paragraphLabel", { sec: (paragraphGapMs / 1000).toFixed(1) })}
+                  fineLabel={t("gapSlider.fine")}
+                  coarseLabel={t("gapSlider.coarse")}
+                  defaultValueMs={getDefaultParagraphGapMs()}
+                  onChange={setParagraphGapMs}
+                  onChangeComplete={handleParagraphGapChangeComplete}
+                />
+              </View>
             ) : (
               <Text style={styles.noteSettingsDisabledText}>
-                セクション分けをオフにしているため、区切りの細かさは調整できません。
+                {t("noteDetail.settingsSheet.groupingDisabledHint")}
               </Text>
             )}
           </Pressable>
@@ -2285,94 +2352,6 @@ export default function NoteDetailScreen() {
   );
 }
 
-// セクション区切りの閾値(2.0〜8.0秒、0.5秒刻み)を調整するスライダー。
-// 再生バーのシークバー(PanResponder方式)と同じ考え方の、専用の独立したトラック
-function SectionGapSlider({
-  valueMs,
-  onChange,
-  onChangeComplete,
-}: {
-  valueMs: number;
-  onChange: (ms: number) => void;
-  onChangeComplete: (ms: number) => void;
-}) {
-  const trackRef = useRef<View>(null);
-  const trackWidthRef = useRef(0);
-  const trackPageXRef = useRef(0);
-  const [trackWidth, setTrackWidth] = useState(0);
-  // PanResponderはuseRefで一度だけ作られるため、内部から呼ぶコールバックは常に最新のpropsを
-  // 参照するようrefを介す(再生バーのシークバーと同じ理由)
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const onChangeCompleteRef = useRef(onChangeComplete);
-  onChangeCompleteRef.current = onChangeComplete;
-
-  const msFromRatio = (ratio: number): number => {
-    const raw = SECTION_GAP_MIN_MS + ratio * (SECTION_GAP_MAX_MS - SECTION_GAP_MIN_MS);
-    const stepped = Math.round(raw / SECTION_GAP_STEP_MS) * SECTION_GAP_STEP_MS;
-    return Math.min(SECTION_GAP_MAX_MS, Math.max(SECTION_GAP_MIN_MS, stepped));
-  };
-
-  const ratioFromPageX = (pageX: number): number => {
-    if (trackWidthRef.current <= 0) return 0;
-    return Math.min(1, Math.max(0, (pageX - trackPageXRef.current) / trackWidthRef.current));
-  };
-
-  const handleTrackLayout = (e: LayoutChangeEvent) => {
-    setTrackWidth(e.nativeEvent.layout.width);
-    trackWidthRef.current = e.nativeEvent.layout.width;
-    trackRef.current?.measure((_x, _y, _width, _height, pageX) => {
-      trackPageXRef.current = pageX;
-    });
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true,
-      onPanResponderGrant: (evt: GestureResponderEvent) => {
-        onChangeRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
-      },
-      onPanResponderMove: (evt: GestureResponderEvent) => {
-        onChangeRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
-      },
-      onPanResponderRelease: (evt: GestureResponderEvent) => {
-        onChangeCompleteRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
-      },
-      onPanResponderTerminate: (evt: GestureResponderEvent) => {
-        onChangeCompleteRef.current(msFromRatio(ratioFromPageX(evt.nativeEvent.pageX)));
-      },
-    })
-  ).current;
-
-  const ratio = (valueMs - SECTION_GAP_MIN_MS) / (SECTION_GAP_MAX_MS - SECTION_GAP_MIN_MS);
-
-  return (
-    <View style={styles.gapSliderWrap}>
-      <Text style={styles.gapSliderLabel}>
-        区切りの細かさ: {(valueMs / 1000).toFixed(1)}秒
-      </Text>
-      <View
-        ref={trackRef}
-        style={styles.gapSliderTrack}
-        onLayout={handleTrackLayout}
-        {...panResponder.panHandlers}
-      >
-        <View style={styles.gapSliderTrackBg} />
-        <View style={[styles.gapSliderTrackFill, { width: `${ratio * 100}%` }]} />
-        <View style={[styles.gapSliderThumb, { left: `${ratio * 100}%` }]} />
-      </View>
-      <View style={styles.gapSliderEndsRow}>
-        <Text style={styles.gapSliderEndText}>細かく分ける</Text>
-        <Text style={styles.gapSliderEndText}>まとめる</Text>
-      </View>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   // 無印の吹き出し(白背景)が浮いて見えるよう、画面全体はNotesScreenと同じ薄いグレーにする
@@ -2527,30 +2506,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // セクション区切りの細かさスライダー
-  gapSliderWrap: {},
   noteSettingsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   noteSettingsRowLabel: { fontSize: 15, color: "#1c1c1e" },
   noteSettingsDisabledText: { fontSize: 13, color: "#8e8e93", lineHeight: 19 },
-  gapSliderLabel: { fontSize: 12, color: "#8e8e93", marginBottom: 6 },
-  gapSliderTrack: { height: 24, justifyContent: "center" },
-  gapSliderTrackBg: { height: 4, borderRadius: 2, backgroundColor: "#e2e2e7" },
-  gapSliderTrackFill: {
-    position: "absolute",
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#06c",
-  },
-  gapSliderThumb: {
-    position: "absolute",
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#06c",
-    marginLeft: -9,
-  },
-  gapSliderEndsRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
-  gapSliderEndText: { fontSize: 11, color: "#c7c7cc" },
+  // 「区切りの細かさ」「改行の細かさ」の2つのGapSliderを縦に並べる
+  gapSlidersCol: { gap: 18 },
 
   timelineWrap: { flex: 1, backgroundColor: "#fff" },
   // タイムラインの一番下(プレイヤーバーのすぐ上)に浮かせる。timelineWrap自体が

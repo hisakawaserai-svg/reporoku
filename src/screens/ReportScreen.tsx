@@ -3,6 +3,8 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacit
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { useFocusEffect, useRoute } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { Share } from "react-native";
@@ -14,7 +16,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as blocksRepo from "../db/repositories/blocks";
 import * as sessionsRepo from "../db/repositories/sessions";
 import type { Block, Session } from "../db/types";
-import { buildReportText, reportFileName, type ReportTemplate } from "../utils/report";
+import { buildReportText, buildStructuredReport, reportFileName, type ReportTemplate } from "../utils/report";
 import { buildReportPdfHtml, reportPdfFileName } from "../utils/reportPdf";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
@@ -28,9 +30,9 @@ const SUMMARY_ICONS: { key: string; icon: IconName; color: string }[] = [
   { key: "question", icon: "help-circle", color: colors.question.accent },
 ];
 
-const TEMPLATES: { key: ReportTemplate; label: string; description: string }[] = [
-  { key: "summary", label: "要点抜粋", description: "のみ(デフォルト)" },
-  { key: "full", label: "全文", description: "文字起こし全体を含む" },
+const TEMPLATES: { key: ReportTemplate; labelKey: string; descriptionKey: string }[] = [
+  { key: "summary", labelKey: "report.template.summary.label", descriptionKey: "report.template.summary.description" },
+  { key: "full", labelKey: "report.template.full.label", descriptionKey: "report.template.full.description" },
 ];
 
 // プレビューが長くなりすぎる(特に「全文」テンプレート)場合、画面を占領しないようこの行数までで
@@ -41,11 +43,11 @@ const PREVIEW_LINE_LIMIT = 15;
 // 書き出しのたびに上書きしてよい一時的な出力先として documentDirectory 配下に置く
 const reportsDirectory = new Directory(Paths.document, "reports");
 
-async function writeReportFile(session: Session, text: string): Promise<File> {
+async function writeReportFile(session: Session, text: string, t: TFunction): Promise<File> {
   if (!reportsDirectory.exists) {
     reportsDirectory.create({ intermediates: true, idempotent: true });
   }
-  const file = new File(reportsDirectory, reportFileName(session));
+  const file = new File(reportsDirectory, reportFileName(session, t));
   file.create({ overwrite: true });
   file.write(text);
   return file;
@@ -53,11 +55,11 @@ async function writeReportFile(session: Session, text: string): Promise<File> {
 
 // expo-printが書き出す一時PDF(cache配下・ランダムなファイル名)を、テキスト出力と同じ
 // reports/ディレクトリへノート名でコピーし直す(ファイル名を分かりやすくするため)
-async function writeReportPdfFile(session: Session, generatedUri: string): Promise<File> {
+async function writeReportPdfFile(session: Session, generatedUri: string, t: TFunction): Promise<File> {
   if (!reportsDirectory.exists) {
     reportsDirectory.create({ intermediates: true, idempotent: true });
   }
-  const destination = new File(reportsDirectory, reportPdfFileName(session));
+  const destination = new File(reportsDirectory, reportPdfFileName(session, t));
   if (destination.exists) {
     destination.delete();
   }
@@ -67,6 +69,8 @@ async function writeReportPdfFile(session: Session, generatedUri: string): Promi
 }
 
 export default function ReportScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const route = useRoute<RouteProp<RootStackParamList, "Report">>();
   const sessionId = route.params.noteId;
   const [template, setTemplate] = useState<ReportTemplate>("summary");
@@ -88,7 +92,8 @@ export default function ReportScreen() {
     }, [sessionId])
   );
 
-  const reportText = session ? buildReportText(session, blocks, template) : "";
+  const structuredReport = session ? buildStructuredReport(session, blocks, template) : null;
+  const reportText = structuredReport ? buildReportText(structuredReport, t, lang) : "";
   const reportLines = reportText.split("\n");
   const previewOverflowing = reportLines.length > PREVIEW_LINE_LIMIT;
   const previewText =
@@ -105,10 +110,10 @@ export default function ReportScreen() {
     if (!session) return;
     try {
       await Clipboard.setStringAsync(reportText);
-      Alert.alert("コピーしました", "クリップボードにレポートをコピーしました。");
+      Alert.alert(t("report.copy.doneTitle"), t("report.copy.doneMessage"));
     } catch (e) {
       console.warn("[Clipboard] コピーに失敗しました", e);
-      Alert.alert("コピーに失敗しました");
+      Alert.alert(t("report.copy.failed"));
     }
   };
 
@@ -124,99 +129,109 @@ export default function ReportScreen() {
   const handleSaveFile = async () => {
     if (!session) return;
     try {
-      const file = await writeReportFile(session, reportText);
+      const file = await writeReportFile(session, reportText, t);
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(file.uri, {
           mimeType: "text/plain",
-          dialogTitle: reportFileName(session),
+          dialogTitle: reportFileName(session, t),
         });
       } else {
-        Alert.alert("保存しました", file.uri);
+        Alert.alert(t("settings.backup.savedTitle"), file.uri);
       }
     } catch (e) {
       console.warn("[FS] テキストファイルの保存に失敗しました", e);
-      Alert.alert("保存に失敗しました");
+      Alert.alert(t("report.saveFailed"));
     }
   };
 
-  // 写真を含むPDFは常に「要点抜粋」の構成で書き出す(全文テンプレートを選んでいても切り替わらない)。
-  // テキスト出力(buildReportText/buildExcerptSections)のロジック自体には一切手を加えていない
+  // 写真を含むPDFは常に「要点抜粋」の構成で書き出す(全文テンプレートを選んでいても切り替わらない)
   const handleExportPdf = async () => {
     if (!session || pdfGenerating) return;
     setPdfGenerating(true);
     try {
-      const html = await buildReportPdfHtml(session, blocks);
+      const summaryReport = buildStructuredReport(session, blocks, "summary");
+      const html = await buildReportPdfHtml(summaryReport, blocks, session, t, lang);
       const { uri } = await Print.printToFileAsync({ html });
-      const file = await writeReportPdfFile(session, uri);
+      const file = await writeReportPdfFile(session, uri, t);
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
         await Sharing.shareAsync(file.uri, {
           mimeType: "application/pdf",
-          dialogTitle: reportPdfFileName(session),
+          dialogTitle: reportPdfFileName(session, t),
           UTI: "com.adobe.pdf",
         });
       } else {
-        Alert.alert("保存しました", file.uri);
+        Alert.alert(t("settings.backup.savedTitle"), file.uri);
       }
     } catch (e) {
       console.warn("[PDF] PDFの生成に失敗しました", e);
-      Alert.alert("PDFの生成に失敗しました");
+      Alert.alert(t("report.pdf.generateFailed"));
     } finally {
       setPdfGenerating(false);
     }
   };
 
   const EXPORT_ACTIONS = [
-    { key: "copy", label: "クリップボードにコピー", onPress: handleCopy },
-    { key: "share", label: "共有シート", onPress: handleShareSheet },
-    { key: "save", label: "テキストファイルとして保存", onPress: handleSaveFile },
+    { key: "copy", labelKey: "report.export.copy", onPress: handleCopy },
+    { key: "share", labelKey: "report.export.share", onPress: handleShareSheet },
+    { key: "save", labelKey: "report.export.saveFile", onPress: handleSaveFile },
   ];
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.sectionHeader}>テンプレート</Text>
+        <Text style={styles.sectionHeader}>{t("report.templateHeader")}</Text>
         <View style={styles.templateGroup}>
-          {TEMPLATES.map((t) => (
+          {TEMPLATES.map((tpl) => (
             <TouchableOpacity
-              key={t.key}
-              style={[styles.templateCard, template === t.key && styles.templateCardSelected]}
-              onPress={() => selectTemplate(t.key)}
+              key={tpl.key}
+              style={[styles.templateCard, template === tpl.key && styles.templateCardSelected]}
+              onPress={() => selectTemplate(tpl.key)}
             >
-              <View style={[styles.radio, template === t.key && styles.radioSelected]} />
+              <View style={[styles.radio, template === tpl.key && styles.radioSelected]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.templateLabel}>{t.label}</Text>
+                <Text style={styles.templateLabel}>{t(tpl.labelKey)}</Text>
                 <View style={styles.templateDescriptionRow}>
-                  {t.key === "summary" &&
+                  {tpl.key === "summary" &&
                     SUMMARY_ICONS.map((icon) => (
                       <Ionicons key={icon.key} name={icon.icon} size={15} color={icon.color} />
                     ))}
-                  <Text style={styles.templateDescription}>{t.description}</Text>
+                  <Text style={styles.templateDescription}>{t(tpl.descriptionKey)}</Text>
                 </View>
               </View>
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={styles.sectionHeader}>プレビュー</Text>
-        <View style={styles.previewBox}>
-          <Text style={styles.previewText} selectable>
-            {session ? previewText : "読み込み中..."}
-          </Text>
-          {session && previewOverflowing && !previewExpanded ? (
-            <Text style={styles.previewFadeNotice}>…</Text>
+        <View style={styles.previewHeaderRow}>
+          <Text style={[styles.sectionHeader, styles.previewSectionHeaderText]}>{t("report.previewHeader")}</Text>
+          {session && previewOverflowing ? (
+            <TouchableOpacity onPress={() => setPreviewExpanded((v) => !v)} hitSlop={8}>
+              <Text style={styles.previewToggleText}>
+                {previewExpanded
+                  ? t("report.preview.collapse")
+                  : t("report.preview.expand", { count: reportLines.length })}
+              </Text>
+            </TouchableOpacity>
           ) : null}
         </View>
-        {session && previewOverflowing ? (
-          <TouchableOpacity onPress={() => setPreviewExpanded((v) => !v)}>
-            <Text style={styles.previewToggleText}>
-              {previewExpanded ? "折りたたむ ▲" : `続きを見る(全${reportLines.length}行) ▼`}
+        <TouchableOpacity
+          activeOpacity={previewOverflowing ? 0.7 : 1}
+          disabled={!session || !previewOverflowing}
+          onPress={() => setPreviewExpanded((v) => !v)}
+        >
+          <View style={styles.previewBox}>
+            <Text style={styles.previewText} selectable>
+              {session ? previewText : t("report.loading")}
             </Text>
-          </TouchableOpacity>
-        ) : null}
+            {session && previewOverflowing && !previewExpanded ? (
+              <Text style={styles.previewFadeNotice}>…</Text>
+            ) : null}
+          </View>
+        </TouchableOpacity>
 
-        <Text style={styles.sectionHeader}>書き出し方法</Text>
+        <Text style={styles.sectionHeader}>{t("report.exportHeader")}</Text>
         <View style={styles.card}>
           {EXPORT_ACTIONS.map((action, i) => (
             <TouchableOpacity
@@ -225,12 +240,12 @@ export default function ReportScreen() {
               onPress={action.onPress}
               disabled={!session}
             >
-              <Text style={styles.rowLabel}>{action.label}</Text>
+              <Text style={styles.rowLabel}>{t(action.labelKey)}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <Text style={styles.sectionHeader}>写真付きPDF</Text>
+        <Text style={styles.sectionHeader}>{t("report.pdfHeader")}</Text>
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.row}
@@ -240,13 +255,11 @@ export default function ReportScreen() {
             {pdfGenerating ? (
               <ActivityIndicator size="small" color="#06c" />
             ) : (
-              <Text style={styles.rowLabel}>PDFとして書き出す</Text>
+              <Text style={styles.rowLabel}>{t("report.pdf.exportButton")}</Text>
             )}
           </TouchableOpacity>
         </View>
-        <Text style={styles.pdfCaption}>
-          テンプレートの選択にかかわらず、要点抜粋(重要・ToDo・質問・Q&A)に写真を時系列順で加えて書き出します。
-        </Text>
+        <Text style={styles.pdfCaption}>{t("report.pdf.caption")}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -285,6 +298,14 @@ const styles = StyleSheet.create({
   templateLabel: { fontSize: 16, fontWeight: "600" },
   templateDescriptionRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   templateDescription: { fontSize: 13, color: "#8e8e93" },
+  previewHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 16,
+    marginBottom: 6,
+  },
+  previewSectionHeaderText: { marginTop: 0, marginBottom: 0 },
   previewBox: {
     backgroundColor: "#fff",
     borderRadius: radius.card,
@@ -298,8 +319,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#06c",
     fontWeight: "600",
-    marginTop: 8,
-    textAlign: "center",
   },
   card: { backgroundColor: "#fff", borderRadius: radius.card, overflow: "hidden" },
   row: { paddingVertical: spacing.cardPadding, paddingHorizontal: spacing.cardPadding },

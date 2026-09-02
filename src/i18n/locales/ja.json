@@ -1,0 +1,681 @@
+{
+  "common": {
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "save": "保存",
+    "close": "閉じる",
+    "done": "完了",
+    "required": "必須"
+  },
+  "navigation": {
+    "tabRecord": "収録",
+    "tabNotes": "ノート",
+    "tabSummary": "まとめ",
+    "tabSettings": "設定",
+    "noteDetailTitle": "ノート詳細",
+    "reportTitle": "レポート出力",
+    "storageManagementTitle": "ストレージ管理",
+    "howToUseTitle": "使い方"
+  },
+  "settings": {
+    "title": "設定",
+    "language": {
+      "rowLabel": "表示言語",
+      "system": "端末の設定に合わせる",
+      "japanese": "日本語",
+      "english": "English",
+      "promptTitle": "言語を選択"
+    },
+    "sampleRate": {
+      "standard": {
+        "label": "標準(16000Hz)",
+        "hint": "容量を抑える(1時間あたり約115MB)"
+      },
+      "high": {
+        "label": "高音質(44100Hz)",
+        "hint": "容量が大きい(1時間あたり約300MB)"
+      }
+    },
+    "playback": {
+      "sectionHeader": "再生",
+      "leadRowLabel": "再生開始位置(lead)",
+      "leadValue": "{{sec}}秒",
+      "resetButton": "リセット",
+      "leadHint": "タップ再生時に、何秒手前から再生を開始するかの設定です。ボタンを押し続けると連続して変更できます。"
+    },
+    "recording": {
+      "sectionHeader": "録音",
+      "sampleRateLabel": "音声の品質 / サンプルレート",
+      "bluetoothLabel": "外部マイクを使う",
+      "bluetoothHint": "オンにすると、接続中のワイヤレスイヤホンやピンマイクから録音します。離れた場所の声を録る場合はオフのままにしてください。"
+    },
+    "timeline": {
+      "sectionHeader": "タイムライン表示",
+      "defaultGapLabel": "新しい録音のデフォルト間隔",
+      "defaultGapHint": "新しく録音を開始した時の初期値です。既存のノートの間隔には影響しません。",
+      "defaultParagraphGapLabel": "段落内で改行する基準",
+      "defaultParagraphGapHint": "同じ段落として行間を詰めて表示するかどうかの初期値です。区切りの細かさより小さい範囲でのみ調整できます。既存のノートの間隔には影響しません。"
+    },
+    "storage": {
+      "sectionHeader": "ストレージ管理",
+      "deleting": "削除中…",
+      "checking": "確認中…",
+      "deleteOrphans": "不要なファイルを削除",
+      "checkFailed": "確認に失敗しました",
+      "noOrphans": "不要なファイルは見つかりませんでした",
+      "deleteFailed": "削除に失敗しました",
+      "deleteConfirm": {
+        "title": "不要なファイルを削除しますか？",
+        "message": "どのノートからも参照されていないファイルが{{count}}件({{size}})見つかりました。削除してもノートの内容には影響しません。この操作は元に戻せません。"
+      }
+    },
+    "backup": {
+      "sectionHeader": "バックアップ",
+      "creating": "バックアップを作成中…",
+      "create": "バックアップを作成",
+      "restoring": "復元中…",
+      "restoreFromBackup": "バックアップから復元",
+      "restoreButton": "復元",
+      "savedTitle": "保存しました",
+      "createFailed": "バックアップの作成に失敗しました",
+      "invalidFile": "バックアップファイルが正しくありません",
+      "restoreConfirm": {
+        "title": "バックアップを復元しますか？",
+        "message": "バックアップを復元すると、現在のデータは全て上書きされます。よろしいですか？"
+      },
+      "restoreDone": {
+        "title": "復元が完了しました",
+        "message": "変更を反映するため、アプリを再起動してください。"
+      },
+      "restoreFailedTitle": "復元に失敗しました",
+      "restoreFailed": {
+        "rollbackMessage": "復元に失敗し、データの状態が不安定になっている可能性があります。バックアップから再度復元をお試しいただくか、お手数ですがサポートにご連絡ください。",
+        "keptMessage": "元のデータは保持されています。"
+      }
+    },
+    "help": {
+      "sectionHeader": "ヘルプ"
+    },
+    "appInfo": {
+      "sectionHeader": "アプリ情報",
+      "terms": "利用規約",
+      "privacyPolicy": "プライバシーポリシー",
+      "openSourceLicenses": "オープンソースライセンス",
+      "contact": "お問い合わせ"
+    },
+    "dev": {
+      "sectionHeader": "開発者向け",
+      "seeding": "投入中…",
+      "seedButton": "テストデータを投入する",
+      "seedDone": "テストデータを追加しました",
+      "seedFailed": "テストデータの投入に失敗しました"
+    },
+    "languageSection": {
+      "sectionHeader": "言語"
+    },
+    "speechLanguage": {
+      "rowLabel": "音声認識の言語",
+      "japanese": "日本語",
+      "english": "English",
+      "promptTitle": "音声認識の言語を選択",
+      "hint": "文字起こしに使う音声の言語です。上の「表示言語」とは連動しません。",
+      "restartConfirm": {
+        "title": "言語を変更しますか？",
+        "message": "言語を変更すると、現在の録音セッションが一瞬再起動されます。よろしいですか？",
+        "confirm": "変更する"
+      }
+    }
+  },
+  "record": {
+    "markLabel": {
+      "star": "重要",
+      "todo": "ToDo",
+      "question": "質問",
+      "photo": "撮影",
+      "memo": "メモ"
+    },
+    "error": {
+      "audioCapture": "マイクから音声を取得できませんでした",
+      "interrupted": "他の音声(通話や通知音など)により録音が中断されました",
+      "network": "ネットワークの問題で音声認識に失敗しました",
+      "notAllowed": "マイクの権限が許可されていません",
+      "serviceNotAllowed": "音声認識サービスを利用できませんでした",
+      "busy": "音声認識が混み合っています",
+      "languageNotSupported": "この言語には対応していません",
+      "speechTimeout": "音声が検出されませんでした",
+      "generic": "音声認識でエラーが発生しました",
+      "autoRestartMessage": "⚠️ {{message}}(自動的に再開します)",
+      "repeatedFailure": "⚠️ 音声認識が繰り返し失敗したため録音を中断しました。マイクの状態を確認し、もう一度「開始」を押してください"
+    },
+    "status": {
+      "restoring": "復元中",
+      "paused": "一時停止中",
+      "recording": "収録中",
+      "idle": "待機中"
+    },
+    "markSelect": {
+      "star": "★を付ける発言をタップしてください",
+      "todo": "📝を付ける発言をタップしてください",
+      "question": "❓を記録する発言をタップしてください"
+    },
+    "newArrival": "新着 {{count}}件",
+    "hint": {
+      "running": "話しかけると文字起こしが表示されます",
+      "idle": "「開始」を押すと録音が始まります"
+    },
+    "button": {
+      "resume": "再開",
+      "pause": "一時停止",
+      "start": "開始",
+      "stop": "終了"
+    },
+    "memoModal": {
+      "title": "メモ",
+      "placeholder": "メモを入力"
+    },
+    "resetConfirm": {
+      "title": "この録音をリセットしますか？",
+      "message": "ここまでの文字起こし・メモ・写真・音声がすべて削除され、元に戻せません。",
+      "confirm": "リセットする"
+    },
+    "deleteBlockConfirm": {
+      "title": "このブロックを削除しますか？",
+      "message": "元に戻せません。"
+    },
+    "menu": {
+      "editText": "テキスト編集",
+      "addMemo": "メモを追加",
+      "addPhoto": "写真を追加"
+    },
+    "log": {
+      "memo": "📝 メモ: {{text}}",
+      "cameraPermissionDenied": "[カメラ権限が拒否されました]",
+      "micPermissionDenied": "[マイク権限が拒否されました]"
+    },
+    "debug": {
+      "title": "検証用デバッグ情報",
+      "restartsAndFiles": "再起動 {{restarts}} 回 / 音声ファイル {{count}} 個",
+      "leadSeconds": "手前 {{sec}} 秒",
+      "showRawLog": "生ログを表示"
+    },
+    "section": {
+      "header": "セクション{{index}} ({{range}})"
+    },
+    "playback": {
+      "duration": "長さ: {{sec}} 秒",
+      "leadFrom": "手前 {{sec}} 秒から再生",
+      "tapToPlay": "タップでその位置から再生"
+    }
+  },
+  "notes": {
+    "mode": {
+      "list": "リスト",
+      "calendar": "カレンダー"
+    },
+    "searchPlaceholder": "ノートを検索",
+    "editButton": "編集",
+    "untitledNote": "無題のノート",
+    "untitledRecordOn": "{{date}} の記録",
+    "durationMinutes": "{{count}}分",
+    "photoCountOne": "1枚",
+    "photoCountMore": "+{{count}}枚",
+    "cardMeta": {
+      "startedAt": "{{time}} 開始"
+    },
+    "deleteConfirm": {
+      "title": "このノートを削除しますか？",
+      "message": "録音・写真・メモなど全て削除され、元に戻せません。"
+    },
+    "bulkDeleteConfirm": {
+      "title": "{{count}}件のノートを削除します。よろしいですか？"
+    },
+    "bulkDeleteButton": "選択した項目を削除({{count}}件)",
+    "menu": {
+      "open": "ノートを開く"
+    },
+    "search": {
+      "tooShort": "もう少し詳しく入力してください",
+      "noResults": "検索結果がありません"
+    },
+    "empty": {
+      "noNotes": "まだ記録がありません"
+    },
+    "calendar": {
+      "selectDate": "日付を選択してください",
+      "noNotesForDay": "この日の記録はありません"
+    },
+    "monthPicker": {
+      "title": "月を選択"
+    }
+  },
+  "noteDetail": {
+    "filter": {
+      "all": "すべて"
+    },
+    "viewMode": {
+      "timeline": "タイムライン",
+      "summary": "まとめ"
+    },
+    "summarySection": {
+      "star": "重要",
+      "question": "質問",
+      "photo": "写真",
+      "note": "メモ"
+    },
+    "photoFallbackLabel": "写真",
+    "timeRange": "{{start}} 〜 {{end}}",
+    "editedBadge": "編集済み",
+    "tapToTakePhoto": "タップして写真を撮る",
+    "tapToAddMemo": "タップしてメモを追加",
+    "split": {
+      "hint": "分割したい位置をタップしてください",
+      "confirm": "この位置で分割"
+    },
+    "todo": {
+      "markDone": "完了にする",
+      "markUndone": "未完了に戻す"
+    },
+    "answer": {
+      "add": "回答を記入",
+      "edit": "回答を編集",
+      "placeholder": "わかったこと・聞いた答えなど",
+      "caption": "任意・あとで記入してもOK"
+    },
+    "summaryNote": {
+      "add": "一言メモを書く",
+      "edit": "一言メモを編集",
+      "placeholder": "一言でまとめる(例: パスワードを使い回さない)",
+      "caption": "空にすると元の発言テキストがそのまま表示されます"
+    },
+    "group": {
+      "set": "グループを設定",
+      "labelWithValue": "グループ: {{group}}"
+    },
+    "menu": {
+      "editText": "テキスト編集",
+      "copy": "コピー",
+      "addMemo": "メモを追加",
+      "addPhoto": "写真を追加",
+      "mergePrev": "前と結合",
+      "mergeNext": "次と結合",
+      "split": "分割"
+    },
+    "audioMissing": {
+      "crash": "このノートには音声がありません(強制終了により失われました)。テキストの記録は残っています。",
+      "generic": "このノートには音声がありません。テキストの記録は残っています。"
+    },
+    "summary": {
+      "empty": "まとめられる項目がありません"
+    },
+    "itemCount": "{{count}}件",
+    "newArrival": "新着 {{count}}件",
+    "empty": {
+      "noBlocks": "まだ何も記録されていません",
+      "noVisibleBlocks": "表示できるブロックがありません"
+    },
+    "sectionLabel": "セクション{{index}}",
+    "settingsSheet": {
+      "title": "このノートの設定",
+      "sectionGroupingLabel": "セクション分けを表示する",
+      "groupingDisabledHint": "セクション分けをオフにしているため、区切りの細かさは調整できません。"
+    }
+  },
+  "summaryScreen": {
+    "tab": {
+      "all": "全て",
+      "star": "重要",
+      "todo": "Todo",
+      "question": "質問"
+    },
+    "noteSubtitle": "{{title}} ・ {{date}}",
+    "searchPlaceholder": "ToDo・質問・重要を検索",
+    "defer": {
+      "release": "保留を解除する",
+      "set": "保留にする"
+    },
+    "empty": {
+      "hint": "★・📝・❓を記録すると、ここにまとまって表示されます"
+    },
+    "section": {
+      "starPill": "★ 重要",
+      "todoPill": "✓ Todo",
+      "questionPill": "? 質問"
+    },
+    "none": "なし",
+    "todo": {
+      "noMatch": "一致するToDoはありません",
+      "noPending": "未完了のToDoはありません",
+      "hideDone": "完了済みを閉じる ▲",
+      "showDone": "完了したものも見る ▼",
+      "doneCount": "完了 {{count}}件",
+      "markPending": "未対応に戻す"
+    },
+    "question": {
+      "noMatch": "一致する質問はありません",
+      "noUnresolved": "未解決の質問はありません",
+      "hideMore": "閉じる ▲",
+      "showMore": "解決済み・保留も見る ▼",
+      "deferredCount": "保留 {{count}}件",
+      "resolvedCount": "解決済み {{count}}件"
+    },
+    "todoEdit": {
+      "title": "ToDoを編集",
+      "placeholder": "ToDoの内容"
+    },
+    "answerEdit": {
+      "title": "質問を編集",
+      "placeholder": "質問の内容",
+      "caption": "Q ・ 必須",
+      "secondaryCaption": "A ・ 任意"
+    },
+    "quickAdd": {
+      "titleTodo": "ToDoを追加",
+      "titleQuestion": "質問を追加",
+      "subtitle": "クイック追加",
+      "secondaryCaption": "A ・ 任意・あとで記入してもOK"
+    }
+  },
+  "howToUse": {
+    "diagramLabel": "図解",
+    "tabs": {
+      "record": "録音",
+      "notesList": "ノート一覧"
+    },
+    "record": {
+      "title": "録音画面の使い方",
+      "intro": "<star/>・<check/>・<question/>は画面を見ずに1タップでマークできます。\n長押しすると、直近の発言一覧から選んで付け直せます。\n<camera/>でスライド撮影、<pencil/>で短いメモも残せます。",
+      "diagramTapLabel": "1タップでマーク",
+      "diagramLongPressCaption": "長押し → 直近の発言一覧から選び直す",
+      "sections": {
+        "pauseVsEnd": {
+          "heading": "一時停止と終了の違い",
+          "bullet1": "「一時停止」はまだ記録の途中です。ノートとして保存されるのは「終了」を押した時です。",
+          "bullet2": "一時停止中は経過時間のタイマーも止まり、再開すると続きから計測されます。"
+        },
+        "multipleMarks": {
+          "heading": "マークは複数付けられる",
+          "bullet1": "重要・ToDo・質問は同じ発言に同時に付けられます。付いている発言は行の色やアイコンで区別できます。",
+          "bullet2": "長押しで開く「直近の発言から選ぶ」モードでは、画面が自動でスクロールしなくなるので、過去の発言を落ち着いて選べます。"
+        },
+        "autoScroll": {
+          "heading": "自動スクロールと新着バッジ",
+          "bullet1": "発言が増えるたびに、通常はタイムラインが自動で一番下までスクロールします。",
+          "bullet2": "長押しメニューを開いている間などは自動スクロールが止まり、画面外に新着がある時だけ「↓ 新着N件」のバッジが表示されます。"
+        },
+        "sectionGrouping": {
+          "heading": "セクション分け(段落分け)",
+          "bullet1": "発言と発言の間が一定時間空くと、自動でセクション(段落)に分かれます。オン/オフと間隔は設定画面から調整できます。",
+          "bullet2": "録音を開始した時点の設定がその録音全体で使われ、録音の途中では変更できません。"
+        },
+        "interruptedRecording": {
+          "heading": "録音が途中で終了してしまった時",
+          "bullet1": "アプリが強制終了しても、次に開いた時に「前回の録音を再開する / 内容だけ見る / 破棄する」を選べます。",
+          "bullet2": "発言・マーク・写真・音声のいずれも記録されなかった空の録音は、確認なしに自動で破棄されます。"
+        },
+        "sleepMode": {
+          "heading": "スリープモード",
+          "bullet1": "右上の月アイコンをタップすると、画面を暗くして直近の発言だけを表示する省電力モードに切り替わります。ポケットに入れたまま録音したい時などに使えます。",
+          "bullet2": "解除するには画面を長押ししてください。押している間、画面が少しずつ明るくなり、押しきると通常表示に戻ります(誤って軽く触れただけでは解除されません)。ヘッダーの月アイコンをタップした場合はすぐに解除されます。",
+          "bullet3": "一時停止・終了・重要マーク・写真の操作はスリープ中でも下部のボタンから行えます。"
+        },
+        "resetButton": {
+          "heading": "リセットボタン",
+          "bullet1": "収録中に表示される「リセット」ボタンは、保存せずにここまでの録音(文字起こし・メモ・写真・音声)をすべて破棄して待機中の状態に戻します。誤って録音を始めてしまった時などに使います。",
+          "bullet2": "確認ダイアログで「リセットする」を選ぶと元に戻せないため、内容を残したい場合は代わりに「終了」を使ってください。"
+        },
+        "audioInterference": {
+          "heading": "他アプリの音声との干渉について",
+          "bullet1": "このアプリは、録音・音声認識のために、他のアプリの音声を一時的に中断させることがあります。通常の電話は影響を受けませんが、iPadの分割画面表示や、ピクチャーインピクチャー再生など、一部の特殊な状況では、動画や音楽の再生が、断続的に中断される可能性があります。"
+        }
+      }
+    },
+    "noteDetail": {
+      "title": "ノート詳細画面の使い方",
+      "intro": "発言をタップすると、その位置から音声が再生されます。\n長押しでテキストの編集、前後の発言との結合・分割ができます。\n上部のフィルタで、<star/>や<question/>だけを絞り込んで表示できます。",
+      "diagramTapCaption": "タップ → その位置から音声を再生",
+      "diagramLongPressCaption": "長押し → 編集・前後の発言と結合/分割",
+      "diagramFilterCaption": "上部フィルタで絞り込み表示",
+      "sections": {
+        "longPressMenu": {
+          "heading": "長押しメニューは発言の種類で変わる",
+          "bullet1": "重要の発言には「一言メモ」「グループ設定」、質問の発言には「回答を記入」、ToDoの発言には「完了にする」など、種類ごとに専用の操作が追加されます。",
+          "bullet2": "テキストのコピーもここから行えます。"
+        },
+        "mergeSplit": {
+          "heading": "結合・分割",
+          "bullet1": "「前と結合」「次と結合」で隣り合う発言をひとつにまとめられます(写真の記録は結合できません)。",
+          "bullet2": "結合すると重要・ToDo・質問のマークは両方の発言から引き継がれます。",
+          "bullet3": "「分割」はタップした文字位置でテキストを前後2つに分けます(本文が2文字以上ある発言のみ)。"
+        },
+        "summaryTab": {
+          "heading": "この画面内の「まとめ」タブ",
+          "bullet1": "上部の「まとめ」タブは、まとめ画面(タブバーの方)とは別物で、このノート1件分の重要・質問・ToDo・写真・メモだけを種類ごとに表示します。"
+        },
+        "noAudioNotice": {
+          "heading": "「音声がありません」の通知",
+          "bullet1": "アプリの強制終了で音声が失われた場合か、ストレージ管理で音声だけを削除した場合に表示されます。どちらもテキストの記録自体は残っています。"
+        },
+        "export": {
+          "heading": "書き出し",
+          "bullet1": "右上の書き出しアイコンから、「要点抜粋(重要・ToDo・質問のみ)」または「全文」を選んでコピー・共有・ファイル保存ができます。",
+          "bullet2": "書き出したテキスト内の記号の意味: ★=重要な発言、❓=質問、📝=メモ、ToDoは☑️(未完了)と✅(完了)の2種類で完了状態が分かるようになっています。",
+          "bullet3": "要点抜粋では、★・❓・📝は各セクションの見出しにのみ付き(行ごとには繰り返しません)、ToDoの☑️/✅だけは完了状態が行ごとに違うため各行に表示されます。写真は絵文字ではなく「(写真)」という文字で示されます。"
+        }
+      }
+    },
+    "summary": {
+      "title": "まとめ画面の使い方",
+      "intro": "複数の研修・会議を横断して、未対応のTodo、未解決の質問、\n重要な発言をまとめて確認できます。",
+      "diagramConvergeCaption": "複数の研修・会議を横断して集約",
+      "diagramPendingTodo": "未対応Todo",
+      "diagramUnresolvedQuestion": "未解決の質問",
+      "diagramImportant": "重要な発言",
+      "sections": {
+        "hiddenByDefault": {
+          "heading": "完了・解決済みは初期状態では隠れている",
+          "bullet1": "完了済みのToDoは「完了したものも見る」を開くまで表示されません。",
+          "bullet2": "質問も未解決のみが初期表示で、「解決済み・保留も見る」で残りが表示されます。"
+        },
+        "deferQuestion": {
+          "heading": "質問は「保留」にできる",
+          "bullet1": "削除せずに一覧から目立たなくしたい場合は、「保留にする」を使います。"
+        },
+        "groupedStars": {
+          "heading": "重要はグループにまとめられる",
+          "bullet1": "同じグループ名を付けた重要は、ノートをまたいで1つのカードにまとめて表示されます。"
+        },
+        "itemToNote": {
+          "heading": "項目から元のノートへ",
+          "bullet1": "各項目をタップすると内容を編集でき、ノートアイコンをタップすると元のノートの該当箇所へジャンプします。",
+          "bullet2": "ToDo・質問タブでは、左下の+ボタンから録音を伴わずにその場で追加できます。"
+        }
+      }
+    },
+    "notesList": {
+      "title": "ノート一覧の使い方",
+      "intro": "過去の記録をリストやカレンダーで探せます。検索バーで発言内容\nからも検索できます(2文字以下では検索できません)。",
+      "diagramSearchPlaceholder": "発言内容を検索…",
+      "diagramSearchHint": "2文字以下では検索できません",
+      "sections": {
+        "bulkSelect": {
+          "heading": "複数選択して一括削除",
+          "bullet1": "リストタブでカードを長押しすると選択モードに入ります(右上の「編集」からも入れます)。",
+          "bullet2": "選択モード中だけ、各ノートの使用容量(音声+写真)が表示されます。",
+          "bullet3": "削除すると音声・写真・メモを含めて完全に削除され、元に戻せません。"
+        },
+        "calendarView": {
+          "heading": "カレンダー表示",
+          "bullet1": "日付の下の青い点は、その日に記録があることを示します。",
+          "bullet2": "月のラベルをタップすると年月をまとめて選べます(記録がある月は太字で表示)。",
+          "bullet3": "カレンダータブでは一括選択はできませんが、長押しで開く/削除は可能です。"
+        }
+      }
+    },
+    "settings": {
+      "title": "設定・バックアップ",
+      "intro": "再生の挙動や録音品質、バックアップなど、設定画面から調整できる項目と、\nその意味をまとめています。",
+      "diagramLeadTime": "再生開始位置",
+      "diagramSampleRate": "録音サンプルレート",
+      "diagramExternalMic": "外部マイク",
+      "sections": {
+        "leadTime": {
+          "heading": "再生開始位置(手前の秒数)",
+          "bullet1": "ノート詳細でタップ再生する時に、発言の頭を聞き逃さないよう少し手前から再生を始めるための秒数です。"
+        },
+        "sampleRate": {
+          "heading": "録音サンプルレート",
+          "bullet1": "標準(容量が小さい)と高音質(容量が大きい)から選べます。",
+          "bullet2": "変更が反映されるのは次回の録音からで、すでに録音済みのノートには影響しません。"
+        },
+        "bluetoothMic": {
+          "heading": "外部マイクを使う",
+          "bullet1": "Bluetoothイヤホンやピンマイクを使う時はオンにします。",
+          "bullet2": "部屋のスピーカーマイクで広く拾いたい場合はオフのままにします。"
+        },
+        "sectionGroupingSettings": {
+          "heading": "セクション分けを表示する / 新しい録音のデフォルト間隔",
+          "bullet1": "録音画面で発言の間が空いた時に自動で段落分けするかどうかと、その間隔の初期値です。",
+          "bullet2": "ここで変更しても、すでにあるノートの区切りには影響しません(次に録音を始める時から適用されます)。"
+        },
+        "storageManagement": {
+          "heading": "ストレージ管理",
+          "bullet1": "ノートごとの使用容量を確認できます。",
+          "bullet2": "「音声のみ削除」でテキストの記録を残したまま音声だけを削除できます(元に戻せません)。",
+          "bullet3": "参照されていない不要なファイルをまとめて削除するクリーンアップ機能もあります。"
+        },
+        "backupRestore": {
+          "heading": "バックアップの作成・復元",
+          "bullet1": "バックアップにはデータベース・音声・写真が含まれます(書き出し済みのレポートファイルは含まれません)。",
+          "bullet2": "復元すると、その時点のアプリ内のデータはすべて上書きされます。実行前に必ず確認が表示されます。",
+          "bullet3": "復元が完了したら、変更を反映するためにアプリを再起動してください。"
+        }
+      }
+    }
+  },
+  "recordComplete": {
+    "heading": "記録が完了しました",
+    "nameLabel": "名前(任意)",
+    "defaultTitle": "{{time}} の記録",
+    "viewNow": "今すぐ確認",
+    "later": "あとで"
+  },
+  "onboarding": {
+    "slides": {
+      "record": {
+        "title": "話した内容を、そのまま記録",
+        "description": "音声を認識してテキスト化し、ノートとして残します。"
+      },
+      "timeline": {
+        "title": "★・写真・音声が1本のタイムラインに",
+        "description": "重要な発言に★を付けたり写真を挟んだりしながら、時系列でまとめて振り返れます。"
+      },
+      "local": {
+        "title": "完全ローカルで動作、通信ゼロ",
+        "description": "録音も文字起こしもすべて端末内で完結します。データが外部に送信されることはありません。"
+      }
+    },
+    "nextButton": "次へ",
+    "consent": {
+      "heading": "利用上の注意",
+      "notice1": "録音・撮影は、必ず主催者の許可やその場のルールに従ってください。",
+      "notice2": "録音・撮影した内容の取り扱いは、利用者ご自身の責任となります。",
+      "agreeButton": "同意して始める"
+    },
+    "permission": {
+      "heading": "マイクへのアクセス",
+      "description": "音声を認識してテキスト化するために、マイクへのアクセスを許可してください。",
+      "allowButton": "マイクへのアクセスを許可する",
+      "deniedTitle": "マイクへのアクセスが許可されませんでした",
+      "deniedMessage": "後で「設定」アプリからいつでも許可できます。",
+      "continue": "続ける"
+    }
+  },
+  "storageManagement": {
+    "totalLabel": "使用容量(音声・写真の合計)",
+    "perNoteHeader": "ノートごとの容量",
+    "empty": "音声・写真のあるノートはありません",
+    "deleteAudioOnly": "音声のみ削除",
+    "noAudio": "音声なし",
+    "bulkDeleteButton": "音声データを一括削除",
+    "bulkDeleteFailed": "一括削除に失敗しました",
+    "deleteAudioConfirm": {
+      "title": "このノートの音声を削除しますか？",
+      "message": "「{{title}}」の音声ファイルを削除します。文字起こしなどのテキスト記録は残ります。この操作は元に戻せません。"
+    },
+    "bulkDeleteConfirm": {
+      "title": "音声データを一括削除しますか？",
+      "message": "全てのノートの音声ファイルを削除します。文字起こしなどのテキスト記録は残ります。この操作は元に戻せません。",
+      "confirm": "一括削除"
+    }
+  },
+  "report": {
+    "template": {
+      "summary": {
+        "label": "要点抜粋",
+        "description": "のみ(デフォルト)"
+      },
+      "full": {
+        "label": "全文",
+        "description": "文字起こし全体を含む"
+      }
+    },
+    "templateHeader": "テンプレート",
+    "previewHeader": "プレビュー",
+    "loading": "読み込み中...",
+    "preview": {
+      "collapse": "折りたたむ ▲",
+      "expand": "続きを見る(全{{count}}行) ▼"
+    },
+    "exportHeader": "書き出し方法",
+    "export": {
+      "copy": "クリップボードにコピー",
+      "share": "共有シート",
+      "saveFile": "テキストファイルとして保存"
+    },
+    "copy": {
+      "doneTitle": "コピーしました",
+      "doneMessage": "クリップボードにレポートをコピーしました。",
+      "failed": "コピーに失敗しました"
+    },
+    "saveFailed": "保存に失敗しました",
+    "pdfHeader": "写真付きPDF",
+    "pdf": {
+      "exportButton": "PDFとして書き出す",
+      "generateFailed": "PDFの生成に失敗しました",
+      "caption": "テンプレートの選択にかかわらず、要点抜粋(重要・ToDo・質問・Q&A)に写真を時系列順で加えて書き出します。"
+    },
+    "section": {
+      "stars": "重要なポイント★",
+      "todos": "今後のアクション",
+      "questions": "確認事項 ❓",
+      "memos": "メモ 📝",
+      "qa": "Q&A",
+      "transcript": "全体文字起こしログ",
+      "photos": "写真 📷"
+    },
+    "qa": {
+      "questionPrefix": "Q：",
+      "answerPrefix": "A："
+    },
+    "meta": {
+      "dateTimeLine": "日時：{{date}} {{start}}〜{{end}}"
+    },
+    "transcript": {
+      "photoLabel": "(写真)"
+    },
+    "fileNameFallback": "レポート"
+  },
+  "groupSettingForm": {
+    "newGroupPlaceholder": "新しいグループ名(例: 朝の出勤時にやること)",
+    "chooseExisting": "既存のグループから選ぶ",
+    "searchPlaceholder": "グループ名で検索",
+    "noMatch": "一致するグループがありません",
+    "itemCount": "{{count}}件"
+  },
+  "gapSlider": {
+    "sectionLabel": "区切りの細かさ: {{sec}}秒",
+    "paragraphLabel": "改行の細かさ: {{sec}}秒",
+    "fine": "細かく分ける",
+    "coarse": "まとめる"
+  }
+}

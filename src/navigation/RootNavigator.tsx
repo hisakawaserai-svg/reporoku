@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { InteractionManager } from "react-native";
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import {
   NavigationContainer,
@@ -47,6 +48,7 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function MainTabs() {
+  const { t } = useTranslation();
   return (
     <Tab.Navigator
       initialRouteName="Record"
@@ -59,7 +61,7 @@ function MainTabs() {
         name="Record"
         component={RecordScreen}
         options={{
-          title: "収録",
+          title: t("navigation.tabRecord"),
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "mic" : "mic-outline"} size={size} color={color} />
           ),
@@ -69,7 +71,7 @@ function MainTabs() {
         name="Notes"
         component={NotesScreen}
         options={{
-          title: "ノート",
+          title: t("navigation.tabNotes"),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text-outline" size={size} color={color} />
           ),
@@ -79,7 +81,7 @@ function MainTabs() {
         name="Summary"
         component={SummaryScreen}
         options={{
-          title: "まとめ",
+          title: t("navigation.tabSummary"),
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "bookmark" : "bookmark-outline"} size={size} color={color} />
           ),
@@ -89,7 +91,7 @@ function MainTabs() {
         name="Settings"
         component={SettingsScreen}
         options={{
-          title: "設定",
+          title: t("navigation.tabSettings"),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings-outline" size={size} color={color} />
           ),
@@ -100,6 +102,7 @@ function MainTabs() {
 }
 
 export default function RootNavigator() {
+  const { t } = useTranslation();
   const initialRouteName = getOnboardingCompleted() ? "MainTabs" : "Onboarding";
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   // onReadyは resetRoot 後の再遷移や開発中の Fast Refresh などで複数回呼ばれることがある。
@@ -133,12 +136,12 @@ export default function RootNavigator() {
         <Stack.Screen
           name="NoteDetail"
           component={NoteDetailScreen}
-          options={{ title: "ノート詳細" }}
+          options={{ title: t("navigation.noteDetailTitle") }}
         />
         <Stack.Screen
           name="Report"
           component={ReportScreen}
-          options={{ title: "レポート出力" }}
+          options={{ title: t("navigation.reportTitle") }}
         />
         <Stack.Screen
           name="RecordComplete"
@@ -153,12 +156,12 @@ export default function RootNavigator() {
         <Stack.Screen
           name="StorageManagement"
           component={StorageManagementScreen}
-          options={{ title: "ストレージ管理" }}
+          options={{ title: t("navigation.storageManagementTitle") }}
         />
         <Stack.Screen
           name="HowToUse"
           component={HowToUseScreen}
-          options={{ title: "使い方" }}
+          options={{ title: t("navigation.howToUseTitle") }}
         />
       </Stack.Navigator>
     </NavigationContainer>

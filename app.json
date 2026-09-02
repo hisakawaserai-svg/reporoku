@@ -48,7 +48,11 @@
       ],
       "expo-audio",
       "expo-sqlite",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-localization",
+        { "supportedLocales": { "ios": ["ja", "en"] } }
+      ]
     ]
   }
 }

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { RouteProp } from "@react-navigation/native";
 import { useRoute } from "@react-navigation/native";
+import { Trans, useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
@@ -20,15 +21,16 @@ function InlineIcon({ name, color }: { name: IconName; color: string }) {
 function RecordIntro() {
   return (
     <Text style={styles.sectionBody}>
-      <InlineIcon name="star" color={colors.star.accent} />・
-      <InlineIcon name="checkmark-circle" color={colors.todo.accent} />・
-      <InlineIcon name="help-circle" color={colors.question.accent} />
-      は画面を見ずに1タップでマークできます。{"\n"}
-      長押しすると、直近の発言一覧から選んで付け直せます。{"\n"}
-      <InlineIcon name="camera" color="#57575c" />
-      でスライド撮影、
-      <InlineIcon name="create" color="#57575c" />
-      で短いメモも残せます。
+      <Trans
+        i18nKey="howToUse.record.intro"
+        components={{
+          star: <InlineIcon name="star" color={colors.star.accent} />,
+          check: <InlineIcon name="checkmark-circle" color={colors.todo.accent} />,
+          question: <InlineIcon name="help-circle" color={colors.question.accent} />,
+          camera: <InlineIcon name="camera" color="#57575c" />,
+          pencil: <InlineIcon name="create" color="#57575c" />,
+        }}
+      />
     </Text>
   );
 }
@@ -36,43 +38,34 @@ function RecordIntro() {
 function NoteDetailIntro() {
   return (
     <Text style={styles.sectionBody}>
-      発言をタップすると、その位置から音声が再生されます。{"\n"}
-      長押しでテキストの編集、前後の発言との結合・分割ができます。{"\n"}
-      上部のフィルタで、<InlineIcon name="star" color={colors.star.accent} />や
-      <InlineIcon name="help-circle" color={colors.question.accent} />
-      だけを絞り込んで表示できます。
+      <Trans
+        i18nKey="howToUse.noteDetail.intro"
+        components={{
+          star: <InlineIcon name="star" color={colors.star.accent} />,
+          question: <InlineIcon name="help-circle" color={colors.question.accent} />,
+        }}
+      />
     </Text>
   );
 }
 
 function SummaryIntro() {
-  return (
-    <Text style={styles.sectionBody}>
-      複数の研修・会議を横断して、未対応のTodo、未解決の質問、{"\n"}
-      重要な発言をまとめて確認できます。
-    </Text>
-  );
+  const { t } = useTranslation();
+  return <Text style={styles.sectionBody}>{t("howToUse.summary.intro")}</Text>;
 }
 
 function NotesListIntro() {
-  return (
-    <Text style={styles.sectionBody}>
-      過去の記録をリストやカレンダーで探せます。検索バーで発言内容{"\n"}
-      からも検索できます(2文字以下では検索できません)。
-    </Text>
-  );
+  const { t } = useTranslation();
+  return <Text style={styles.sectionBody}>{t("howToUse.notesList.intro")}</Text>;
 }
 
 function SettingsIntro() {
-  return (
-    <Text style={styles.sectionBody}>
-      再生の挙動や録音品質、バックアップなど、設定画面から調整できる項目と、{"\n"}
-      その意味をまとめています。
-    </Text>
-  );
+  const { t } = useTranslation();
+  return <Text style={styles.sectionBody}>{t("howToUse.settings.intro")}</Text>;
 }
 
 function RecordDiagram() {
+  const { t } = useTranslation();
   const tiles: { icon: IconName; color: string; bg: string }[] = [
     { icon: "star", color: colors.star.accent, bg: colors.star.background },
     { icon: "checkmark-circle", color: colors.todo.accent, bg: colors.todo.background },
@@ -96,17 +89,18 @@ function RecordDiagram() {
       </View>
       <View style={styles.diagramTapRow}>
         <Ionicons name="arrow-up" size={14} color={colors.primary} />
-        <Text style={styles.diagramTapLabel}>1タップでマーク</Text>
+        <Text style={styles.diagramTapLabel}>{t("howToUse.record.diagramTapLabel")}</Text>
       </View>
       <View style={styles.diagramCaptionRow}>
         <Ionicons name="time-outline" size={16} color="#8e8e93" />
-        <Text style={styles.diagramCaption}>長押し → 直近の発言一覧から選び直す</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.record.diagramLongPressCaption")}</Text>
       </View>
     </View>
   );
 }
 
 function NoteDetailDiagram() {
+  const { t } = useTranslation();
   return (
     <View style={styles.diagramBox}>
       <View style={styles.diagramFakeRow}>
@@ -118,7 +112,7 @@ function NoteDetailDiagram() {
       </View>
       <View style={styles.diagramCaptionRow}>
         <Ionicons name="arrow-forward" size={14} color={colors.primary} />
-        <Text style={styles.diagramCaption}>タップ → その位置から音声を再生</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.noteDetail.diagramTapCaption")}</Text>
       </View>
 
       <View style={[styles.diagramFakeRow, { marginTop: 12 }]}>
@@ -130,7 +124,7 @@ function NoteDetailDiagram() {
       </View>
       <View style={styles.diagramCaptionRow}>
         <Ionicons name="time-outline" size={16} color="#8e8e93" />
-        <Text style={styles.diagramCaption}>長押し → 編集・前後の発言と結合/分割</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.noteDetail.diagramLongPressCaption")}</Text>
       </View>
 
       <View style={styles.diagramFilterRow}>
@@ -140,13 +134,14 @@ function NoteDetailDiagram() {
         <View style={[styles.diagramPill, { backgroundColor: colors.question.background }]}>
           <Ionicons name="help-circle" size={13} color={colors.question.accent} />
         </View>
-        <Text style={styles.diagramCaption}>上部フィルタで絞り込み表示</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.noteDetail.diagramFilterCaption")}</Text>
       </View>
     </View>
   );
 }
 
 function SummaryDiagram() {
+  const { t } = useTranslation();
   return (
     <View style={styles.diagramBox}>
       <View style={styles.diagramConvergeRow}>
@@ -156,22 +151,28 @@ function SummaryDiagram() {
       </View>
       <View style={styles.diagramCaptionRow}>
         <Ionicons name="arrow-down" size={14} color={colors.primary} />
-        <Text style={styles.diagramCaption}>複数の研修・会議を横断して集約</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.summary.diagramConvergeCaption")}</Text>
       </View>
       <View style={styles.diagramRow}>
         <View style={[styles.diagramPillWide, { backgroundColor: colors.todo.background }]}>
           <Ionicons name="checkmark-circle" size={14} color={colors.todo.accent} />
-          <Text style={[styles.diagramPillText, { color: colors.todo.accent }]}>未対応Todo</Text>
+          <Text style={[styles.diagramPillText, { color: colors.todo.accent }]}>
+            {t("howToUse.summary.diagramPendingTodo")}
+          </Text>
         </View>
         <View style={[styles.diagramPillWide, { backgroundColor: colors.question.background }]}>
           <Ionicons name="help-circle" size={14} color={colors.question.accent} />
-          <Text style={[styles.diagramPillText, { color: colors.question.accent }]}>未解決の質問</Text>
+          <Text style={[styles.diagramPillText, { color: colors.question.accent }]}>
+            {t("howToUse.summary.diagramUnresolvedQuestion")}
+          </Text>
         </View>
       </View>
       <View style={styles.diagramRow}>
         <View style={[styles.diagramPillWide, { backgroundColor: colors.star.background }]}>
           <Ionicons name="star" size={14} color={colors.star.accent} />
-          <Text style={[styles.diagramPillText, { color: colors.star.accent }]}>重要な発言</Text>
+          <Text style={[styles.diagramPillText, { color: colors.star.accent }]}>
+            {t("howToUse.summary.diagramImportant")}
+          </Text>
         </View>
       </View>
     </View>
@@ -179,36 +180,38 @@ function SummaryDiagram() {
 }
 
 function NotesListDiagram() {
+  const { t } = useTranslation();
   return (
     <View style={styles.diagramBox}>
       <View style={styles.diagramRow}>
         <View style={styles.diagramSegment}>
           <Ionicons name="list-outline" size={16} color={colors.primary} />
-          <Text style={styles.diagramSegmentText}>リスト</Text>
+          <Text style={styles.diagramSegmentText}>{t("notes.mode.list")}</Text>
         </View>
         <View style={[styles.diagramSegment, styles.diagramSegmentMuted]}>
           <Ionicons name="calendar-outline" size={16} color="#8e8e93" />
-          <Text style={[styles.diagramSegmentText, { color: "#8e8e93" }]}>カレンダー</Text>
+          <Text style={[styles.diagramSegmentText, { color: "#8e8e93" }]}>{t("notes.mode.calendar")}</Text>
         </View>
       </View>
       <View style={styles.diagramSearchRow}>
         <Ionicons name="search" size={16} color="#8e8e93" />
-        <Text style={styles.diagramSearchText}>発言内容を検索…</Text>
+        <Text style={styles.diagramSearchText}>{t("howToUse.notesList.diagramSearchPlaceholder")}</Text>
       </View>
       <View style={styles.diagramCaptionRow}>
         <Ionicons name="information-circle-outline" size={16} color="#8e8e93" />
-        <Text style={styles.diagramCaption}>2文字以下では検索できません</Text>
+        <Text style={styles.diagramCaption}>{t("howToUse.notesList.diagramSearchHint")}</Text>
       </View>
     </View>
   );
 }
 
 function SettingsDiagram() {
-  const rows: { icon: IconName; label: string }[] = [
-    { icon: "play-skip-back-outline", label: "再生開始位置" },
-    { icon: "musical-notes-outline", label: "録音サンプルレート" },
-    { icon: "bluetooth-outline", label: "外部マイク" },
-    { icon: "archive-outline", label: "バックアップ" },
+  const { t } = useTranslation();
+  const rows: { icon: IconName; labelKey: string }[] = [
+    { icon: "play-skip-back-outline", labelKey: "howToUse.settings.diagramLeadTime" },
+    { icon: "musical-notes-outline", labelKey: "howToUse.settings.diagramSampleRate" },
+    { icon: "bluetooth-outline", labelKey: "howToUse.settings.diagramExternalMic" },
+    { icon: "archive-outline", labelKey: "settings.backup.sectionHeader" },
   ];
   return (
     <View style={styles.diagramBox}>
@@ -217,7 +220,7 @@ function SettingsDiagram() {
           <View style={styles.diagramSettingsIcon}>
             <Ionicons name={r.icon} size={16} color={colors.primary} />
           </View>
-          <Text style={styles.diagramSettingsLabel}>{r.label}</Text>
+          <Text style={styles.diagramSettingsLabel}>{t(r.labelKey)}</Text>
           <Ionicons name="chevron-forward" size={14} color="#c7c7cc" />
         </View>
       ))}
@@ -226,266 +229,265 @@ function SettingsDiagram() {
 }
 
 type Subsection = {
-  heading: string;
+  headingKey: string;
   icon: IconName;
-  bullets: string[];
+  bulletKeys: string[];
 };
 
 const RECORD_SUBSECTIONS: Subsection[] = [
   {
-    heading: "一時停止と終了の違い",
+    headingKey: "howToUse.record.sections.pauseVsEnd.heading",
     icon: "pause-circle-outline",
-    bullets: [
-      "「一時停止」はまだ記録の途中です。ノートとして保存されるのは「終了」を押した時です。",
-      "一時停止中は経過時間のタイマーも止まり、再開すると続きから計測されます。",
+    bulletKeys: [
+      "howToUse.record.sections.pauseVsEnd.bullet1",
+      "howToUse.record.sections.pauseVsEnd.bullet2",
     ],
   },
   {
-    heading: "マークは複数付けられる",
+    headingKey: "howToUse.record.sections.multipleMarks.heading",
     icon: "pricetags-outline",
-    bullets: [
-      "重要・ToDo・質問は同じ発言に同時に付けられます。付いている発言は行の色やアイコンで区別できます。",
-      "長押しで開く「直近の発言から選ぶ」モードでは、画面が自動でスクロールしなくなるので、過去の発言を落ち着いて選べます。",
+    bulletKeys: [
+      "howToUse.record.sections.multipleMarks.bullet1",
+      "howToUse.record.sections.multipleMarks.bullet2",
     ],
   },
   {
-    heading: "自動スクロールと新着バッジ",
+    headingKey: "howToUse.record.sections.autoScroll.heading",
     icon: "arrow-down-circle-outline",
-    bullets: [
-      "発言が増えるたびに、通常はタイムラインが自動で一番下までスクロールします。",
-      "長押しメニューを開いている間などは自動スクロールが止まり、画面外に新着がある時だけ「↓ 新着N件」のバッジが表示されます。",
+    bulletKeys: [
+      "howToUse.record.sections.autoScroll.bullet1",
+      "howToUse.record.sections.autoScroll.bullet2",
     ],
   },
   {
-    heading: "セクション分け(段落分け)",
+    headingKey: "howToUse.record.sections.sectionGrouping.heading",
     icon: "reader-outline",
-    bullets: [
-      "発言と発言の間が一定時間空くと、自動でセクション(段落)に分かれます。オン/オフと間隔は設定画面から調整できます。",
-      "録音を開始した時点の設定がその録音全体で使われ、録音の途中では変更できません。",
+    bulletKeys: [
+      "howToUse.record.sections.sectionGrouping.bullet1",
+      "howToUse.record.sections.sectionGrouping.bullet2",
     ],
   },
   {
-    heading: "録音が途中で終了してしまった時",
+    headingKey: "howToUse.record.sections.interruptedRecording.heading",
     icon: "warning-outline",
-    bullets: [
-      "アプリが強制終了しても、次に開いた時に「前回の録音を再開する / 内容だけ見る / 破棄する」を選べます。",
-      "発言・マーク・写真・音声のいずれも記録されなかった空の録音は、確認なしに自動で破棄されます。",
+    bulletKeys: [
+      "howToUse.record.sections.interruptedRecording.bullet1",
+      "howToUse.record.sections.interruptedRecording.bullet2",
     ],
   },
   {
-    heading: "スリープモード",
+    headingKey: "howToUse.record.sections.sleepMode.heading",
     icon: "moon-outline",
-    bullets: [
-      "右上の月アイコンをタップすると、画面を暗くして直近の発言だけを表示する省電力モードに切り替わります。ポケットに入れたまま録音したい時などに使えます。",
-      "解除するには画面を長押ししてください。押している間、画面が少しずつ明るくなり、押しきると通常表示に戻ります(誤って軽く触れただけでは解除されません)。ヘッダーの月アイコンをタップした場合はすぐに解除されます。",
-      "一時停止・終了・重要マーク・写真の操作はスリープ中でも下部のボタンから行えます。",
+    bulletKeys: [
+      "howToUse.record.sections.sleepMode.bullet1",
+      "howToUse.record.sections.sleepMode.bullet2",
+      "howToUse.record.sections.sleepMode.bullet3",
     ],
   },
   {
-    heading: "リセットボタン",
+    headingKey: "howToUse.record.sections.resetButton.heading",
     icon: "refresh-outline",
-    bullets: [
-      "収録中に表示される「リセット」ボタンは、保存せずにここまでの録音(文字起こし・メモ・写真・音声)をすべて破棄して待機中の状態に戻します。誤って録音を始めてしまった時などに使います。",
-      "確認ダイアログで「リセットする」を選ぶと元に戻せないため、内容を残したい場合は代わりに「終了」を使ってください。",
+    bulletKeys: [
+      "howToUse.record.sections.resetButton.bullet1",
+      "howToUse.record.sections.resetButton.bullet2",
     ],
+  },
+  {
+    headingKey: "howToUse.record.sections.audioInterference.heading",
+    icon: "volume-mute-outline",
+    bulletKeys: ["howToUse.record.sections.audioInterference.bullet1"],
   },
 ];
 
 const NOTE_DETAIL_SUBSECTIONS: Subsection[] = [
   {
-    heading: "長押しメニューは発言の種類で変わる",
+    headingKey: "howToUse.noteDetail.sections.longPressMenu.heading",
     icon: "hand-left-outline",
-    bullets: [
-      "重要の発言には「一言メモ」「グループ設定」、質問の発言には「回答を記入」、ToDoの発言には「完了にする」など、種類ごとに専用の操作が追加されます。",
-      "テキストのコピーもここから行えます。",
+    bulletKeys: [
+      "howToUse.noteDetail.sections.longPressMenu.bullet1",
+      "howToUse.noteDetail.sections.longPressMenu.bullet2",
     ],
   },
   {
-    heading: "結合・分割",
+    headingKey: "howToUse.noteDetail.sections.mergeSplit.heading",
     icon: "git-merge-outline",
-    bullets: [
-      "「前と結合」「次と結合」で隣り合う発言をひとつにまとめられます(写真の記録は結合できません)。",
-      "結合すると重要・ToDo・質問のマークは両方の発言から引き継がれます。",
-      "「分割」はタップした文字位置でテキストを前後2つに分けます(本文が2文字以上ある発言のみ)。",
+    bulletKeys: [
+      "howToUse.noteDetail.sections.mergeSplit.bullet1",
+      "howToUse.noteDetail.sections.mergeSplit.bullet2",
+      "howToUse.noteDetail.sections.mergeSplit.bullet3",
     ],
   },
   {
-    heading: "この画面内の「まとめ」タブ",
+    headingKey: "howToUse.noteDetail.sections.summaryTab.heading",
     icon: "layers-outline",
-    bullets: [
-      "上部の「まとめ」タブは、まとめ画面(タブバーの方)とは別物で、このノート1件分の重要・質問・ToDo・写真・メモだけを種類ごとに表示します。",
-    ],
+    bulletKeys: ["howToUse.noteDetail.sections.summaryTab.bullet1"],
   },
   {
-    heading: "「音声がありません」の通知",
+    headingKey: "howToUse.noteDetail.sections.noAudioNotice.heading",
     icon: "alert-circle-outline",
-    bullets: [
-      "アプリの強制終了で音声が失われた場合か、ストレージ管理で音声だけを削除した場合に表示されます。どちらもテキストの記録自体は残っています。",
-    ],
+    bulletKeys: ["howToUse.noteDetail.sections.noAudioNotice.bullet1"],
   },
   {
-    heading: "書き出し",
+    headingKey: "howToUse.noteDetail.sections.export.heading",
     icon: "download-outline",
-    bullets: [
-      "右上の書き出しアイコンから、「要点抜粋(重要・ToDo・質問のみ)」または「全文」を選んでコピー・共有・ファイル保存ができます。",
-      "書き出したテキスト内の記号の意味: ★=重要な発言、❓=質問、📝=メモ、ToDoは☑️(未完了)と✅(完了)の2種類で完了状態が分かるようになっています。",
-      "要点抜粋では、★・❓・📝は各セクションの見出しにのみ付き(行ごとには繰り返しません)、ToDoの☑️/✅だけは完了状態が行ごとに違うため各行に表示されます。写真は絵文字ではなく「(写真)」という文字で示されます。",
+    bulletKeys: [
+      "howToUse.noteDetail.sections.export.bullet1",
+      "howToUse.noteDetail.sections.export.bullet2",
+      "howToUse.noteDetail.sections.export.bullet3",
     ],
   },
 ];
 
 const SUMMARY_SUBSECTIONS: Subsection[] = [
   {
-    heading: "完了・解決済みは初期状態では隠れている",
+    headingKey: "howToUse.summary.sections.hiddenByDefault.heading",
     icon: "eye-off-outline",
-    bullets: [
-      "完了済みのToDoは「完了したものも見る」を開くまで表示されません。",
-      "質問も未解決のみが初期表示で、「解決済み・保留も見る」で残りが表示されます。",
+    bulletKeys: [
+      "howToUse.summary.sections.hiddenByDefault.bullet1",
+      "howToUse.summary.sections.hiddenByDefault.bullet2",
     ],
   },
   {
-    heading: "質問は「保留」にできる",
+    headingKey: "howToUse.summary.sections.deferQuestion.heading",
     icon: "time-outline",
-    bullets: ["削除せずに一覧から目立たなくしたい場合は、「保留にする」を使います。"],
+    bulletKeys: ["howToUse.summary.sections.deferQuestion.bullet1"],
   },
   {
-    heading: "重要はグループにまとめられる",
+    headingKey: "howToUse.summary.sections.groupedStars.heading",
     icon: "albums-outline",
-    bullets: ["同じグループ名を付けた重要は、ノートをまたいで1つのカードにまとめて表示されます。"],
+    bulletKeys: ["howToUse.summary.sections.groupedStars.bullet1"],
   },
   {
-    heading: "項目から元のノートへ",
+    headingKey: "howToUse.summary.sections.itemToNote.heading",
     icon: "open-outline",
-    bullets: [
-      "各項目をタップすると内容を編集でき、ノートアイコンをタップすると元のノートの該当箇所へジャンプします。",
-      "ToDo・質問タブでは、左下の+ボタンから録音を伴わずにその場で追加できます。",
+    bulletKeys: [
+      "howToUse.summary.sections.itemToNote.bullet1",
+      "howToUse.summary.sections.itemToNote.bullet2",
     ],
   },
 ];
 
 const NOTES_LIST_SUBSECTIONS: Subsection[] = [
   {
-    heading: "複数選択して一括削除",
+    headingKey: "howToUse.notesList.sections.bulkSelect.heading",
     icon: "checkbox-outline",
-    bullets: [
-      "リストタブでカードを長押しすると選択モードに入ります(右上の「編集」からも入れます)。",
-      "選択モード中だけ、各ノートの使用容量(音声+写真)が表示されます。",
-      "削除すると音声・写真・メモを含めて完全に削除され、元に戻せません。",
+    bulletKeys: [
+      "howToUse.notesList.sections.bulkSelect.bullet1",
+      "howToUse.notesList.sections.bulkSelect.bullet2",
+      "howToUse.notesList.sections.bulkSelect.bullet3",
     ],
   },
   {
-    heading: "カレンダー表示",
+    headingKey: "howToUse.notesList.sections.calendarView.heading",
     icon: "calendar-outline",
-    bullets: [
-      "日付の下の青い点は、その日に記録があることを示します。",
-      "月のラベルをタップすると年月をまとめて選べます(記録がある月は太字で表示)。",
-      "カレンダータブでは一括選択はできませんが、長押しで開く/削除は可能です。",
+    bulletKeys: [
+      "howToUse.notesList.sections.calendarView.bullet1",
+      "howToUse.notesList.sections.calendarView.bullet2",
+      "howToUse.notesList.sections.calendarView.bullet3",
     ],
   },
 ];
 
 const SETTINGS_SUBSECTIONS: Subsection[] = [
   {
-    heading: "再生開始位置(手前の秒数)",
+    headingKey: "howToUse.settings.sections.leadTime.heading",
     icon: "play-skip-back-outline",
-    bullets: [
-      "ノート詳細でタップ再生する時に、発言の頭を聞き逃さないよう少し手前から再生を始めるための秒数です。",
-    ],
+    bulletKeys: ["howToUse.settings.sections.leadTime.bullet1"],
   },
   {
-    heading: "録音サンプルレート",
+    headingKey: "howToUse.settings.sections.sampleRate.heading",
     icon: "musical-notes-outline",
-    bullets: [
-      "標準(容量が小さい)と高音質(容量が大きい)から選べます。",
-      "変更が反映されるのは次回の録音からで、すでに録音済みのノートには影響しません。",
+    bulletKeys: [
+      "howToUse.settings.sections.sampleRate.bullet1",
+      "howToUse.settings.sections.sampleRate.bullet2",
     ],
   },
   {
-    heading: "外部マイクを使う",
+    headingKey: "howToUse.settings.sections.bluetoothMic.heading",
     icon: "bluetooth-outline",
-    bullets: [
-      "Bluetoothイヤホンやピンマイクを使う時はオンにします。",
-      "部屋のスピーカーマイクで広く拾いたい場合はオフのままにします。",
+    bulletKeys: [
+      "howToUse.settings.sections.bluetoothMic.bullet1",
+      "howToUse.settings.sections.bluetoothMic.bullet2",
     ],
   },
   {
-    heading: "セクション分けを表示する / 新しい録音のデフォルト間隔",
+    headingKey: "howToUse.settings.sections.sectionGroupingSettings.heading",
     icon: "timer-outline",
-    bullets: [
-      "録音画面で発言の間が空いた時に自動で段落分けするかどうかと、その間隔の初期値です。",
-      "ここで変更しても、すでにあるノートの区切りには影響しません(次に録音を始める時から適用されます)。",
+    bulletKeys: [
+      "howToUse.settings.sections.sectionGroupingSettings.bullet1",
+      "howToUse.settings.sections.sectionGroupingSettings.bullet2",
     ],
   },
   {
-    heading: "ストレージ管理",
+    headingKey: "howToUse.settings.sections.storageManagement.heading",
     icon: "folder-outline",
-    bullets: [
-      "ノートごとの使用容量を確認できます。",
-      "「音声のみ削除」でテキストの記録を残したまま音声だけを削除できます(元に戻せません)。",
-      "参照されていない不要なファイルをまとめて削除するクリーンアップ機能もあります。",
+    bulletKeys: [
+      "howToUse.settings.sections.storageManagement.bullet1",
+      "howToUse.settings.sections.storageManagement.bullet2",
+      "howToUse.settings.sections.storageManagement.bullet3",
     ],
   },
   {
-    heading: "バックアップの作成・復元",
+    headingKey: "howToUse.settings.sections.backupRestore.heading",
     icon: "archive-outline",
-    bullets: [
-      "バックアップにはデータベース・音声・写真が含まれます(書き出し済みのレポートファイルは含まれません)。",
-      "復元すると、その時点のアプリ内のデータはすべて上書きされます。実行前に必ず確認が表示されます。",
-      "復元が完了したら、変更を反映するためにアプリを再起動してください。",
+    bulletKeys: [
+      "howToUse.settings.sections.backupRestore.bullet1",
+      "howToUse.settings.sections.backupRestore.bullet2",
+      "howToUse.settings.sections.backupRestore.bullet3",
     ],
   },
 ];
 
 const TABS: {
   id: TabId;
-  label: string;
+  labelKey: string;
   screenName: string;
-  title: string;
+  titleKey: string;
   Intro: () => React.JSX.Element;
   Diagram?: () => React.JSX.Element;
   subsections: Subsection[];
 }[] = [
   {
     id: "record",
-    label: "録音",
+    labelKey: "howToUse.tabs.record",
     screenName: "RecordScreen",
-    title: "録音画面の使い方",
+    titleKey: "howToUse.record.title",
     Intro: RecordIntro,
     Diagram: RecordDiagram,
     subsections: RECORD_SUBSECTIONS,
   },
   {
     id: "noteDetail",
-    label: "ノート詳細",
+    labelKey: "navigation.noteDetailTitle",
     screenName: "NoteDetailScreen",
-    title: "ノート詳細画面の使い方",
+    titleKey: "howToUse.noteDetail.title",
     Intro: NoteDetailIntro,
     Diagram: NoteDetailDiagram,
     subsections: NOTE_DETAIL_SUBSECTIONS,
   },
   {
     id: "summary",
-    label: "まとめ",
+    labelKey: "navigation.tabSummary",
     screenName: "SummaryScreen",
-    title: "まとめ画面の使い方",
+    titleKey: "howToUse.summary.title",
     Intro: SummaryIntro,
     Diagram: SummaryDiagram,
     subsections: SUMMARY_SUBSECTIONS,
   },
   {
     id: "notesList",
-    label: "ノート一覧",
+    labelKey: "howToUse.tabs.notesList",
     screenName: "NotesScreen",
-    title: "ノート一覧の使い方",
+    titleKey: "howToUse.notesList.title",
     Intro: NotesListIntro,
     Diagram: NotesListDiagram,
     subsections: NOTES_LIST_SUBSECTIONS,
   },
   {
     id: "settings",
-    label: "設定",
+    labelKey: "navigation.tabSettings",
     screenName: "SettingsScreen",
-    title: "設定・バックアップ",
+    titleKey: "howToUse.settings.title",
     Intro: SettingsIntro,
     Diagram: SettingsDiagram,
     subsections: SETTINGS_SUBSECTIONS,
@@ -493,6 +495,7 @@ const TABS: {
 ];
 
 export default function HowToUseScreen() {
+  const { t } = useTranslation();
   const route = useRoute<RouteProp<RootStackParamList, "HowToUse">>();
   const [activeTab, setActiveTab] = useState<TabId>(route.params?.section ?? "record");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -515,24 +518,24 @@ export default function HowToUseScreen() {
         style={styles.tabBar}
         contentContainerStyle={styles.tabBarContent}
       >
-        {TABS.map((t) => (
+        {TABS.map((tabItem) => (
           <Text
-            key={t.id}
-            onPress={() => setActiveTab(t.id)}
-            style={[styles.tabChip, t.id === activeTab && styles.tabChipSelected]}
+            key={tabItem.id}
+            onPress={() => setActiveTab(tabItem.id)}
+            style={[styles.tabChip, tabItem.id === activeTab && styles.tabChipSelected]}
           >
-            {t.label}
+            {t(tabItem.labelKey)}
           </Text>
         ))}
       </ScrollView>
       <ScrollView contentContainerStyle={styles.content} key={tab.id}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{tab.title}</Text>
+          <Text style={styles.sectionTitle}>{t(tab.titleKey)}</Text>
           {tab.Diagram ? (
             <>
               <View style={styles.diagramLabelRow}>
                 <Ionicons name="images-outline" size={13} color="#8e8e93" />
-                <Text style={styles.diagramLabel}>図解</Text>
+                <Text style={styles.diagramLabel}>{t("howToUse.diagramLabel")}</Text>
               </View>
               <tab.Diagram />
             </>
@@ -540,10 +543,10 @@ export default function HowToUseScreen() {
           <tab.Intro />
         </View>
         {tab.subsections.map((sub) => {
-          const key = `${tab.id}:${sub.heading}`;
+          const key = `${tab.id}:${sub.headingKey}`;
           const isOpen = expanded.has(key);
           return (
-            <View key={sub.heading} style={styles.subsection}>
+            <View key={sub.headingKey} style={styles.subsection}>
               <Pressable
                 onPress={() => toggleSubsection(key)}
                 style={styles.subsectionHeadingRow}
@@ -552,7 +555,7 @@ export default function HowToUseScreen() {
                 <View style={styles.subsectionIconBadge}>
                   <Ionicons name={sub.icon} size={14} color={colors.primary} />
                 </View>
-                <Text style={styles.subsectionHeading}>{sub.heading}</Text>
+                <Text style={styles.subsectionHeading}>{t(sub.headingKey)}</Text>
                 <Ionicons
                   name={isOpen ? "chevron-up" : "chevron-down"}
                   size={16}
@@ -561,10 +564,10 @@ export default function HowToUseScreen() {
               </Pressable>
               {isOpen ? (
                 <View style={styles.subsectionBody}>
-                  {sub.bullets.map((bullet) => (
-                    <View key={bullet} style={styles.bulletRow}>
+                  {sub.bulletKeys.map((bulletKey) => (
+                    <View key={bulletKey} style={styles.bulletRow}>
                       <View style={styles.bulletDot} />
-                      <Text style={styles.bulletText}>{bullet}</Text>
+                      <Text style={styles.bulletText}>{t(bulletKey)}</Text>
                     </View>
                   ))}
                 </View>

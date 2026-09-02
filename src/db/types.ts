@@ -9,6 +9,8 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   sectionGapMs: number;
+  // セクション内で同じ段落として詰めるかの閾値(ms)。常にsectionGapMsより小さい値
+  paragraphGapMs: number;
   isQuick: boolean;
   isPinned: boolean;
 }

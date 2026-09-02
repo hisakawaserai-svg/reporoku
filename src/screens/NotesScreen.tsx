@@ -18,6 +18,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
@@ -33,12 +35,19 @@ import { fontSize } from "../theme/typography";
 
 type DisplayMode = "list" | "calendar";
 
-const MODES: { key: DisplayMode; label: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
-  { key: "list", label: "リスト", icon: "list-outline" },
-  { key: "calendar", label: "カレンダー", icon: "calendar-outline" },
+const MODES: { key: DisplayMode; labelKey: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
+  { key: "list", labelKey: "notes.mode.list", icon: "list-outline" },
+  { key: "calendar", labelKey: "notes.mode.calendar", icon: "calendar-outline" },
 ];
 
-const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+// 2023-01-01は日曜日。この週の7日分から、現在の言語での曜日の短縮表記(Intl)を組み立てる基準日にする
+const WEEKDAY_REFERENCE_SUNDAY = new Date(2023, 0, 1).getTime();
+
+function weekdayShortLabels(lang: string): string[] {
+  return Array.from({ length: 7 }, (_, i) =>
+    new Intl.DateTimeFormat(lang, { weekday: "short" }).format(WEEKDAY_REFERENCE_SUNDAY + i * 86400000)
+  );
+}
 
 type SessionSummary = Session & {
   starCount: number;
@@ -86,26 +95,38 @@ function groupBySession(blocks: BlockWithSession[]): SessionGroup[] {
   return groups;
 }
 
-function formatMonthKey(monthKey: string): string {
+function monthKeyToDate(monthKey: string): Date {
   const [year, month] = monthKey.split("-");
-  return `${year}年${Number(month)}月`;
+  return new Date(Number(year), Number(month) - 1, 1);
 }
 
-function formatTime(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+function formatMonthKey(monthKey: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "long" }).format(monthKeyToDate(monthKey));
 }
 
-function formatDuration(durationMs: number): string {
+function formatMonthShort(monthKey: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { month: "short" }).format(monthKeyToDate(monthKey));
+}
+
+function formatYearOnly(monthKey: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric" }).format(monthKeyToDate(monthKey));
+}
+
+function formatTime(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
+}
+
+function formatHourOnly(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { hour: "numeric" }).format(unixMs);
+}
+
+function formatDuration(durationMs: number, t: TFunction): string {
   const totalMinutes = Math.round(durationMs / 60000);
-  return `${totalMinutes}分`;
+  return t("notes.durationMinutes", { count: totalMinutes });
 }
 
-function formatDateSlash(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+function formatDateSlash(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "2-digit", day: "2-digit" }).format(unixMs);
 }
 
 function dayKeyOf(unixMs: number): string {
@@ -126,10 +147,19 @@ function shiftMonthKey(monthKey: string, delta: number): string {
   return monthKeyOf(d.getTime());
 }
 
-function formatWeekdayLabel(dateKey: string): string {
+function dateKeyToDate(dateKey: string): Date {
   const [y, m, day] = dateKey.split("-").map(Number);
-  const d = new Date(y, m - 1, day);
-  return WEEKDAYS[d.getDay()];
+  return new Date(y, m - 1, day);
+}
+
+// Intlのlong表記は言語ごとに完結した表現になる(ja: "月曜日" / en: "Monday")ため、
+// 呼び出し側で追加の接尾辞("曜日"等)を付ける必要がない
+function formatWeekdayLong(dateKey: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { weekday: "long" }).format(dateKeyToDate(dateKey));
+}
+
+function formatDayOnly(dateKey: string, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { day: "numeric" }).format(dateKeyToDate(dateKey));
 }
 
 type CalendarCell = { dateKey: string; dayNum: number; inMonth: boolean };
@@ -161,11 +191,14 @@ function buildMonthGrid(monthKey: string): CalendarCell[] {
   return cells;
 }
 
-function noteDisplayTitle(session: Session): string {
-  return session.title || `${formatDateSlash(session.startedAt)} の記録`;
+function noteDisplayTitle(session: Session, lang: string, t: TFunction): string {
+  return session.title || t("notes.untitledRecordOn", { date: formatDateSlash(session.startedAt, lang) });
 }
 
 export default function NotesScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
+  const weekdays = useMemo(() => weekdayShortLabels(lang), [lang]);
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [mode, setMode] = useState<DisplayMode>("list");
@@ -342,7 +375,7 @@ export default function NotesScreen() {
 
   const searchGroupsForMode = useMemo(() => groupBySession(searchResults), [searchResults]);
   const searchResultCountForMode = searchResults.length;
-  const searchPlaceholder = "ノートを検索";
+  const searchPlaceholder = t("notes.searchPlaceholder");
 
   const goToNote = (noteId: string) => {
     navigation.navigate("NoteDetail", { noteId });
@@ -369,10 +402,10 @@ export default function NotesScreen() {
   };
 
   const confirmDeleteSession = (session: SessionSummary) => {
-    Alert.alert("このノートを削除しますか？", "録音・写真・メモなど全て削除され、元に戻せません。", [
-      { text: "キャンセル", style: "cancel" },
+    Alert.alert(t("notes.deleteConfirm.title"), t("notes.deleteConfirm.message"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "削除",
+        text: t("common.delete"),
         style: "destructive",
         onPress: async () => {
           try {
@@ -408,10 +441,10 @@ export default function NotesScreen() {
   const confirmBulkDeleteSelected = () => {
     const count = selectedIds.size;
     if (count === 0) return;
-    Alert.alert(`${count}件のノートを削除します。よろしいですか？`, "録音・写真・メモなど全て削除され、元に戻せません。", [
-      { text: "キャンセル", style: "cancel" },
+    Alert.alert(t("notes.bulkDeleteConfirm.title", { count }), t("notes.deleteConfirm.message"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "削除",
+        text: t("common.delete"),
         style: "destructive",
         onPress: async () => {
           try {
@@ -431,19 +464,20 @@ export default function NotesScreen() {
   const renderCardContent = (session: SessionSummary) => {
     const thumbBadge =
       session.photoCount > 1
-        ? `+${session.photoCount - 1}枚`
+        ? t("notes.photoCountMore", { count: session.photoCount - 1 })
         : session.photoCount === 1
-        ? "1枚"
+        ? t("notes.photoCountOne")
         : null;
 
     return (
       <>
         <View style={styles.cardBody}>
           <Text style={styles.cardTitle} numberOfLines={1}>
-            {noteDisplayTitle(session)}
+            {noteDisplayTitle(session, lang, t)}
           </Text>
           <Text style={styles.cardMeta}>
-            {formatTime(session.startedAt)} 開始 ・ {formatDuration(session.durationMs)}
+            {t("notes.cardMeta.startedAt", { time: formatTime(session.startedAt, lang) })} ・{" "}
+            {formatDuration(session.durationMs, t)}
             {selectionMode && mode === "list"
               ? ` ・ ${formatBytes(noteSizeBytes[session.id] ?? 0)}`
               : ""}
@@ -529,14 +563,14 @@ export default function NotesScreen() {
         return [
           {
             key: "open",
-            label: "ノートを開く",
+            label: t("notes.menu.open"),
             icon: "open-outline",
             color: "#06c",
             onPress: () => rowMenu.close(() => goToNote(session.id)),
           },
           {
             key: "delete",
-            label: "削除",
+            label: t("common.delete"),
             icon: "trash-outline",
             color: colors.danger.action,
             onPress: () => rowMenu.close(() => confirmDeleteSession(session)),
@@ -546,7 +580,7 @@ export default function NotesScreen() {
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
-      {group.sessionTitle || "無題のノート"} ・ {formatDateSlash(group.sessionStartedAt)}
+      {group.sessionTitle || t("notes.untitledNote")} ・ {formatDateSlash(group.sessionStartedAt, lang)}
     </Text>
   );
 
@@ -583,7 +617,9 @@ export default function NotesScreen() {
           <TouchableOpacity
             onPress={() => (selectionMode ? exitSelectionMode() : enterSelectionMode())}
           >
-            <Text style={styles.selectionHeaderButtonText}>{selectionMode ? "完了" : "編集"}</Text>
+            <Text style={styles.selectionHeaderButtonText}>
+              {selectionMode ? t("common.done") : t("notes.editButton")}
+            </Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity
@@ -631,7 +667,7 @@ export default function NotesScreen() {
                 mode === m.key && styles.segmentTextSelected,
               ]}
             >
-              {m.label}
+              {t(m.labelKey)}
             </Text>
           </TouchableOpacity>
         ))}
@@ -643,12 +679,12 @@ export default function NotesScreen() {
             {queryTooShort ? (
               <View style={styles.placeholder}>
                 <Ionicons name="search-outline" size={32} color="#c7c7cc" />
-                <Text style={styles.placeholderText}>もう少し詳しく入力してください</Text>
+                <Text style={styles.placeholderText}>{t("notes.search.tooShort")}</Text>
               </View>
             ) : searchResultCountForMode === 0 ? (
               <View style={styles.placeholder}>
                 <Ionicons name="search-outline" size={32} color="#c7c7cc" />
-                <Text style={styles.placeholderText}>検索結果がありません</Text>
+                <Text style={styles.placeholderText}>{t("notes.search.noResults")}</Text>
               </View>
             ) : (
               searchGroupsForMode.map((group) => (
@@ -668,21 +704,18 @@ export default function NotesScreen() {
           sections={monthGroups.map((group) => ({ title: group.monthKey, data: group.items }))}
           keyExtractor={(session) => session.id}
           renderItem={({ item }) => renderCard(item)}
-          renderSectionHeader={({ section }) => {
-            const [year, month] = section.title.split("-");
-            return (
-              <View style={styles.monthHeaderRow}>
-                <View style={styles.monthHeaderPill}>
-                  <Text style={styles.monthHeaderPillText}>{Number(month)}月</Text>
-                </View>
-                <Text style={styles.monthHeaderYear}>{year}年</Text>
+          renderSectionHeader={({ section }) => (
+            <View style={styles.monthHeaderRow}>
+              <View style={styles.monthHeaderPill}>
+                <Text style={styles.monthHeaderPillText}>{formatMonthShort(section.title, lang)}</Text>
               </View>
-            );
-          }}
+              <Text style={styles.monthHeaderYear}>{formatYearOnly(section.title, lang)}</Text>
+            </View>
+          )}
           ListEmptyComponent={
             <View style={styles.placeholder}>
               <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-              <Text style={styles.placeholderText}>まだ記録がありません</Text>
+              <Text style={styles.placeholderText}>{t("notes.empty.noNotes")}</Text>
             </View>
           }
         />
@@ -703,7 +736,7 @@ export default function NotesScreen() {
                     activeOpacity={0.6}
                     onPress={() => setMonthPickerVisible(true)}
                   >
-                    <Text style={styles.calHeaderTitle}>{formatMonthKey(displayMonthKey)}</Text>
+                    <Text style={styles.calHeaderTitle}>{formatMonthKey(displayMonthKey, lang)}</Text>
                     <Ionicons name="chevron-down" size={14} color="#06c" />
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -715,8 +748,8 @@ export default function NotesScreen() {
                 </View>
 
                 <View style={styles.calWeekdayRow}>
-                  {WEEKDAYS.map((w) => (
-                    <View key={w} style={styles.calCell}>
+                  {weekdays.map((w, i) => (
+                    <View key={i} style={styles.calCell}>
                       <Text style={styles.calWeekdayText}>{w}</Text>
                     </View>
                   ))}
@@ -756,28 +789,26 @@ export default function NotesScreen() {
                   {selectedDateKey ? (
                     <View style={styles.dayHeaderRow}>
                       <View style={styles.dayHeaderPill}>
-                        <Text style={styles.dayHeaderPillText}>
-                          {Number(selectedDateKey.split("-")[2])}日
-                        </Text>
+                        <Text style={styles.dayHeaderPillText}>{formatDayOnly(selectedDateKey, lang)}</Text>
                       </View>
-                      <Text style={styles.dayHeaderWeekday}>
-                        {formatWeekdayLabel(selectedDateKey)}曜日
-                      </Text>
+                      <Text style={styles.dayHeaderWeekday}>{formatWeekdayLong(selectedDateKey, lang)}</Text>
                     </View>
                   ) : (
-                    <Text style={styles.sectionHeader}>日付を選択してください</Text>
+                    <Text style={styles.sectionHeader}>{t("notes.calendar.selectDate")}</Text>
                   )}
                   {selectedDateKey && !selectedDayGroup ? (
                     <View style={styles.placeholder}>
                       <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-                      <Text style={styles.placeholderText}>この日の記録はありません</Text>
+                      <Text style={styles.placeholderText}>{t("notes.calendar.noNotesForDay")}</Text>
                     </View>
                   ) : (
                     selectedHourGroups.map((hg, idx) => (
                       <View key={hg.hour} style={styles.timeRow}>
                         <View style={styles.timeBadgeCol}>
                           <View style={styles.timeBadge}>
-                            <Text style={styles.timeBadgeText}>{hg.hour}時</Text>
+                            <Text style={styles.timeBadgeText}>
+                              {formatHourOnly(new Date().setHours(hg.hour, 0, 0, 0), lang)}
+                            </Text>
                           </View>
                           {idx < selectedHourGroups.length - 1 ? (
                             <View style={styles.timeConnector} />
@@ -814,7 +845,7 @@ export default function NotesScreen() {
       >
         <Pressable style={styles.monthPickerOverlay} onPress={() => setMonthPickerVisible(false)}>
           <Pressable style={styles.monthPickerSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.monthPickerTitle}>月を選択</Text>
+            <Text style={styles.monthPickerTitle}>{t("notes.monthPicker.title")}</Text>
 
             <View style={styles.monthPickerYearNav}>
               <TouchableOpacity
@@ -823,7 +854,9 @@ export default function NotesScreen() {
               >
                 <Ionicons name="chevron-back" size={20} color="#3c3c43" />
               </TouchableOpacity>
-              <Text style={styles.monthPickerYearNavLabel}>{monthPickerYear}年</Text>
+              <Text style={styles.monthPickerYearNavLabel}>
+                {formatYearOnly(`${monthPickerYear}-01`, lang)}
+              </Text>
               <TouchableOpacity
                 style={styles.monthPickerYearArrow}
                 onPress={() => setMonthPickerYear((y) => y + 1)}
@@ -855,7 +888,7 @@ export default function NotesScreen() {
                         isCurrent && styles.monthPickerCellTextSelected,
                       ]}
                     >
-                      {monthNum}月
+                      {formatMonthShort(key, lang)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -866,7 +899,7 @@ export default function NotesScreen() {
               style={styles.monthPickerCloseButton}
               onPress={() => setMonthPickerVisible(false)}
             >
-              <Text style={styles.monthPickerCloseText}>閉じる</Text>
+              <Text style={styles.monthPickerCloseText}>{t("common.close")}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -879,7 +912,7 @@ export default function NotesScreen() {
             disabled={selectedIds.size === 0}
             onPress={confirmBulkDeleteSelected}
           >
-            <Text style={styles.bulkButtonText}>選択した項目を削除({selectedIds.size}件)</Text>
+            <Text style={styles.bulkButtonText}>{t("notes.bulkDeleteButton", { count: selectedIds.size })}</Text>
           </TouchableOpacity>
         </View>
       ) : null}

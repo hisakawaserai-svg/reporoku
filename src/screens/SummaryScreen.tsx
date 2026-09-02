@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
@@ -36,18 +37,15 @@ type RowMenuData =
 
 type TabKey = "all" | "star" | "todo" | "question";
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "all", label: "全て" },
-  { key: "star", label: "重要" },
-  { key: "todo", label: "Todo" },
-  { key: "question", label: "質問" },
+const TABS: { key: TabKey; labelKey: string }[] = [
+  { key: "all", labelKey: "summaryScreen.tab.all" },
+  { key: "star", labelKey: "summaryScreen.tab.star" },
+  { key: "todo", labelKey: "summaryScreen.tab.todo" },
+  { key: "question", labelKey: "summaryScreen.tab.question" },
 ];
 
-function formatDateSlash(unixMs: number): string {
-  const d = new Date(unixMs);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
+function formatDateSlash(unixMs: number, lang: string): string {
+  return new Intl.DateTimeFormat(lang, { year: "numeric", month: "2-digit", day: "2-digit" }).format(unixMs);
 }
 
 // Todo/質問/★の「追加」「編集」で共通のモーダル外枠。中身のカード(InlineEditCard)は
@@ -79,6 +77,13 @@ function EditCardModal({
 }
 
 export default function SummaryScreen() {
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
+  const noteSubtitle = (block: BlockWithSession) =>
+    t("summaryScreen.noteSubtitle", {
+      title: block.sessionTitle || t("notes.untitledNote"),
+      date: formatDateSlash(block.sessionStartedAt, lang),
+    });
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [tab, setTab] = useState<TabKey>("all");
   const [query, setQuery] = useState("");
@@ -156,9 +161,7 @@ export default function SummaryScreen() {
   const startTodoEdit = (block: BlockWithSession) => {
     setTodoEditBlockId(block.id);
     setTodoEditDraft(block.text ?? "");
-    setTodoEditSubtitle(
-      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
-    );
+    setTodoEditSubtitle(noteSubtitle(block));
     setTodoEditVisible(true);
   };
 
@@ -179,9 +182,7 @@ export default function SummaryScreen() {
     setAnswerPromptBlockId(block.id);
     setAnswerPromptQDraft(block.text ?? "");
     setAnswerPromptDraft(block.questionTerm ?? "");
-    setAnswerPromptSubtitle(
-      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
-    );
+    setAnswerPromptSubtitle(noteSubtitle(block));
     setAnswerPromptVisible(true);
   };
 
@@ -205,9 +206,7 @@ export default function SummaryScreen() {
   const startStarEdit = (block: BlockWithSession) => {
     setStarEditBlockId(block.id);
     setStarEditDraft(block.summaryNote ?? block.text ?? "");
-    setStarEditSubtitle(
-      `${block.sessionTitle || "無題のノート"} ・ ${formatDateSlash(block.sessionStartedAt)}`
-    );
+    setStarEditSubtitle(noteSubtitle(block));
     setStarEditVisible(true);
   };
 
@@ -308,7 +307,7 @@ export default function SummaryScreen() {
         <Text style={[styles.todoText, block.todoDone && styles.todoTextDone]}>
           {block.text ?? ""}
         </Text>
-        <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
+        <Text style={styles.cardSubMeta}>{block.sessionTitle || t("notes.untitledNote")}</Text>
       </View>
       <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
         <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
@@ -345,7 +344,7 @@ export default function SummaryScreen() {
           {resolved ? (
             <Text style={styles.questionAnswerPreview}>{`A: ${answer}`}</Text>
           ) : null}
-          <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
+          <Text style={styles.cardSubMeta}>{block.sessionTitle || t("notes.untitledNote")}</Text>
           {!resolved ? (
             <TouchableOpacity
               hitSlop={8}
@@ -353,7 +352,7 @@ export default function SummaryScreen() {
               onPress={() => toggleDeferred(block)}
             >
               <Text style={styles.deferButtonText}>
-                {block.isDeferred ? "保留を解除する" : "保留にする"}
+                {block.isDeferred ? t("summaryScreen.defer.release") : t("summaryScreen.defer.set")}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -378,7 +377,7 @@ export default function SummaryScreen() {
       >
         <View style={styles.rowTextCol}>
           <Text style={styles.todoText}>{summary || block.text || ""}</Text>
-          <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
+          <Text style={styles.cardSubMeta}>{block.sessionTitle || t("notes.untitledNote")}</Text>
         </View>
         <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
           <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
@@ -413,7 +412,7 @@ export default function SummaryScreen() {
               <View style={styles.rowTextCol}>
                 <Text style={styles.todoText}>{summary || block.text || ""}</Text>
                 {!sameSession ? (
-                  <Text style={styles.cardSubMeta}>{block.sessionTitle || "無題のノート"}</Text>
+                  <Text style={styles.cardSubMeta}>{block.sessionTitle || t("notes.untitledNote")}</Text>
                 ) : null}
               </View>
               <TouchableOpacity hitSlop={8} onPress={() => goToBlock(block)}>
@@ -423,7 +422,7 @@ export default function SummaryScreen() {
           );
         })}
         {sameSession ? (
-          <Text style={styles.cardSubMeta}>{items[0].sessionTitle || "無題のノート"}</Text>
+          <Text style={styles.cardSubMeta}>{items[0].sessionTitle || t("notes.untitledNote")}</Text>
         ) : null}
       </View>
     );
@@ -497,21 +496,21 @@ export default function SummaryScreen() {
         return [
           {
             key: "edit",
-            label: "編集",
+            label: t("notes.editButton"),
             icon: "create-outline",
             color: "#8e8e93",
             onPress: () => rowMenu.close(() => startTodoEdit(block)),
           },
           {
             key: "toggleDone",
-            label: block.todoDone ? "未対応に戻す" : "完了にする",
+            label: block.todoDone ? t("summaryScreen.todo.markPending") : t("noteDetail.todo.markDone"),
             icon: "checkmark-done-outline",
             color: colors.todo.accent,
             onPress: () => rowMenu.close(() => toggleTodoDone(block)),
           },
           {
             key: "open",
-            label: "ノートを開く",
+            label: t("notes.menu.open"),
             icon: "open-outline",
             color: "#06c",
             onPress: () => rowMenu.close(() => goToBlock(block)),
@@ -524,21 +523,21 @@ export default function SummaryScreen() {
         return [
           {
             key: "answer",
-            label: block.questionTerm?.trim() ? "回答を編集" : "回答を記入",
+            label: block.questionTerm?.trim() ? t("noteDetail.answer.edit") : t("noteDetail.answer.add"),
             icon: "chatbubble-ellipses-outline",
             color: "#7c4dff",
             onPress: () => rowMenu.close(() => startAnswerPrompt(block)),
           },
           {
             key: "defer",
-            label: block.isDeferred ? "保留を解除する" : "保留にする",
+            label: block.isDeferred ? t("summaryScreen.defer.release") : t("summaryScreen.defer.set"),
             icon: "time-outline",
             color: colors.star.accent,
             onPress: () => rowMenu.close(() => toggleDeferred(block)),
           },
           {
             key: "open",
-            label: "ノートを開く",
+            label: t("notes.menu.open"),
             icon: "open-outline",
             color: "#06c",
             onPress: () => rowMenu.close(() => goToBlock(block)),
@@ -550,7 +549,7 @@ export default function SummaryScreen() {
         return [
           {
             key: "edit",
-            label: "編集",
+            label: t("notes.editButton"),
             icon: "create-outline",
             color: "#8e8e93",
             onPress: () => rowMenu.close(() => startStarEdit(block)),
@@ -558,15 +557,15 @@ export default function SummaryScreen() {
           {
             key: "group",
             label: block.importantGroup?.trim()
-              ? `グループ: ${block.importantGroup}`
-              : "グループを設定",
+              ? t("noteDetail.group.labelWithValue", { group: block.importantGroup })
+              : t("noteDetail.group.set"),
             icon: "albums-outline",
             color: colors.star.accent,
             onPress: () => rowMenu.close(() => startGroupPrompt(block)),
           },
           {
             key: "open",
-            label: "ノートを開く",
+            label: t("notes.menu.open"),
             icon: "open-outline",
             color: "#06c",
             onPress: () => rowMenu.close(() => goToBlock(block)),
@@ -580,7 +579,7 @@ export default function SummaryScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>まとめ</Text>
+        <Text style={styles.headerTitle}>{t("navigation.tabSummary")}</Text>
         <TouchableOpacity
           onPress={() => navigation.navigate("HowToUse", { section: "summary" })}
           hitSlop={8}
@@ -593,7 +592,7 @@ export default function SummaryScreen() {
         <Ionicons name="search" size={18} color="#8e8e93" />
         <TextInput
           style={styles.searchInput}
-          placeholder="ToDo・質問・重要を検索"
+          placeholder={t("summaryScreen.searchPlaceholder")}
           placeholderTextColor="#8e8e93"
           value={query}
           onChangeText={setQuery}
@@ -601,14 +600,14 @@ export default function SummaryScreen() {
       </View>
 
       <View style={styles.tabRow}>
-        {TABS.map((t) => (
+        {TABS.map((tabItem) => (
           <TouchableOpacity
-            key={t.key}
-            style={[styles.tabButton, tab === t.key && styles.tabButtonSelected]}
-            onPress={() => setTab(t.key)}
+            key={tabItem.key}
+            style={[styles.tabButton, tab === tabItem.key && styles.tabButtonSelected]}
+            onPress={() => setTab(tabItem.key)}
           >
-            <Text style={[styles.tabButtonText, tab === t.key && styles.tabButtonTextSelected]}>
-              {t.label}
+            <Text style={[styles.tabButtonText, tab === tabItem.key && styles.tabButtonTextSelected]}>
+              {t(tabItem.labelKey)}
             </Text>
           </TouchableOpacity>
         ))}
@@ -619,8 +618,8 @@ export default function SummaryScreen() {
           <View style={styles.placeholder}>
             <Text style={styles.placeholderText}>
               {isSearching
-                ? "検索結果がありません"
-                : "★・📝・❓を記録すると、ここにまとまって表示されます"}
+                ? t("notes.search.noResults")
+                : t("summaryScreen.empty.hint")}
             </Text>
           </View>
         ) : (
@@ -633,10 +632,12 @@ export default function SummaryScreen() {
                   onPress={() => toggleSection("star")}
                 >
                   <View style={[styles.sectionPill, styles.sectionPillStar]}>
-                    <Text style={[styles.sectionPillText, styles.sectionPillTextStar]}>★ 重要</Text>
+                    <Text style={[styles.sectionPillText, styles.sectionPillTextStar]}>
+                      {t("summaryScreen.section.starPill")}
+                    </Text>
                   </View>
                   <Text style={styles.sectionCount}>
-                    {isSearching ? starSearchResults.length : starred.length}件
+                    {t("noteDetail.itemCount", { count: isSearching ? starSearchResults.length : starred.length })}
                   </Text>
                   <Ionicons
                     name={collapsedSections.has("star") ? "chevron-forward" : "chevron-down"}
@@ -666,10 +667,12 @@ export default function SummaryScreen() {
                 onPress={() => toggleSection("todo")}
               >
                 <View style={[styles.sectionPill, styles.sectionPillTodo]}>
-                  <Text style={[styles.sectionPillText, styles.sectionPillTextTodo]}>✓ Todo</Text>
+                  <Text style={[styles.sectionPillText, styles.sectionPillTextTodo]}>
+                    {t("summaryScreen.section.todoPill")}
+                  </Text>
                 </View>
                 <Text style={styles.sectionCount}>
-                  {isSearching ? todoSearchResults.length : todos.pending.length}件
+                  {t("noteDetail.itemCount", { count: isSearching ? todoSearchResults.length : todos.pending.length })}
                 </Text>
                 <Ionicons
                   name={collapsedSections.has("todo") ? "chevron-forward" : "chevron-down"}
@@ -681,31 +684,31 @@ export default function SummaryScreen() {
               {!collapsedSections.has("todo") ? (
               isSearching ? (
                 todoSearchResults.length === 0 ? (
-                  <Text style={styles.emptyGroupText}>一致するToDoはありません</Text>
+                  <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noMatch")}</Text>
                 ) : (
                   todoSearchResults.map(renderTodoRow)
                 )
               ) : (
                 <>
                   {todos.pending.length === 0 ? (
-                    <Text style={styles.emptyGroupText}>未完了のToDoはありません</Text>
+                    <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noPending")}</Text>
                   ) : (
                     todos.pending.map(renderTodoRow)
                   )}
                   <TouchableOpacity onPress={() => setShowDoneTodos((v) => !v)}>
                     <Text style={styles.expandToggleText}>
-                      {showDoneTodos ? "完了済みを閉じる ▲" : "完了したものも見る ▼"}
+                      {showDoneTodos ? t("summaryScreen.todo.hideDone") : t("summaryScreen.todo.showDone")}
                     </Text>
                   </TouchableOpacity>
                   {showDoneTodos ? (
                     <View style={styles.expandedGroup}>
                       <View style={[styles.statusHeaderPill, styles.statusPillDone]}>
                         <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
-                          完了 {todos.done.length}件
+                          {t("summaryScreen.todo.doneCount", { count: todos.done.length })}
                         </Text>
                       </View>
                       {todos.done.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>なし</Text>
+                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
                       ) : (
                         todos.done.map(renderTodoRow)
                       )}
@@ -725,10 +728,14 @@ export default function SummaryScreen() {
                 onPress={() => toggleSection("question")}
               >
                 <View style={[styles.sectionPill, styles.sectionPillQuestion]}>
-                  <Text style={[styles.sectionPillText, styles.sectionPillTextQuestion]}>? 質問</Text>
+                  <Text style={[styles.sectionPillText, styles.sectionPillTextQuestion]}>
+                    {t("summaryScreen.section.questionPill")}
+                  </Text>
                 </View>
                 <Text style={styles.sectionCount}>
-                  {isSearching ? questionSearchResults.length : unresolvedQuestions.length}件
+                  {t("noteDetail.itemCount", {
+                    count: isSearching ? questionSearchResults.length : unresolvedQuestions.length,
+                  })}
                 </Text>
                 <Ionicons
                   name={collapsedSections.has("question") ? "chevron-forward" : "chevron-down"}
@@ -740,31 +747,31 @@ export default function SummaryScreen() {
               {!collapsedSections.has("question") ? (
               isSearching ? (
                 questionSearchResults.length === 0 ? (
-                  <Text style={styles.emptyGroupText}>一致する質問はありません</Text>
+                  <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noMatch")}</Text>
                 ) : (
                   questionSearchResults.map(renderQuestionRow)
                 )
               ) : (
                 <>
                   {unresolvedQuestions.length === 0 ? (
-                    <Text style={styles.emptyGroupText}>未解決の質問はありません</Text>
+                    <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noUnresolved")}</Text>
                   ) : (
                     unresolvedQuestions.map(renderQuestionRow)
                   )}
                   <TouchableOpacity onPress={() => setShowMoreQuestions((v) => !v)}>
                     <Text style={styles.expandToggleText}>
-                      {showMoreQuestions ? "閉じる ▲" : "解決済み・保留も見る ▼"}
+                      {showMoreQuestions ? t("summaryScreen.question.hideMore") : t("summaryScreen.question.showMore")}
                     </Text>
                   </TouchableOpacity>
                   {showMoreQuestions ? (
                     <View style={styles.expandedGroup}>
                       <View style={[styles.statusHeaderPill, styles.statusPillDeferred]}>
                         <Text style={[styles.statusHeaderPillText, styles.statusPillTextDeferred]}>
-                          保留 {deferredQuestions.length}件
+                          {t("summaryScreen.question.deferredCount", { count: deferredQuestions.length })}
                         </Text>
                       </View>
                       {deferredQuestions.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>なし</Text>
+                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
                       ) : (
                         deferredQuestions.map(renderQuestionRow)
                       )}
@@ -772,11 +779,11 @@ export default function SummaryScreen() {
                         style={[styles.statusHeaderPill, styles.statusPillDone, styles.statusHeaderPillSpaced]}
                       >
                         <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
-                          解決済み {resolvedQuestions.length}件
+                          {t("summaryScreen.question.resolvedCount", { count: resolvedQuestions.length })}
                         </Text>
                       </View>
                       {resolvedQuestions.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>なし</Text>
+                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
                       ) : (
                         resolvedQuestions.map(renderQuestionRow)
                       )}
@@ -804,12 +811,12 @@ export default function SummaryScreen() {
       <EditCardModal visible={todoEditVisible} onCancel={cancelTodoEdit}>
         <InlineEditCard
           kind="todo"
-          title="ToDoを編集"
+          title={t("summaryScreen.todoEdit.title")}
           subtitle={todoEditSubtitle}
           value={todoEditDraft}
           onChangeText={setTodoEditDraft}
-          placeholder="ToDoの内容"
-          caption="必須"
+          placeholder={t("summaryScreen.todoEdit.placeholder")}
+          caption={t("common.required")}
           onCancel={cancelTodoEdit}
           onConfirm={confirmTodoEdit}
         />
@@ -818,17 +825,17 @@ export default function SummaryScreen() {
       <EditCardModal visible={answerPromptVisible} onCancel={cancelAnswerPrompt}>
         <InlineEditCard
           kind="question"
-          title="質問を編集"
+          title={t("summaryScreen.answerEdit.title")}
           subtitle={answerPromptSubtitle}
           value={answerPromptQDraft}
           onChangeText={setAnswerPromptQDraft}
-          placeholder="質問の内容"
-          caption="Q ・ 必須"
+          placeholder={t("summaryScreen.answerEdit.placeholder")}
+          caption={t("summaryScreen.answerEdit.caption")}
           showSecondary
           secondaryValue={answerPromptDraft}
           onSecondaryChange={setAnswerPromptDraft}
-          secondaryPlaceholder="わかったこと・聞いた答えなど"
-          secondaryCaption="A ・ 任意"
+          secondaryPlaceholder={t("noteDetail.answer.placeholder")}
+          secondaryCaption={t("summaryScreen.answerEdit.secondaryCaption")}
           onCancel={cancelAnswerPrompt}
           onConfirm={confirmAnswerPrompt}
         />
@@ -837,12 +844,12 @@ export default function SummaryScreen() {
       <EditCardModal visible={starEditVisible} onCancel={cancelStarEdit}>
         <InlineEditCard
           kind="star"
-          title="一言メモを編集"
+          title={t("noteDetail.summaryNote.edit")}
           subtitle={starEditSubtitle}
           value={starEditDraft}
           onChangeText={setStarEditDraft}
-          placeholder="一言でまとめる(例: パスワードを使い回さない)"
-          caption="空にすると元の発言テキストがそのまま表示されます"
+          placeholder={t("noteDetail.summaryNote.placeholder")}
+          caption={t("noteDetail.summaryNote.caption")}
           onCancel={cancelStarEdit}
           onConfirm={confirmStarEdit}
         />
@@ -851,17 +858,17 @@ export default function SummaryScreen() {
       <EditCardModal visible={quickAddVisible} onCancel={cancelQuickAdd}>
         <InlineEditCard
           kind={quickAddKind}
-          title={quickAddKind === "todo" ? "ToDoを追加" : "質問を追加"}
-          subtitle="クイック追加"
+          title={quickAddKind === "todo" ? t("summaryScreen.quickAdd.titleTodo") : t("summaryScreen.quickAdd.titleQuestion")}
+          subtitle={t("summaryScreen.quickAdd.subtitle")}
           value={quickAddDraft}
           onChangeText={setQuickAddDraft}
-          placeholder={quickAddKind === "todo" ? "ToDoの内容" : "質問の内容"}
-          caption={quickAddKind === "todo" ? "必須" : "Q ・ 必須"}
+          placeholder={quickAddKind === "todo" ? t("summaryScreen.todoEdit.placeholder") : t("summaryScreen.answerEdit.placeholder")}
+          caption={quickAddKind === "todo" ? t("common.required") : t("summaryScreen.answerEdit.caption")}
           showSecondary={quickAddKind === "question"}
           secondaryValue={quickAddAnswerDraft}
           onSecondaryChange={setQuickAddAnswerDraft}
-          secondaryPlaceholder="わかったこと・聞いた答えなど"
-          secondaryCaption="A ・ 任意・あとで記入してもOK"
+          secondaryPlaceholder={t("noteDetail.answer.placeholder")}
+          secondaryCaption={t("summaryScreen.quickAdd.secondaryCaption")}
           onCancel={cancelQuickAdd}
           onConfirm={confirmQuickAdd}
         />
@@ -901,7 +908,7 @@ export default function SummaryScreen() {
                   {`A: ${data.block.questionTerm}`}
                 </Text>
               ) : null}
-              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || "無題のノート"}</Text>
+              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || t("notes.untitledNote")}</Text>
             </View>
           ) : data.kind === "star" && data.group ? (
             (() => {
@@ -916,12 +923,12 @@ export default function SummaryScreen() {
                     <View key={b.id}>
                       <Text style={styles.rowMenuPreviewText}>{b.summaryNote?.trim() || b.text || ""}</Text>
                       {!sameSession ? (
-                        <Text style={styles.cardSubMeta}>{b.sessionTitle || "無題のノート"}</Text>
+                        <Text style={styles.cardSubMeta}>{b.sessionTitle || t("notes.untitledNote")}</Text>
                       ) : null}
                     </View>
                   ))}
                   {sameSession ? (
-                    <Text style={styles.cardSubMeta}>{items[0].sessionTitle || "無題のノート"}</Text>
+                    <Text style={styles.cardSubMeta}>{items[0].sessionTitle || t("notes.untitledNote")}</Text>
                   ) : null}
                 </View>
               );
@@ -931,14 +938,14 @@ export default function SummaryScreen() {
               <Text style={styles.rowMenuPreviewText} numberOfLines={4}>
                 {data.block.summaryNote?.trim() || data.block.text || ""}
               </Text>
-              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || "無題のノート"}</Text>
+              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || t("notes.untitledNote")}</Text>
             </View>
           ) : (
             <View>
               <Text style={styles.rowMenuPreviewText} numberOfLines={4}>
                 {data.block.text ?? ""}
               </Text>
-              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || "無題のノート"}</Text>
+              <Text style={styles.cardSubMeta}>{data.block.sessionTitle || t("notes.untitledNote")}</Text>
             </View>
           )
         }

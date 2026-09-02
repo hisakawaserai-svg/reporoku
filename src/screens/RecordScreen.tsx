@@ -19,6 +19,8 @@ import {
   AppStateStatus,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
@@ -41,11 +43,15 @@ import { adoptOrphanAudioFiles, deleteOrphanAudioFiles, hasRecoverableAudio } fr
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import {
   getAllowBluetoothMic,
+  getDefaultParagraphGapMs,
   getDefaultSectionGapMs,
   getPlaybackLeadSec,
   getRecordingSampleRate,
   getSectionGroupingEnabled,
+  getSpeechRecognitionLanguage,
+  onSpeechRecognitionLanguageChange,
 } from "../utils/settings";
+import { setIsRecordingActive } from "../utils/recordingStatus";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import * as colors from "../theme/colors";
@@ -85,49 +91,60 @@ type MarkKey = "star" | "todo" | "question" | "photo" | "memo";
 const MARK_TILES: {
   key: MarkKey;
   icon: keyof typeof Ionicons.glyphMap;
-  label: string;
+  labelKey: string;
   border: string;
   bg: string;
   tint: string;
 }[] = [
-  { key: "star", icon: "star", label: "重要", border: "#f3cf7c", bg: "#fff8e8", tint: colors.star.accent },
-  { key: "todo", icon: "checkmark-circle", label: "ToDo", border: "#9adcab", bg: "#eefbf1", tint: colors.todo.accent },
-  { key: "question", icon: "help-circle", label: "質問", border: "#c9b3f5", bg: "#f5f0ff", tint: "#7c4dff" },
-  { key: "photo", icon: "camera", label: "撮影", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
-  { key: "memo", icon: "create", label: "メモ", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
+  { key: "star", icon: "star", labelKey: "record.markLabel.star", border: "#f3cf7c", bg: "#fff8e8", tint: colors.star.accent },
+  { key: "todo", icon: "checkmark-circle", labelKey: "record.markLabel.todo", border: "#9adcab", bg: "#eefbf1", tint: colors.todo.accent },
+  { key: "question", icon: "help-circle", labelKey: "record.markLabel.question", border: "#c9b3f5", bg: "#f5f0ff", tint: "#7c4dff" },
+  { key: "photo", icon: "camera", labelKey: "record.markLabel.photo", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
+  { key: "memo", icon: "create", labelKey: "record.markLabel.memo", border: "#d3d3d9", bg: "#f7f7f9", tint: "#57575c" },
 ];
 
-// タイムラインのセクション分けの閾値(ms)。ノート詳細画面と同じ考え方
-// (前のブロックの推定終了時刻から次のブロックのstart(ms)までの「間」で判定する)。
-// セクションの閾値自体はセッション(録音)ごとにsessions.section_gap_msとして持つため、
-// ここには「同じ段落とみなすか」の閾値だけを残す。録音画面自体にスライダーは置かず、
-// 調整はノート詳細画面に一本化しているため、この画面では開始時に読み込んだ値を録音中ずっと使う
-const PARAGRAPH_GAP_MS = 1500; // これ未満: 同じ段落として行間を詰める
 const MS_PER_CHAR = 150; // 1文字あたりの推定発話時間(ms)。ノート詳細画面と同じ概算値
+
+// begin()を呼んでからaudiostartが発火するまでこの時間待っても来なければ、
+// ネイティブ側の起動が失敗したとみなす(他アプリがまだ音声セッションを離していない場合など)
+const BEGIN_WATCHDOG_TIMEOUT_MS = 3000;
+// 想定内の中断(no-speech・interrupted)からの自動リトライまでの待機時間。
+// interruptedは他アプリが音声セッションを解放するまで少し時間がかかることがあるため、
+// no-speechより長めに待ってからリトライする
+const NO_SPEECH_RETRY_DELAY_MS = 150;
+const INTERRUPTED_RETRY_DELAY_MS = 600;
+// Duolingoのように、断続的に長く音声セッションを奪い続けるアプリが相手だと、
+// interruptedのリトライを繰り返しても一向に成功しないことがある。この回数を超えたら
+// ローカルでの積極的なリトライは諦め、大人しく待つモードに切り替える(強制終了はしない)
+const INTERRUPTED_STREAK_LIMIT = 4;
+// 大人しく待つモード中、フォアグラウンド復帰イベントが来なくても(例: 他アプリの音声が
+// 通知経由などでアプリを切り替えずに割り込むケース)いずれ回復できるよう、この間隔で
+// ゆるく再試行し続ける
+const PASSIVE_RETRY_INTERVAL_MS = 5000;
 
 // expo-speech-recognitionのエラーコードは開発者向けの英語表記(例: "audio-capture")のため、
 // ユーザーが読んでも状況が分かるよう日本語の説明文に置き換える(native側のe.messageは
 // プラットフォームごとの生の文言でユーザー向けではないため使わない)
-function describeSpeechRecognitionError(code: string): string {
+function describeSpeechRecognitionError(code: string, t: TFunction): string {
   switch (code) {
     case "audio-capture":
-      return "マイクから音声を取得できませんでした";
+      return t("record.error.audioCapture");
     case "interrupted":
-      return "他の音声(通話や通知音など)により録音が中断されました";
+      return t("record.error.interrupted");
     case "network":
-      return "ネットワークの問題で音声認識に失敗しました";
+      return t("record.error.network");
     case "not-allowed":
-      return "マイクの権限が許可されていません";
+      return t("record.error.notAllowed");
     case "service-not-allowed":
-      return "音声認識サービスを利用できませんでした";
+      return t("record.error.serviceNotAllowed");
     case "busy":
-      return "音声認識が混み合っています";
+      return t("record.error.busy");
     case "language-not-supported":
-      return "この言語には対応していません";
+      return t("record.error.languageNotSupported");
     case "speech-timeout":
-      return "音声が検出されませんでした";
+      return t("record.error.speechTimeout");
     default:
-      return "音声認識でエラーが発生しました";
+      return t("record.error.generic");
   }
 }
 
@@ -147,9 +164,9 @@ function gapMsBetween(prev: Block, next: Block): number {
 }
 
 type RecordRowSpacing = "paragraph" | "line";
-function recordRowSpacingFor(prev: Block | undefined, block: Block): RecordRowSpacing {
+function recordRowSpacingFor(prev: Block | undefined, block: Block, paragraphGapMs: number): RecordRowSpacing {
   if (!prev) return "line";
-  return gapMsBetween(prev, block) < PARAGRAPH_GAP_MS ? "paragraph" : "line";
+  return gapMsBetween(prev, block) < paragraphGapMs ? "paragraph" : "line";
 }
 
 type RecordSection = { key: string; blocks: Block[] };
@@ -184,6 +201,7 @@ function recordBlockBadges(b: Block): RecordIconBadge[] {
 // App.tsx にあった録音・文字起こしの検証コードをそのまま移植したもの。
 // ロジックは変更していない。見た目(スタイル)のみ Claude Design 案(3a)に合わせて調整。
 export default function RecordScreen() {
+  const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<MainTabParamList, "Record">>();
   // クラッシュ復旧からの再開処理を、同じセッションに対して二重実行しないためのガード。
@@ -202,6 +220,25 @@ export default function RecordScreen() {
   useEffect(() => {
     if (!running) setBandExpanded(false);
   }, [running]);
+
+  // 設定画面が「録音中に言語を変えてよいか」を判断できるよう、収録中(一時停止していない)
+  // かどうかを共有stateに反映する。画面を離れても値が古いまま残らないよう、
+  // アンマウント時には必ずfalseに戻す
+  useEffect(() => {
+    setIsRecordingActive(running && !paused);
+    return () => setIsRecordingActive(false);
+  }, [running, paused]);
+
+  // 設定画面で音声認識の言語が変更された時、収録中であればその場でセッションを
+  // 再起動して新しい言語をすぐに反映する。待機中・一時停止中は何もしない
+  // (次に録音を始めた時にgetSpeechRecognitionLanguage()経由で自然に新しい値が使われる)
+  useEffect(() => {
+    return onSpeechRecognitionLanguageChange(() => {
+      if (!running || paused) return;
+      isChangingLanguageRef.current = true;
+      ExpoSpeechRecognitionModule.stop();
+    });
+  }, [running, paused]);
 
   // スリープモード(Claude Design案 1c): 画面を暗くして直近数行だけを薄く表示する省電力・
   // 非集中表示モード。DB結線・音声認識ロジックには関与しない、見た目専用の状態
@@ -281,7 +318,7 @@ export default function RecordScreen() {
     const id = setInterval(() => setRestoringDots((n) => (n % 3) + 1), 450);
     return () => clearInterval(id);
   }, [restoring]);
-  const restoringLabel = `復元中${".".repeat(restoringDots)}`;
+  const restoringLabel = `${t("record.status.restoring")}${".".repeat(restoringDots)}`;
   // 復元は完了しているが、まだユーザーが「開始」を押していない(=マイクはまだ起動していない)
   // セッションID。「録音を再開する」を選んだだけで勝手に録音を始めないよう、実際に
   // 録音を始めるのはユーザーが明示的に「開始」を押した時点にする
@@ -290,6 +327,9 @@ export default function RecordScreen() {
   // 「リセット」による破棄目的のstopか。trueの場合、endイベント側では保存(finalize)せず
   // セッションを丸ごと削除する
   const isDiscardingRef = useRef(false);
+  // 設定画面で音声認識の言語が変更されたことによる、意図的な再起動目的のstopか。
+  // 失敗として扱わず、新しい言語ですぐにbegin()し直す
+  const isChangingLanguageRef = useRef(false);
   // 「end」イベントが何らかの理由で二重に発火した場合、finalize/clearScreenStateを
   // 2回走らせない(=既に確定済みのタイムラインを巻き戻さない)ためのガード
   const finalizedRef = useRef(false);
@@ -313,21 +353,39 @@ export default function RecordScreen() {
 
   const startedAt = useRef(0);
   const shouldRun = useRef(false);      // ユーザーが「止めたい」のか判別
-  const failStreak = useRef(0);         // 無限リトライ防止
+  const failStreak = useRef(0);         // 無限リトライ防止(原因不明の単発的な起動失敗用)
+  // interruptedによる再起動が、audiostartに到達しないまま何回連続で失敗しているか。
+  // failStreakとは別に数える。Duolingoのように断続的に長くセッションを奪い続ける相手だと、
+  // 通常のfailStreakと同じ扱いにしてしまうと強制終了に至ってしまうため分離している
+  const interruptedStreak = useRef(0);
   const lastErrorWasNoSpeechRef = useRef(false); // 直前の再起動がno-speech(無音)由来か。failStreakの誤カウント防止用
+  // 直前の再起動がinterrupted(他アプリに音声セッションを奪われた)由来か。no-speechと同様、
+  // 想定内の中断として扱い、failStreakにはカウントしない(ただし少し長めに待ってからリトライする)
+  const lastErrorWasInterruptedRef = useRef(false);
+  // 直近のbegin()呼び出しが、どの理由によるリトライだったか。ウォッチドッグが発火した際、
+  // interrupted由来の連続失敗として数えるか、原因不明の失敗(failStreak)として数えるかの判定に使う
+  const lastBeginReasonRef = useRef<"interrupted" | "generic">("generic");
   const lastResultAt = useRef(0);
   const segStart = useRef<number | null>(null);
   const [leadSec, setLeadSec] = useState(getPlaybackLeadSec);
 
   const isRecognizingRef = useRef(false);            // 現在ネイティブ側の音声認識セッションが動いているか(audiostart〜end間)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  // begin()を呼んだのにaudiostartが一定時間発火しない(=ネイティブ側の起動が実質的に
+  // 失敗した)場合の見張りタイマー。他アプリがまだ音声セッションを離していない場合などに、
+  // "end"イベント自体が二度と来ず、isRecognizingRefがtrueのまま固まってしまうのを防ぐ
+  const beginWatchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // interruptedStreakが上限を超え、積極的なリトライを諦めて「大人しく待つ」モードに
+  // 入っている間、ゆるい間隔でbegin()を試み続けるためのタイマー
+  const passiveRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // DB連携用の状態
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartedAtRef = useRef(0);   // セッション全体の開始時刻(音声認識の再起動では変わらない)
-  // このセッションのセクション区切り閾値(ms)。開始時に設定画面のデフォルト値を読み込んで固定する。
+  // このセッションのセクション区切り・段落の閾値(ms)。開始時に設定画面のデフォルト値を読み込んで固定する。
   // 録音画面自体には調整UIを置かない(微調整はノート詳細画面のスライダーに一本化)ため、録音中は変わらない
   const sectionGapMsRef = useRef(5000);
+  const paragraphGapMsRef = useRef(1500);
   const lastBlockIdRef = useRef<string | null>(null); // 直近確定した文字起こしブロックのID
   const audioSeqRef = useRef(0);           // 音声ファイルの連番(再起動のたびにインクリメント)
 
@@ -468,12 +526,12 @@ export default function RecordScreen() {
   // 「待機中」の状態に戻す(終了ボタンと違い、録音完了画面には遷移しない)
   const handleReset = () => {
     Alert.alert(
-      "この録音をリセットしますか？",
-      "ここまでの文字起こし・メモ・写真・音声がすべて削除され、元に戻せません。",
+      t("record.resetConfirm.title"),
+      t("record.resetConfirm.message"),
       [
-        { text: "キャンセル", style: "cancel" },
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "リセットする",
+          text: t("record.resetConfirm.confirm"),
           style: "destructive",
           onPress: () => {
             if (running && !paused) {
@@ -526,7 +584,7 @@ export default function RecordScreen() {
     const id = genId();
     // DBには文字起こしと区別できる"note"種別で保存するが、収録画面のログはtext/sysしか
     // 描画しないため、その場でログにも出るようsysブロックとして画面にも積む
-    push(`📝 メモ: ${text}`, "sys", startMs, id);
+    push(t("record.log.memo", { text }), "sys", startMs, id);
     blocksRepo
       .create({ id, sessionId, kind: "note", startMs, text })
       .catch((e) => console.warn("[DB] メモの保存に失敗しました", e));
@@ -538,7 +596,7 @@ export default function RecordScreen() {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        push("[カメラ権限が拒否されました]", "sys");
+        push(t("record.log.cameraPermissionDenied"), "sys");
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
@@ -632,10 +690,10 @@ export default function RecordScreen() {
     rowMenu.close();
     const id = block.id;
     if (!id) return;
-    Alert.alert("このブロックを削除しますか？", "元に戻せません。", [
-      { text: "キャンセル", style: "cancel" },
+    Alert.alert(t("record.deleteBlockConfirm.title"), t("record.deleteBlockConfirm.message"), [
+      { text: t("common.cancel"), style: "cancel" },
       {
-        text: "削除",
+        text: t("common.delete"),
         style: "destructive",
         onPress: () => {
           setBlocks((p) => p.filter((b) => b.id !== id));
@@ -704,7 +762,11 @@ export default function RecordScreen() {
     startedAt.current = Date.now(); // このセグメント(音声ファイル)の0秒を表す実時刻
     segStart.current = null; // 新しい認識セッションでは未確定の発話区間をリセットする(prevEndはセッション全体の時系列を保つため、ここではリセットしない)
     isRecognizingRef.current = true;
-    lastErrorWasNoSpeechRef.current = false; // 新しいセグメントが実際に始まったので、直前のno-speechフラグは持ち越さない
+    lastErrorWasNoSpeechRef.current = false; // 新しいセグメントが実際に始まったので、直前のno-speech/interruptedフラグは持ち越さない
+    lastErrorWasInterruptedRef.current = false;
+    interruptedStreak.current = 0; // 実際に起動できたので、割り込み連続失敗のカウントもリセットする
+    clearBeginWatchdog(); // 実際にネイティブ側の起動が確認できたので、見張りタイマーは不要
+    clearPassiveRetryTimer(); // 大人しく待つモード中だった場合、成功したのでもう不要
   });
 
   useSpeechRecognitionEvent("audioend", (e) => {
@@ -733,13 +795,93 @@ export default function RecordScreen() {
       return;
     }
     lastErrorWasNoSpeechRef.current = false;
+    // interrupted(他アプリに音声セッションを奪われた)も、no-speechと同じく想定内の中断として扱う。
+    // ただし他アプリがセッションを解放するまで少し時間がかかることがあるため、endイベント側で
+    // 通常より長めに待ってからリトライする(このフラグで区別する)
+    lastErrorWasInterruptedRef.current = e.error === "interrupted";
     // continuousモードでは直後に自動再開されるため、その旨も併記して不安にさせないようにする
-    push(`⚠️ ${describeSpeechRecognitionError(e.error)}(自動的に再開します)`, "sys");
+    push(t("record.error.autoRestartMessage", { message: describeSpeechRecognitionError(e.error, t) }), "sys");
   });
+
+  // アプリがバックグラウンド寄りの状態かどうかを、AppStateの変化イベント経由で更新される
+  // appStateRef(反映が一瞬遅れることがある)と、その時点の生の値であるAppState.currentStateの
+  // 両方で確認する。通話中などでイベントの反映が遅れていても、どちらかがバックグラウンドを
+  // 示していれば、ローカルでの執拗なリトライは行わずフォアグラウンド復帰の仕組みに委ねる
+  const isAppBackgrounded = () =>
+    appStateRef.current !== "active" || AppState.currentState !== "active";
+
+  const clearBeginWatchdog = () => {
+    if (beginWatchdogTimerRef.current) {
+      clearTimeout(beginWatchdogTimerRef.current);
+      beginWatchdogTimerRef.current = null;
+    }
+  };
+
+  const clearPassiveRetryTimer = () => {
+    if (passiveRetryTimerRef.current) {
+      clearInterval(passiveRetryTimerRef.current);
+      passiveRetryTimerRef.current = null;
+    }
+  };
+
+  // interruptedStreakが上限を超えた時に入るモード。強制終了はせず、shouldRun.currentもtrueの
+  // ままにして、フォアグラウンド復帰イベント(AppState)に加えて、念のためゆるい間隔での
+  // ポーリングでも回復のチャンスを作る(通知経由の音声などでAppStateが一切変化しないケースの保険)
+  const enterPassiveWaitMode = () => {
+    clearPassiveRetryTimer();
+    passiveRetryTimerRef.current = setInterval(() => {
+      if (!shouldRun.current) {
+        clearPassiveRetryTimer();
+        return;
+      }
+      if (isRecognizingRef.current) return; // 既に別経路で再開できていれば何もしない
+      if (isAppBackgrounded()) return; // バックグラウンドならフォアグラウンド復帰の仕組みに任せる
+      lastBeginReasonRef.current = "interrupted";
+      begin();
+    }, PASSIVE_RETRY_INTERVAL_MS);
+  };
+
+  // 一定時間待ってからbegin()を再試行する。
+  // - reason="generic": 原因不明の単発的な失敗。failStreakに加算し、閾値を超えたら従来通り強制終了する
+  // - reason="interrupted": 他アプリによる割り込みからの復帰。failStreakには加算しないが、
+  //   interruptedStreakとして別に数え、上限を超えたら積極的なリトライを諦めて大人しく待つモードに入る
+  //   (強制終了はしない)
+  // - reason="no-speech": 無音による正常な再起動。どちらのカウンタにも加算しない
+  const scheduleRestart = (delayMs: number, reason: "no-speech" | "interrupted" | "generic") => {
+    if (reason === "generic") {
+      failStreak.current += 1;
+      if (failStreak.current > 8) {
+        if (finalizedRef.current) return;
+        finalizedRef.current = true;
+        setAudioModeAsync({ allowsRecording: false }).catch(() => {});
+        push(t("record.error.repeatedFailure"), "sys");
+        shouldRun.current = false;
+        setRunning(false);
+        finalizeOrDiscardEmptySession({ showComplete: false, clearAfter: false });
+        return;
+      }
+    } else if (reason === "interrupted") {
+      interruptedStreak.current += 1;
+      if (interruptedStreak.current > INTERRUPTED_STREAK_LIMIT) {
+        enterPassiveWaitMode();
+        return;
+      }
+    }
+    setRestarts((n) => n + 1);
+    setTimeout(() => {
+      if (!shouldRun.current) return;
+      // 待機中にバックグラウンドへ回っていた場合は、ここでのリトライはせず
+      // フォアグラウンド復帰時の仕組みに委ねる(通話中などにセッションを奪い返そうとしない)
+      if (isAppBackgrounded()) return;
+      lastBeginReasonRef.current = reason === "interrupted" ? "interrupted" : "generic";
+      begin();
+    }, delayMs);
+  };
 
   // ここが肝:終了したら、止めたいわけでなければ即座に再開
   useSpeechRecognitionEvent("end", () => {
     isRecognizingRef.current = false;
+    clearBeginWatchdog();
 
     if (isDiscardingRef.current) {
       // リセットによるstop。保存せず、セッションを丸ごと破棄する
@@ -755,6 +897,14 @@ export default function RecordScreen() {
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       return;
     }
+    if (isChangingLanguageRef.current) {
+      // 言語切り替えによる意図的な再起動。失敗としてカウントせず、
+      // 新しい言語(getSpeechRecognitionLanguage()経由でbegin()が読み直す)ですぐに再開する
+      isChangingLanguageRef.current = false;
+      lastBeginReasonRef.current = "generic"; // 割り込みとは無関係の、意図的な再起動のため
+      begin();
+      return;
+    }
     if (!shouldRun.current) {
       // endイベントが何らかの理由で二重に発火しても、確定済みのタイムラインを
       // 2回clearScreenStateで巻き戻したり、finalizeSessionDurationを2回走らせたりしない
@@ -766,7 +916,7 @@ export default function RecordScreen() {
       finalizeOrDiscardEmptySession({ showComplete: true, clearAfter: true });
       return;
     }
-    if (appStateRef.current !== "active") {
+    if (isAppBackgrounded()) {
       // バックグラウンド中(他アプリへの切替による音声セッション割り込みなど)のendは、
       // すぐに再起動しても失敗するだけなので、ここではリトライせず
       // フォアグラウンド復帰時にまとめて再開する(AppStateの変化を監視するuseEffect側で処理)
@@ -777,27 +927,15 @@ export default function RecordScreen() {
     // 閾値を超えて録音が強制終了してしまっていたため、ここで区別する
     if (lastErrorWasNoSpeechRef.current) {
       lastErrorWasNoSpeechRef.current = false;
-      setRestarts((n) => n + 1);
-      setTimeout(() => {
-        if (shouldRun.current) begin();
-      }, 150);
+      scheduleRestart(NO_SPEECH_RETRY_DELAY_MS, "no-speech");
       return;
     }
-    failStreak.current += 1;
-    if (failStreak.current > 8) {
-      if (finalizedRef.current) return;
-      finalizedRef.current = true;
-      setAudioModeAsync({ allowsRecording: false }).catch(() => {});
-      push("⚠️ 音声認識が繰り返し失敗したため録音を中断しました。マイクの状態を確認し、もう一度「開始」を押してください", "sys");
-      shouldRun.current = false;
-      setRunning(false);
-      finalizeOrDiscardEmptySession({ showComplete: false, clearAfter: false });
+    if (lastErrorWasInterruptedRef.current) {
+      lastErrorWasInterruptedRef.current = false;
+      scheduleRestart(INTERRUPTED_RETRY_DELAY_MS, "interrupted");
       return;
     }
-    setRestarts((n) => n + 1);
-    setTimeout(() => {
-      if (shouldRun.current) begin();
-    }, 150);
+    scheduleRestart(NO_SPEECH_RETRY_DELAY_MS, "generic");
   });
 
   const begin = () => {
@@ -821,7 +959,7 @@ export default function RecordScreen() {
     const useExternalicMic = getAllowBluetoothMic();
 
     ExpoSpeechRecognitionModule.start({
-      lang: "ja-JP",
+      lang: getSpeechRecognitionLanguage(),
       interimResults: true,
       continuous: true,
       requiresOnDeviceRecognition: true,
@@ -842,18 +980,40 @@ export default function RecordScreen() {
         intervalMillis: 100,
       },
     });
+
+    // start()は戻り値のない投げっぱなしの呼び出しで、ネイティブ側の起動が実際に成功したかを
+    // 直接は確認できない。他アプリがまだ音声セッションを離していない場合など、audiostartが
+    // 一切発火しないまま(=対応する"end"も来ないまま)isRecognizingRefがtrueに固まってしまう
+    // ケースがあるため、一定時間で見切りをつけて再試行する
+    clearBeginWatchdog();
+    beginWatchdogTimerRef.current = setTimeout(() => {
+      beginWatchdogTimerRef.current = null;
+      if (!isRecognizingRef.current) return; // 既に別経路(audiostart/end)で解消済みなら何もしない
+      isRecognizingRef.current = false;
+      if (!shouldRun.current) return;
+      if (isAppBackgrounded()) return; // 通話・動画視聴などでバックグラウンド相当ならリトライしない
+      // このbegin()呼び出しがinterrupted由来のリトライ連鎖の一部だった場合は、failStreakではなく
+      // interruptedStreakとして数える(Duolingoのような断続的な割り込みで強制終了に至らないようにするため)
+      if (lastBeginReasonRef.current === "interrupted") {
+        scheduleRestart(INTERRUPTED_RETRY_DELAY_MS, "interrupted");
+      } else {
+        scheduleRestart(NO_SPEECH_RETRY_DELAY_MS, "generic"); // 実起動に失敗したとみなし、failStreakに加算する
+      }
+    }, BEGIN_WATCHDOG_TIMEOUT_MS);
   };
 
   const start = async () => {
     const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
     if (!mic.granted) {
-      push("[マイク権限が拒否されました]", "sys");
+      push(t("record.log.micPermissionDenied"), "sys");
       return;
     }
     startedAt.current = Date.now();
     sessionStartedAtRef.current = startedAt.current;
     lastResultAt.current = Date.now();
     failStreak.current = 0;
+    interruptedStreak.current = 0;
+    lastBeginReasonRef.current = "generic";
     shouldRun.current = true;
     finalizedRef.current = false;
     setBlocks([]);
@@ -869,12 +1029,14 @@ export default function RecordScreen() {
     prevEnd.current = 0; // 前のセッションの値が新しいセッションに引き継がれてしまわないようにする
     segStart.current = null;
     sectionGapMsRef.current = getDefaultSectionGapMs();
+    paragraphGapMsRef.current = getDefaultParagraphGapMs();
     sessionsRepo
       .create({
         id: sessionId,
         title: "",
         startedAt: sessionStartedAtRef.current,
         sectionGapMs: sectionGapMsRef.current,
+        paragraphGapMs: paragraphGapMsRef.current,
       })
       .catch((e) => console.warn("[DB] セッションの作成に失敗しました", e));
 
@@ -901,6 +1063,7 @@ export default function RecordScreen() {
     sessionIdRef.current = sessionId;
     sessionStartedAtRef.current = session.startedAt;
     sectionGapMsRef.current = session.sectionGapMs;
+    paragraphGapMsRef.current = session.paragraphGapMs;
 
     const transcripts = existingBlocks
       .filter((b) => b.kind === "transcript")
@@ -925,7 +1088,7 @@ export default function RecordScreen() {
               isTodo: b.isTodo,
               isQuestion: b.isQuestion,
             }
-          : { id: b.id, ms: b.startMs, text: `📝 メモ: ${b.text ?? ""}`, kind: "sys" }
+          : { id: b.id, ms: b.startMs, text: t("record.log.memo", { text: b.text ?? "" }), kind: "sys" }
       );
     setBlocks(restoredBlocks);
     setAudioUris([]);
@@ -967,7 +1130,7 @@ export default function RecordScreen() {
   const beginPendingResume = async () => {
     const mic = await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
     if (!mic.granted) {
-      push("[マイク権限が拒否されました]", "sys");
+      push(t("record.log.micPermissionDenied"), "sys");
       return;
     }
     pendingResumeSessionIdRef.current = null;
@@ -980,6 +1143,8 @@ export default function RecordScreen() {
     startedAt.current = Date.now();
     lastResultAt.current = Date.now();
     failStreak.current = 0;
+    interruptedStreak.current = 0;
+    lastBeginReasonRef.current = "generic";
     shouldRun.current = true;
     finalizedRef.current = false;
     setRunning(true);
@@ -1017,6 +1182,8 @@ export default function RecordScreen() {
     // 経過時間のティッカーが動くため、ここで先に実時刻を入れておく(入れないと一時停止前の
     // 古いstartedAt.currentがそのまま使われ、一時停止していた時間分が一瞬上乗せされて見える)
     startedAt.current = Date.now();
+    interruptedStreak.current = 0;
+    lastBeginReasonRef.current = "generic";
     begin(); // audiostartで改めて更新され、経過時間はcontentMsRefからの続きとして計測される
   };
 
@@ -1054,10 +1221,22 @@ export default function RecordScreen() {
         // フォアグラウンド復帰時点で認識が止まっていた(=バックグラウンド中の割り込みで
         // 実際に停止していた)場合のみ、失敗カウントをリセットして明示的に再開する
         failStreak.current = 0;
+        interruptedStreak.current = 0;
+        lastBeginReasonRef.current = "generic";
         begin();
       }
     });
     return () => sub.remove();
+  }, []);
+
+  // アンマウント時に、稼働中のwatchdog/受動リトライタイマーを止める
+  // (setIntervalであるpassiveRetryTimerRefは、setTimeoutの各種リトライと違い放置すると残り続けるため)
+  useEffect(() => {
+    return () => {
+      clearBeginWatchdog();
+      clearPassiveRetryTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // debug
@@ -1210,14 +1389,14 @@ export default function RecordScreen() {
     ? [
         {
           key: "edit",
-          label: "テキスト編集",
+          label: t("record.menu.editText"),
           icon: "create-outline",
           color: "#8e8e93",
           onPress: () => startEditingBlock(menuBlock),
         },
         {
           key: "memo",
-          label: "メモを追加",
+          label: t("record.menu.addMemo"),
           icon: "document-text-outline",
           color: "#8e8e93",
           onPress: () => {
@@ -1227,7 +1406,7 @@ export default function RecordScreen() {
         },
         {
           key: "photo",
-          label: "写真を追加",
+          label: t("record.menu.addPhoto"),
           icon: "camera-outline",
           color: "#8e8e93",
           onPress: () => {
@@ -1237,7 +1416,7 @@ export default function RecordScreen() {
         },
         {
           key: "delete",
-          label: "削除",
+          label: t("common.delete"),
           icon: "trash-outline",
           color: colors.danger.action,
           onPress: () => confirmDeleteBlock(menuBlock),
@@ -1275,7 +1454,7 @@ export default function RecordScreen() {
             <View style={styles.sleepStatusRow}>
               <View style={[styles.sleepDot, !(running && !paused) && styles.sleepDotIdle]} />
               <Text style={styles.sleepStatusLabel}>
-                {paused ? "一時停止中" : running ? "収録中" : "待機中"}
+                {paused ? t("record.status.paused") : running ? t("record.status.recording") : t("record.status.idle")}
               </Text>
               <Text style={styles.sleepStatusTimer}>{fmt(elapsedMs)}</Text>
             </View>
@@ -1417,7 +1596,13 @@ export default function RecordScreen() {
             <View style={[styles.recordingDot, !(running && !paused) && styles.recordingDotIdle]} />
           )}
           <Text style={styles.statusLabel}>
-            {restoring ? restoringLabel : paused ? "一時停止中" : running ? "収録中" : "待機中"}
+            {restoring
+              ? restoringLabel
+              : paused
+              ? t("record.status.paused")
+              : running
+              ? t("record.status.recording")
+              : t("record.status.idle")}
           </Text>
           <Text style={styles.statusTimer}>{fmt(elapsedMs)}</Text>
         </View>
@@ -1442,10 +1627,10 @@ export default function RecordScreen() {
           <View style={styles.markSelectBanner}>
             <Text style={styles.markSelectBannerText}>
               {markSelectMode === "star"
-                ? "★を付ける発言をタップしてください"
+                ? t("record.markSelect.star")
                 : markSelectMode === "todo"
-                ? "📝を付ける発言をタップしてください"
-                : "❓を記録する発言をタップしてください"}
+                ? t("record.markSelect.todo")
+                : t("record.markSelect.question")}
             </Text>
             <TouchableOpacity onPress={cancelMarkSelectMode} hitSlop={8}>
               <Ionicons name="close-circle" size={20} color="#fff" />
@@ -1457,7 +1642,7 @@ export default function RecordScreen() {
         <View style={styles.followBadgeContainer} pointerEvents="box-none">
           <TouchableOpacity style={styles.followBadge} activeOpacity={0.85} onPress={resumeAutoScroll}>
             <Ionicons name="arrow-down" size={13} color="#fff" />
-            <Text style={styles.followBadgeText}>{`新着 ${newArrivalCount}件`}</Text>
+            <Text style={styles.followBadgeText}>{t("record.newArrival", { count: newArrivalCount })}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -1488,7 +1673,7 @@ export default function RecordScreen() {
                 // 録音中は折りたたみを行わないため、見出しはタップ不可のプレーンな表示にする
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionHeader}>
-                    セクション{sectionIndex + 1} ({rangeText})
+                    {t("record.section.header", { index: sectionIndex + 1, range: rangeText })}
                   </Text>
                 </View>
               ) : null}
@@ -1506,7 +1691,7 @@ export default function RecordScreen() {
               // 「間」が短いほど、同じ段落として行間を詰めて自然に繋げて見せる(ノート詳細画面と同じ考え方)。
               // オフの場合はフラットな時系列リストにするため計算しない
               const spacing = sectionGroupingEnabled
-                ? recordRowSpacingFor(section.blocks[blockIndexInSection - 1], b)
+                ? recordRowSpacingFor(section.blocks[blockIndexInSection - 1], b, paragraphGapMsRef.current)
                 : "line";
               const body = isEditing ? (
                 <View style={styles.transcriptEditBody}>
@@ -1519,13 +1704,13 @@ export default function RecordScreen() {
                   />
                   <View style={styles.editActionsRow}>
                     <TouchableOpacity style={styles.editActionButton} onPress={cancelBlockEdit}>
-                      <Text style={styles.editActionButtonText}>キャンセル</Text>
+                      <Text style={styles.editActionButtonText}>{t("common.cancel")}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.editActionButton, styles.editActionButtonPrimary]}
                       onPress={commitBlockEdit}
                     >
-                      <Text style={styles.editActionButtonPrimaryText}>完了</Text>
+                      <Text style={styles.editActionButtonPrimaryText}>{t("common.done")}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1571,7 +1756,7 @@ export default function RecordScreen() {
         })}
         {!blocks.length && !interim ? (
           <Text style={styles.placeholderText}>
-            {running ? "話しかけると文字起こしが表示されます" : "「開始」を押すと録音が始まります"}
+            {running ? t("record.hint.running") : t("record.hint.idle")}
           </Text>
         ) : null}
         {!running && audioUris.length === 1 ? (
@@ -1590,11 +1775,11 @@ export default function RecordScreen() {
       <View style={styles.bottomSection}>
         <View style={styles.bottomCard}>
           <View style={styles.tileRow}>
-            {MARK_TILES.map((t) => (
+            {MARK_TILES.map((tile) => (
               <MarkTile
-                key={t.key}
-                tile={t}
-                active={activeMark === t.key}
+                key={tile.key}
+                tile={{ ...tile, label: t(tile.labelKey) }}
+                active={activeMark === tile.key}
                 onPress={handleMarkPress}
                 onLongPress={startMarkSelectMode}
               />
@@ -1623,7 +1808,13 @@ export default function RecordScreen() {
                 <Ionicons name={running && !paused ? "pause" : "play"} size={18} color="#1c1c1e" />
               )}
               <Text style={styles.controlButtonPauseText}>
-                {restoring ? restoringLabel : paused ? "再開" : running ? "一時停止" : "開始"}
+                {restoring
+                  ? restoringLabel
+                  : paused
+                  ? t("record.button.resume")
+                  : running
+                  ? t("record.button.pause")
+                  : t("record.button.start")}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1633,7 +1824,7 @@ export default function RecordScreen() {
               activeOpacity={0.75}
             >
               <Ionicons name="square" size={14} color="#fff" />
-              <Text style={styles.controlButtonStopText}>終了</Text>
+              <Text style={styles.controlButtonStopText}>{t("record.button.stop")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1642,13 +1833,13 @@ export default function RecordScreen() {
       <Modal visible={showDebug} animationType="slide" transparent onRequestClose={() => setShowDebug(false)}>
         <Pressable style={styles.debugOverlay} onPress={() => setShowDebug(false)}>
           <Pressable style={styles.debugPanel} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.debugTitle}>検証用デバッグ情報</Text>
+            <Text style={styles.debugTitle}>{t("record.debug.title")}</Text>
             <Text style={styles.mono}>{diag}</Text>
             <Text style={styles.mono}>
-              再起動 {restarts} 回 / 音声ファイル {audioUris.length} 個
+              {t("record.debug.restartsAndFiles", { restarts, count: audioUris.length })}
             </Text>
             <View style={styles.debugLeadRow}>
-              <Text style={styles.debugLeadLabel}>手前 {leadSec.toFixed(1)} 秒</Text>
+              <Text style={styles.debugLeadLabel}>{t("record.debug.leadSeconds", { sec: leadSec.toFixed(1) })}</Text>
               <TouchableOpacity
                 style={[styles.pillButton, styles.pillButtonSmall]}
                 onPress={() => setLeadSec((v) => Math.round((v - 0.2) * 10) / 10)}
@@ -1666,7 +1857,7 @@ export default function RecordScreen() {
               style={styles.pillButton}
               onPress={() => setShowLog(rawLog.current.join("\n"))}
             >
-              <Text style={styles.pillButtonText}>生ログを表示</Text>
+              <Text style={styles.pillButtonText}>{t("record.debug.showRawLog")}</Text>
             </TouchableOpacity>
             <ScrollView style={styles.debugLogScroll}>
               <Text style={styles.mono}>{showLog}</Text>
@@ -1675,7 +1866,7 @@ export default function RecordScreen() {
               style={[styles.pillButton, styles.pillButtonPrimary]}
               onPress={() => setShowDebug(false)}
             >
-              <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>閉じる</Text>
+              <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>{t("common.close")}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -1693,12 +1884,12 @@ export default function RecordScreen() {
         >
           <Pressable style={styles.debugOverlay} onPress={() => setMemoModalVisible(false)}>
             <Pressable style={styles.promptPanel} onPress={(e) => e.stopPropagation()}>
-              <Text style={styles.debugTitle}>メモ</Text>
+              <Text style={styles.debugTitle}>{t("record.memoModal.title")}</Text>
               <TextInput
                 style={[styles.promptInput, styles.promptInputMultiline]}
                 value={memoInput}
                 onChangeText={setMemoInput}
-                placeholder="メモを入力"
+                placeholder={t("record.memoModal.placeholder")}
                 multiline
                 autoFocus
               />
@@ -1710,13 +1901,13 @@ export default function RecordScreen() {
                     setMemoInput("");
                   }}
                 >
-                  <Text style={styles.pillButtonText}>キャンセル</Text>
+                  <Text style={styles.pillButtonText}>{t("common.cancel")}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.pillButton, styles.pillButtonPrimary]}
                   onPress={confirmMemo}
                 >
-                  <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>保存</Text>
+                  <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>{t("common.save")}</Text>
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -2457,6 +2648,7 @@ const styles = StyleSheet.create({
 });
 
 function Playback({ uri, blocks, leadSec }: { uri: string; blocks: Block[]; leadSec: number }) {
+  const { t } = useTranslation();
   const player = useAudioPlayer({ uri });
 
   return (
@@ -2480,12 +2672,16 @@ function Playback({ uri, blocks, leadSec }: { uri: string; blocks: Block[]; lead
           <Ionicons name="pause" size={18} color="#1c1c1e" />
         </TouchableOpacity>
         <View style={styles.playbackMeta}>
-          <Text style={styles.playbackMetaText}>長さ: {Math.round(player.duration ?? 0)} 秒</Text>
-          <Text style={styles.playbackMetaText}>手前 {leadSec.toFixed(1)} 秒から再生</Text>
+          <Text style={styles.playbackMetaText}>
+            {t("record.playback.duration", { sec: Math.round(player.duration ?? 0) })}
+          </Text>
+          <Text style={styles.playbackMetaText}>
+            {t("record.playback.leadFrom", { sec: leadSec.toFixed(1) })}
+          </Text>
         </View>
       </View>
 
-      <Text style={styles.playbackListLabel}>タップでその位置から再生</Text>
+      <Text style={styles.playbackListLabel}>{t("record.playback.tapToPlay")}</Text>
       {blocks
         .filter((b) => b.kind === "text")
         .map((b, i) => (

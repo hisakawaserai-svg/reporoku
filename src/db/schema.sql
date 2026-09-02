@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   updated_at   INTEGER NOT NULL,
   section_gap_ms INTEGER NOT NULL DEFAULT 5000, -- タイムラインのセクション分け閾値(ms、migration v3)
   is_quick     INTEGER NOT NULL DEFAULT 0, -- Todo/質問タブの「クイック追加」専用の非表示セッションか(migration v6)
-  is_pinned    INTEGER NOT NULL DEFAULT 0 -- (migration v8。参照するUI/機能は廃止済みだが、カラムは残している)
+  is_pinned    INTEGER NOT NULL DEFAULT 0, -- (migration v8。参照するUI/機能は廃止済みだが、カラムは残している)
+  paragraph_gap_ms INTEGER NOT NULL DEFAULT 1500 -- セクション内で改行せず同じ段落として詰めるかの閾値(ms、migration v11)。
+                                                  -- 常にsection_gap_msより小さい値でなければならない(UI側で制約する)
 );
 
 CREATE TABLE IF NOT EXISTS audio_files (
