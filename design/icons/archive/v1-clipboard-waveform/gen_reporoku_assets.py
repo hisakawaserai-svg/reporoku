@@ -1,14 +1,10 @@
 """レポろく アプリアイコン生成スクリプト(これが唯一の正)。
 
 アイコンを調整するときはこのファイルだけを編集する。
-構図は「波形入りクリップボードを見るシマエナガちゃん」を踏襲しつつ、
-クリップボード上に赤い REC ピルを足して「録音してノートにする」ことが
-ホーム画面サイズでも伝わるようにした版。
-
-旧版(RECなし)は design/icons/archive/v1-clipboard-waveform/ に退避してある。
-
-スタンプ抜き(正面)・うりつみ(右で左向き)とキャラの向き・位置が被らないよう、
-左に立って右のクリップボードを見る構図にしている。
+座標は Claude との検討チャットで固まった「波形入りクリップボードを見るシマエナガちゃん」
+構図(ペリウィンクルのグラデーション背景 / 画面左のシマエナガ / 右の波形入り
+クリップボード)をそのまま数値化したもの。スタンプ抜き(正面)・うりつみ(右で左向き)
+とキャラの向き・位置が被らないよう、左に立って右のクリップボードを見る構図にしている。
 
     python3 gen_reporoku_assets.py            # プレビューを out/ に生成
     python3 gen_reporoku_assets.py --install  # app.json が参照する assets/ へ書き出し
@@ -160,46 +156,10 @@ class Scene:
 
 
 
-def make_rec_badge(height_px):
-    """左右反転の影響を受けない REC ピル画像を作る。
-    レイアウトは常に LTR: [赤ドット][隙間][REC]。"""
-    h = max(28, int(round(height_px)))
-    pad_x = int(round(h * 0.22))
-    dot_r = int(round(h * 0.26))
-    gap = int(round(h * 0.14))
-    font_size = max(12, int(round(h * 0.48)))
-    font = ImageFont.truetype(FONT_TEXT, font_size)
-    tmp = Image.new("RGBA", (1, 1))
-    tb = ImageDraw.Draw(tmp).textbbox((0, 0), "REC", font=font)
-    tw = tb[2] - tb[0]
-    w = pad_x + dot_r * 2 + gap + tw + pad_x
-    badge = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(badge, "RGBA")
-    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=h / 2, fill=REC_PILL)
-    cy = h / 2
-    dot_cx = pad_x + dot_r
-    d.ellipse(
-        [dot_cx - dot_r, cy - dot_r, dot_cx + dot_r, cy + dot_r],
-        fill=REC,
-    )
-    # 左中央基準で、ドット右端 + gap から REC を開始する
-    d.text(
-        (pad_x + dot_r * 2 + gap, cy),
-        "REC",
-        font=font,
-        fill=(255, 255, 255, 255),
-        anchor="lm",
-    )
-    return badge
-
-
 def draw_clipboard(sc):
     """右側の小道具:木の板を背面に持つ、波形入りクリップボード。
     録音がノートになることを示す。斜めに持っている見た目にするため、
-    このレイヤーは呼び出し側で回転してから合成する。
-
-    REC ピルは flip と文字描画が干渉するため、ここでは描かず
-    render_clipboard_layer 側で LTR のバッジ画像を貼る。"""
+    このレイヤーは呼び出し側で回転してから合成する。"""
     # 背面の木の板(紙より一回り大きく、縁を少し暗くして立体感を出す)
     sc.rounded_rect(51, 21, 41, 65, 5, WOOD_DARK)
     sc.rounded_rect(52, 21.6, 39, 63, 4.6, WOOD)
@@ -208,20 +168,16 @@ def draw_clipboard(sc):
     # クリップの金具(板の上端を挟む)
     sc.rounded_rect(65.5, 15, 13, 13, 3, CLIP)
     sc.rounded_rect(68.5, 18.8, 7, 4, 1.5, PAPER)
-
-    # イコライザー風波形(中央の薄い基準線 + 上下に伸びる棒)。RECピルの下に余白。
-    wave_y = 52.5
-    sc.rounded_rect(61.5, wave_y - 0.35, 21, 0.7, 0.35, "#D0D0D4")
+    # 波形(録音の記録であることを示す。用紙の中身だけ左右反転)
     for x, h in [
-        (62.2, 8), (65.4, 13), (68.6, 7), (71.8, 16), (75.0, 10),
-        (78.2, 14), (81.4, 7),
+        (62, 16), (65.5, 10), (69, 18), (72.5, 12), (76, 22),
+        (79.5, 14), (83, 8),
     ]:
-        sc.rounded_rect(x, wave_y - h / 2, 2.0, h, 1.0, ORANGE)
-
-    # 書き起こしたメモの行(波形の下)
-    sc.rounded_rect(61, 64.5, 21, 2.8, 1.4, GRILLE)
-    sc.rounded_rect(67, 69.8, 15, 2.8, 1.4, GRILLE)
-    sc.rounded_rect(64, 75.0, 18, 2.8, 1.4, GRILLE)
+        sc.rounded_rect(x, 45 - h / 2, 2.2, h, 1.1, ORANGE)
+    # 書き起こしたメモの行(右寄せに反転)
+    sc.rounded_rect(61, 61, 21, 3, 1.5, GRILLE)
+    sc.rounded_rect(67, 67, 15, 3, 1.5, GRILLE)
+    sc.rounded_rect(64, 73, 18, 3, 1.5, GRILLE)
 
 
 def render_clipboard_layer(ox, oy, scale):
@@ -239,16 +195,6 @@ def render_clipboard_layer(ox, oy, scale):
     inner_oy = oy + (ay - 50.0) * scale * (1 - CLIP_SCALE) + dy * inner_scale
     sc = Scene(d, ox=inner_ox, oy=inner_oy, scale=inner_scale, flip=CLIP_FLIP)
     draw_clipboard(sc)
-
-    # REC ピルは LTR のまま用紙上部へ貼る(文字が反転ロジックで壊れないようにする)。
-    # 貼り付け基準点は flip 済み Scene の座標で用紙上部中央寄り。
-    badge_h = sc.length(6.8)
-    badge = make_rec_badge(badge_h)
-    # ローカル座標(72.5, 37.2)は flip 後に用紙上部の見やすい位置へ来る
-    cx, cy = sc.pt(72.5, 37.2)
-    dest = (int(round(cx - badge.width / 2)), int(round(cy - badge.height / 2)))
-    layer.alpha_composite(badge, dest=dest)
-
     pivot_px = sc.pt(*CLIP_PIVOT)
     # 反射(flip)のあとに回転すると、回転の向きが打ち消し合う形になるため、
     # flip 時は角度の符号を反転させて本当の鏡映結果にする。
@@ -438,15 +384,6 @@ def main():
         save_checked(favicon, os.path.join(ASSETS, 'favicon.png'))
         os.makedirs(STORE_DIR, exist_ok=True)
         save_checked(store, os.path.join(STORE_DIR, 'play_store_icon_512.png'), STORE_ICON_MAX_BYTES)
-        # prebuild 済みの ios/ がある場合、xcassets 側も同時に更新しないと
-        # expo run:ios してもホーム画面アイコンが古いまま残る。
-        ios_icon = os.path.join(
-            HERE, '..', '..', 'ios', 'app', 'Images.xcassets',
-            'AppIcon.appiconset', 'App-Icon-1024x1024@1x.png',
-        )
-        if os.path.isdir(os.path.dirname(ios_icon)):
-            save_checked(full, ios_icon)
-            print('ios AppIcon.appiconset も更新しました')
         print('assets/ と design/icons/store/ に書き出しました')
     else:
         os.makedirs(OUT_DIR, exist_ok=True)
