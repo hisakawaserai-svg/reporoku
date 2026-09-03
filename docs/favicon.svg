@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <path d="M57.10 72.72 L98.28 92.60 L95.44 102.54 L52.84 85.50 Z" fill="#3A3A3C"/>
-  <path d="M42.90 86.92 L42.90 98.28" fill="none" stroke="#FF9500" stroke-width="4.54" stroke-linecap="round"/>
-  <path d="M37.93 100.41 L42.90 98.28 L47.87 100.41" fill="none" stroke="#FF9500" stroke-width="4.54" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M57.10 86.92 L57.10 98.28" fill="none" stroke="#FF9500" stroke-width="4.54" stroke-linecap="round"/>
-  <path d="M52.13 100.41 L57.10 98.28 L62.07 100.41" fill="none" stroke="#FF9500" stroke-width="4.54" stroke-linecap="round" stroke-linejoin="round"/>
-  <ellipse cx="50.00" cy="47.16" rx="41.18" ry="44.02" fill="#FFFFFF" stroke="#1C1C1E" stroke-width="5.11"/>
-  <ellipse cx="78.40" cy="55.68" rx="12.78" ry="22.72" fill="#D8D8DC"/>
-  <circle cx="37.93" cy="37.22" r="6.82" fill="#1C1C1E"/>
-  <circle cx="62.07" cy="37.22" r="6.82" fill="#1C1C1E"/>
-  <path d="M43.61 45.74 L56.39 45.74 L50.00 57.10 Z" fill="#FF9500"/>
-  <circle cx="27.28" cy="50.00" r="5.96" fill="rgba(255,150,170,0.6)"/>
-  <circle cx="72.72" cy="50.00" r="5.96" fill="rgba(255,150,170,0.6)"/>
+  <g transform="translate(50 48) scale(1.22) translate(-50 -54)">
+    <!-- light under-stroke so dark tail stays visible on dark browser chrome -->
+    <path d="M55 72 L84 86 L82 93 L52 81 Z" fill="none" stroke="#F5F5F7" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M55 72 L84 86 L82 93 L52 81 Z" fill="#3A3A3C"/>
+    <path d="M45 82 L45 90 M42 91 L45 90 L48 91" fill="none" stroke="#FF9500" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M55 82 L55 90 M52 91 L55 90 L58 91" fill="none" stroke="#FF9500" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <ellipse cx="50" cy="54" rx="29" ry="31" fill="#FFFFFF" stroke="#1C1C1E" stroke-width="2.8"/>
+    <ellipse cx="70" cy="60" rx="9" ry="16" fill="#D8D8DC"/>
+    <circle cx="42" cy="48" r="3" fill="#1C1C1E"/>
+    <circle cx="58" cy="48" r="3" fill="#1C1C1E"/>
+    <path d="M47 54 L53 54 L50 60 Z" fill="#FF9500"/>
+    <circle cx="36" cy="56" r="3.5" fill="rgba(255,150,170,0.45)"/>
+    <circle cx="64" cy="56" r="3.5" fill="rgba(255,150,170,0.45)"/>
+  </g>
 </svg>
