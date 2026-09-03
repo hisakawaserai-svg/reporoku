@@ -1,21 +1,59 @@
-The MIT License (MIT)
+Copyright (c) 2026 Serai Hisakawa
+All Rights Reserved / 無断利用を禁じます
 
-Copyright (c) 2015-present 650 Industries, Inc. (aka Expo)
+--------------------------------------------------------------------
+日本語
+--------------------------------------------------------------------
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+このリポジトリは、アプリ「レポろく」の中身を誰でも確かめられるように
+するため ── 透明性の確保を目的として公開しています。
+このアプリが何をしていて、入力されたデータをどう扱っているのかを、
+利用者が自分の目で検証できる状態にしておくことがねらいです。
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+そのために、ソースコードを読むこと・内容を確認することは歓迎します。
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+ただし、それ以外の権利は許諾していません。
+著作権者の書面による事前の許可なく、次の行為はできません。
+
+  1. ソースコードの全部または一部の複製・改変・再配布
+  2. 本プロジェクトの全部または一部を、別の製品・サービスに利用すること
+  3. アプリ名「レポろく」、アイコン、イラスト、スクリーンショット等の
+     素材の流用
+
+「公開されている」ことと「自由に使ってよい」ことは別です。
+公開しているのは、隠していないことを示すためであって、
+配布のためではありません。
+
+なお、本アプリが利用している第三者のライブラリは、それぞれの提供元の
+ライセンスに従います。一覧はアプリ内の「オープンソースライセンス」から
+確認できます。
+
+お問い合わせは、本リポジトリの Issues から、またはサポートページから
+お願いします。
+
+--------------------------------------------------------------------
+English
+--------------------------------------------------------------------
+
+This repository is published for transparency: so that anyone can verify
+what the "Reporoku" application does and how it handles the data entered
+into it.
+
+Reading and inspecting the source code for that purpose is welcome.
+
+No other rights are granted. Without prior written permission from the
+copyright holder, you may not:
+
+  1. copy, modify, or redistribute the source code, in whole or in part;
+  2. use this project, in whole or in part, in another product or service;
+  3. reuse the application name "Reporoku" / "レポろく", its icon,
+     illustrations, screenshots, or other assets.
+
+Being publicly visible is not the same as being free to use. The source
+is published to show that nothing is hidden, not to distribute it.
+
+Third-party libraries used by this application remain under their own
+licenses; see the "Open Source Licenses" screen in the app.
+
+For inquiries, please open an issue on this repository or use the support
+page.
