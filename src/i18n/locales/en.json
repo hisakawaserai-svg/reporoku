@@ -7,6 +7,12 @@
     "done": "Done",
     "required": "Required"
   },
+  "photoSource": {
+    "title": "Add photo",
+    "message": "Take a photo or choose one from your library.",
+    "camera": "Take photo",
+    "library": "Choose from library"
+  },
   "navigation": {
     "tabRecord": "Record",
     "tabNotes": "Notes",
@@ -265,7 +271,7 @@
     "photoFallbackLabel": "Photo",
     "timeRange": "{{start}} – {{end}}",
     "editedBadge": "Edited",
-    "tapToTakePhoto": "Tap to take a photo",
+    "tapToTakePhoto": "Tap to add a photo",
     "tapToAddMemo": "Tap to add a memo",
     "split": {
       "hint": "Tap the point where you want to split",

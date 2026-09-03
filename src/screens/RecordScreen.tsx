@@ -33,12 +33,12 @@ import {
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
 import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
-import * as ImagePicker from "expo-image-picker";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
 import { genId } from "../utils/id";
 import { deleteStoredFile, getAudioDirectoryUri, persistPhotoFile } from "../utils/files";
+import { pickImageUri, promptPhotoSource } from "../utils/pickPhoto";
 import { adoptOrphanAudioFiles, deleteOrphanAudioFiles, hasRecoverableAudio } from "../utils/audioRecovery";
 import { mergeSessionAudioSegments } from "../utils/audioMerge";
 import {
@@ -590,37 +590,39 @@ export default function RecordScreen() {
       .catch((e) => console.warn("[DB] メモの保存に失敗しました", e));
   };
 
-  const handlePhotoCapture = async () => {
+  const handlePhotoCapture = () => {
     const sessionId = sessionIdRef.current;
     if (!sessionId) return;
-    try {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) {
-        push(t("record.log.cameraPermissionDenied"), "sys");
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-      if (result.canceled || !result.assets?.[0]?.uri) return;
-      const startMs = sessionElapsedMs();
-
-      // cache URIのままだとOSに削除される恐れがあるため、documentDirectory配下へコピーする
-      let photoUri = result.assets[0].uri;
+    promptPhotoSource(t, async (source) => {
       try {
-        photoUri = await persistPhotoFile(photoUri, sessionId);
-      } catch (copyErr) {
-        console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
-      }
+        const picked = await pickImageUri(source);
+        if (!picked.ok) {
+          if (source === "camera" && picked.reason === "denied") {
+            push(t("record.log.cameraPermissionDenied"), "sys");
+          }
+          return;
+        }
+        const startMs = sessionElapsedMs();
 
-      await blocksRepo.create({
-        id: genId(),
-        sessionId,
-        kind: "photo",
-        startMs,
-        photoUri,
-      });
-    } catch (e) {
-      console.warn("[DB] 写真ブロックの保存に失敗しました", e);
-    }
+        // cache URIのままだとOSに削除される恐れがあるため、documentDirectory配下へコピーする
+        let photoUri = picked.uri;
+        try {
+          photoUri = await persistPhotoFile(photoUri, sessionId);
+        } catch (copyErr) {
+          console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+        }
+
+        await blocksRepo.create({
+          id: genId(),
+          sessionId,
+          kind: "photo",
+          startMs,
+          photoUri,
+        });
+      } catch (e) {
+        console.warn("[DB] 写真ブロックの保存に失敗しました", e);
+      }
+    });
   };
 
   // 長押しで「結合/分割/マーク」メニューを開く。録音中は結合・分割は不要なため省いている。

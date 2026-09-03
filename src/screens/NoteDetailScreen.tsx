@@ -34,8 +34,6 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import * as ImagePicker from "expo-image-picker";
-
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as blocksRepo from "../db/repositories/blocks";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
@@ -45,6 +43,7 @@ import type { AudioFile, Block, Session } from "../db/types";
 import { resolveAudioPosition } from "../utils/audioTimeline";
 import { genId } from "../utils/id";
 import { deleteStoredFile, persistPhotoFile } from "../utils/files";
+import { pickImageUri, promptPhotoSource } from "../utils/pickPhoto";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCard";
 import GroupSettingForm from "../components/GroupSettingForm";
@@ -863,59 +862,59 @@ export default function NoteDetailScreen() {
 
   // afterがnullの場合(ブロックが1つも無いセッション)は、挿入位置の基準が無いので先頭に追加する
   const addPhotoAfter = useCallback(
-    async (after: Block | null) => {
+    (after: Block | null) => {
       rowMenu.close();
-      try {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) return;
-        const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-        if (result.canceled || !result.assets?.[0]?.uri) return;
-
-        let photoUri = result.assets[0].uri;
+      promptPhotoSource(t, async (source) => {
         try {
-          photoUri = await persistPhotoFile(photoUri, sessionId);
-        } catch (copyErr) {
-          console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
-        }
+          const picked = await pickImageUri(source);
+          if (!picked.ok) return;
 
-        await blocksRepo.create({
-          id: genId(),
-          sessionId,
-          kind: "photo",
-          startMs: after ? startMsAfter(after) : 0,
-          photoUri,
-        });
-        loadBlocks();
-      } catch (e) {
-        console.warn("[DB] 写真ブロックの追加に失敗しました", e);
-      }
+          let photoUri = picked.uri;
+          try {
+            photoUri = await persistPhotoFile(photoUri, sessionId);
+          } catch (copyErr) {
+            console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+          }
+
+          await blocksRepo.create({
+            id: genId(),
+            sessionId,
+            kind: "photo",
+            startMs: after ? startMsAfter(after) : 0,
+            photoUri,
+          });
+          loadBlocks();
+        } catch (e) {
+          console.warn("[DB] 写真ブロックの追加に失敗しました", e);
+        }
+      });
     },
-    [sessionId, startMsAfter, loadBlocks]
+    [sessionId, startMsAfter, loadBlocks, t]
   );
 
-  // 写真未設定(プレースホルダー表示)のphotoブロックに、タップで写真を撮って添付する
+  // 写真未設定(プレースホルダー表示)のphotoブロックに、タップで撮影またはライブラリから添付する
   const attachPhotoToBlock = useCallback(
-    async (block: Block) => {
-      try {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) return;
-        const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
-        if (result.canceled || !result.assets?.[0]?.uri) return;
-
-        let photoUri = result.assets[0].uri;
+    (block: Block) => {
+      promptPhotoSource(t, async (source) => {
         try {
-          photoUri = await persistPhotoFile(photoUri, sessionId);
-        } catch (copyErr) {
-          console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
-        }
+          const picked = await pickImageUri(source);
+          if (!picked.ok) return;
 
-        await blocksRepo.setPhotoUri(block.id, photoUri);
-        loadBlocks();
-      } catch (e) {
-        console.warn("[DB] 写真の添付に失敗しました", e);
-      }
+          let photoUri = picked.uri;
+          try {
+            photoUri = await persistPhotoFile(photoUri, sessionId);
+          } catch (copyErr) {
+            console.warn("[FS] 写真の永続保存に失敗しました。cacheのURIのまま記録します", copyErr);
+          }
+
+          await blocksRepo.setPhotoUri(block.id, photoUri);
+          loadBlocks();
+        } catch (e) {
+          console.warn("[DB] 写真の添付に失敗しました", e);
+        }
+      });
     },
-    [sessionId, loadBlocks]
+    [sessionId, loadBlocks, t]
   );
 
   const confirmDeleteBlock = useCallback(

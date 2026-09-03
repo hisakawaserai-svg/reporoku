@@ -13,6 +13,7 @@
         "NSSpeechRecognitionUsageDescription": "録音した内容を文字起こしするために使用します",
         "NSMicrophoneUsageDescription": "研修の録音のためにマイクを使用します",
         "NSCameraUsageDescription": "スライドの撮影のためにカメラを使用します",
+        "NSPhotoLibraryUsageDescription": "ノートに写真を添付するために写真ライブラリへアクセスします",
         "UIBackgroundModes": [
           "audio"
         ]
@@ -52,6 +53,14 @@
       [
         "expo-localization",
         { "supportedLocales": { "ios": ["ja", "en"] } }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ノートに写真を添付するために写真ライブラリへアクセスします",
+          "cameraPermission": "スライドの撮影のためにカメラを使用します",
+          "microphonePermission": false
+        }
       ]
     ]
   }

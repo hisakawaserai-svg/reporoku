@@ -7,6 +7,12 @@
     "done": "完了",
     "required": "必須"
   },
+  "photoSource": {
+    "title": "写真を追加",
+    "message": "撮影するか、ライブラリから選んでください。",
+    "camera": "写真を撮る",
+    "library": "ライブラリから選ぶ"
+  },
   "navigation": {
     "tabRecord": "収録",
     "tabNotes": "ノート",
@@ -265,7 +271,7 @@
     "photoFallbackLabel": "写真",
     "timeRange": "{{start}} 〜 {{end}}",
     "editedBadge": "編集済み",
-    "tapToTakePhoto": "タップして写真を撮る",
+    "tapToTakePhoto": "タップして写真を追加",
     "tapToAddMemo": "タップしてメモを追加",
     "split": {
       "hint": "分割したい位置をタップしてください",
