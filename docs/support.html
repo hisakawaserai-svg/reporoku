@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>サポート | レポろく</title>
+<meta name="description" content="レポろくのサポート / Support for Reporoku">
+<style>:root{--accent:#0066cc}
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --page-bg:oklch(0.97 0.003 240);
+  --panel:oklch(0.995 0.002 240);
+  --ink:oklch(0.22 0.006 240);
+  --ink-soft:oklch(0.48 0.006 240);
+  --line:oklch(0.78 0.006 240);
+  --font-b:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-h:Georgia,"Times New Roman",serif;
+  --font-m:ui-monospace,"SF Mono",Menlo,monospace;
+}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--page-bg);color:var(--ink);font-family:var(--font-b);min-height:100vh}
+.sheet{max-width:640px;margin:0 auto;background:var(--panel);
+  border-left:1px solid var(--line);border-right:1px solid var(--line);min-height:100vh}
+.band{height:56px;border-bottom:2px solid var(--ink);display:flex;align-items:flex-end;background:var(--page-bg)}
+.band .step{background-color:var(--accent);
+  background-image:linear-gradient(var(--page-bg) 0 1px,transparent 1px 8px);
+  background-size:16px 8px;background-position:left bottom;width:16px}
+.band .step.grow{flex:1}
+.band.check{display:block;background-color:var(--accent);
+  background-image:
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%),
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+header{padding:32px 24px 24px;border-bottom:1px solid var(--line)}
+.eyebrow{font:600 11px var(--font-m);letter-spacing:.06em;color:var(--accent)}
+h1{font:700 30px/1.3 var(--font-h);margin:8px 0 4px;color:var(--ink)}
+.appline{font:400 13px var(--font-m);color:var(--ink-soft);margin-bottom:4px}
+.updated{font:400 12px var(--font-m);color:var(--ink-soft);margin-bottom:18px}
+.updated:empty{display:none;margin:0}
+.appline{margin-bottom:18px}
+.appline+.updated:not(:empty){margin-top:-14px}
+.langbar{display:inline-flex;border:1px solid var(--ink)}
+.langbar button{border:none;padding:8px 18px;font:600 13px var(--font-m);cursor:pointer;
+  background:transparent;color:var(--ink-soft);min-height:44px}
+.langbar button+button{border-left:1px solid var(--ink)}
+.langbar button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.langbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.toc{padding:24px 24px 8px}
+.toc h2{font:700 16px var(--font-h);margin:0 0 12px;display:flex;gap:8px;align-items:baseline}
+.toc h2 span{font:600 11px var(--font-m);color:var(--accent)}
+.toc ol{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.toc a{display:flex;gap:6px;padding:7px 0;font:400 13px var(--font-b);color:var(--ink-soft);
+  text-decoration:none;border-bottom:1px dotted var(--line)}
+.toc a span{font:600 12px var(--font-m);color:var(--accent)}
+.toc a:hover{color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent)}
+section{padding:22px 24px 4px;scroll-margin-top:16px}
+section h2{font:700 18px var(--font-h);margin:0 0 10px;display:flex;gap:10px;align-items:baseline;
+  border-top:1px solid var(--line);padding-top:20px}
+section h2 .n{font:600 13px var(--font-m);color:var(--accent)}
+section h3{font:600 15px var(--font-b);margin:20px 0 6px;color:var(--ink)}
+section p{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin:0 0 14px}
+section ul{margin:0 0 14px;padding-left:1.3em}
+section li{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin-bottom:4px}
+a{color:var(--accent);text-underline-offset:3px}
+.point{margin:20px 24px 28px;border:1px solid var(--ink);padding:18px 20px;position:relative}
+.point .tag{position:absolute;top:-10px;left:16px;background:var(--panel);padding:0 6px;
+  font:600 11px var(--font-m);color:var(--accent);letter-spacing:.06em}
+.point p{margin:0;font:600 15px/1.85 var(--font-b);color:var(--ink)}
+.faq{border-top:1px solid var(--line)}
+.faq>summary{display:flex;gap:14px;align-items:baseline;padding:16px 24px;cursor:pointer;
+  font:600 15px var(--font-b);color:var(--ink);min-height:44px;list-style:none}
+.faq>summary::-webkit-details-marker{display:none}
+.faq>summary .qn{font:600 13px var(--font-m);color:var(--accent)}
+.faq>summary .qt{flex:1}
+.faq>summary::after{content:"+";color:var(--accent);font:600 16px var(--font-m)}
+.faq[open]>summary::after{content:"\2212"}
+.faq>summary:hover{background:var(--page-bg)}
+.faq>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.faq-body{padding:0 24px 18px 58px}
+.faq-body p{margin:0 0 12px;font:400 14.5px/1.85 var(--font-b);color:var(--ink-soft)}
+.faq-body p:last-child{margin-bottom:0}
+footer{display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:20px 24px;border-top:2px solid var(--ink);margin-top:4px}
+footer a{font:600 13px var(--font-m);color:var(--accent);text-decoration:none}
+footer a:hover{text-decoration:underline}
+footer a:focus-visible{outline:2px solid var(--accent)}
+footer span{font:400 12px var(--font-m);color:var(--ink-soft)}
+[hidden]{display:none!important}
+@media (max-width:520px){
+  h1{font-size:24px}
+  header{padding:26px 20px 20px}
+  section{padding:20px 20px 4px}
+  .toc{padding:20px 20px 8px}
+  .toc ol{grid-template-columns:1fr}
+  .point{margin:16px 20px 24px}
+  .faq>summary{padding:16px 20px}
+  .faq-body{padding:0 20px 18px 52px}
+  footer{padding:18px 20px;flex-direction:column;align-items:flex-start;gap:8px}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="band" aria-hidden="true"><div class="step" style="height:8px"></div><div class="step" style="height:16px"></div><div class="step" style="height:24px"></div><div class="step" style="height:32px"></div><div class="step" style="height:40px"></div><div class="step" style="height:48px"></div><div class="step" style="height:56px"></div><div class="step grow" style="height:56px"></div></div>
+<header>
+  <p class="eyebrow" id="eyebrow">[ サポート ]</p>
+  <h1 id="pageTitle">サポート</h1>
+  <p class="appline" id="appLine">APP: レポろく</p>
+  <p class="updated" id="updated">最終更新日：2026年9月3日</p>
+  <div class="langbar" role="group" aria-label="Language">
+    <button type="button" id="btnJa" aria-pressed="true">日本語</button>
+    <button type="button" id="btnEn" aria-pressed="false">English</button>
+  </div>
+</header>
+
+<main id="ja">
+
+<section><h2><span class="n">01</span>このアプリについて</h2>
+<p>レポろくは、研修などの話を録音し、端末内で文字起こししてノートに残し、レポートとして書き出せるアプリです。</p>
+<p>録音中に★・ToDo・質問・写真・メモをタイムラインへ残せます。データは端末内に保存されます。</p>
+<p>詳しい操作は、アプリ内の「使い方」からも確認できます。</p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>音声・ノート・写真は端末内に保存し、クラウドに学習データとして送りません。</p></div>
+<section style="padding-bottom:0"><h2><span class="n">02</span>よくある質問</h2></section>
+<div>
+<details class="faq"><summary><span class="qn">Q1</span><span class="qt">マイクが使えない・文字起こしが始まらない</span></summary><div class="faq-body">
+<p>端末の設定でマイクへのアクセスがオフになっていないか確認してください。</p>
+<p>iOS: 設定 → プライバシーとセキュリティ → マイク → レポろく<br>Android: 設定 → アプリ → レポろく → 権限</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q2</span><span class="qt">文字起こしが間違っている</span></summary><div class="faq-body">
+<p>音声認識は完全ではありません。周囲の雑音、話し方、専門用語などで誤認識が起きることがあります。ノート詳細から内容を編集できます。</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q3</span><span class="qt">録音中に音楽や動画が止まる</span></summary><div class="faq-body">
+<p>録音・認識のために、他アプリの音声再生が一時的に中断されることがあります。通常の電話には影響しません。</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q4</span><span class="qt">データはどこに保存されるか・消えた場合</span></summary><div class="faq-body">
+<p>記録は端末内に保存されます。アプリ内の削除やアンインストールで消えます。バックアップ機能がある場合は、機種変更前に書き出してください。</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q5</span><span class="qt">無断録音してもよいか</span></summary><div class="faq-body">
+<p>いいえ。録音・撮影は主催者の許可とその場のルールに従ってください。取り扱いの責任は利用者にあります。詳しくは<a href="./terms.html">利用規約</a>をご覧ください。</p>
+</div></details>
+</div>
+<section><h2><span class="n">03</span>広告について</h2>
+<p>本アプリは広告収入により無料で提供する場合があります。広告の表示には Google AdMob を利用します。</p>
+<p>iOSではトラッキングの許可を確認することがあります。許可しない場合でも機能は利用できます。データの取り扱いの詳細は<a href="./privacy.html">プライバシーポリシー</a>をご覧ください。</p>
+</section>
+<section><h2><span class="n">04</span>お問い合わせ</h2>
+<p>不具合の報告・ご要望・その他のご質問は、下記までお送りください。</p>
+<p><strong>メール：</strong><a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>お使いの端末（機種名・OSバージョン）と、どの画面で何をしたときに起きたかを書いていただけると、原因を特定しやすくなります。</p>
+<p>関連ページ：<a href="./privacy.html">プライバシーポリシー</a> ／ <a href="./terms.html">利用規約</a></p>
+</section>
+
+</main>
+
+<main id="en" hidden>
+
+<section><h2><span class="n">01</span>About this app</h2>
+<p>Reporoku lets you record talks such as training sessions, transcribe them on device into notes, and export reports.</p>
+<p>While recording, you can add stars, to-dos, questions, photos, and memos to a timeline. Your data stays on the device.</p>
+<p>More guidance is available in the in-app How to use screens.</p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>Audio, notes, and photos stay on your device and are not sent to the cloud as training data.</p></div>
+<section style="padding-bottom:0"><h2><span class="n">02</span>Troubleshooting</h2></section>
+<div>
+<details class="faq"><summary><span class="qn">Q1</span><span class="qt">Microphone won’t work / transcription won’t start</span></summary><div class="faq-body">
+<p>Check that microphone access is enabled in your device settings.</p>
+<p>iOS: Settings → Privacy &amp; Security → Microphone → Reporoku<br>Android: Settings → Apps → Reporoku → Permissions</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q2</span><span class="qt">Transcripts are wrong</span></summary><div class="faq-body">
+<p>Speech recognition is imperfect. Noise, speaking style, and specialized terms can cause errors. You can edit content in the note detail screen.</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q3</span><span class="qt">Music or video stops while recording</span></summary><div class="faq-body">
+<p>Other apps’ playback may pause temporarily for recording and recognition. Ordinary phone calls are not affected.</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q4</span><span class="qt">Where is data stored / what if it’s gone</span></summary><div class="faq-body">
+<p>Records are stored on your device. In-app deletion or uninstalling removes them. If a backup feature is available, export before changing devices.</p>
+</div></details>
+<details class="faq"><summary><span class="qn">Q5</span><span class="qt">Can I record without permission</span></summary><div class="faq-body">
+<p>No. Follow the organizer’s permission and local rules. You are responsible for how recordings are handled. See the <a href="./terms.html">Terms of Service</a>.</p>
+</div></details>
+</div>
+<section><h2><span class="n">03</span>About ads</h2>
+<p>The App may be free and supported by advertising through Google AdMob.</p>
+<p>iOS may ask about tracking. Declining does not limit features. See the <a href="./privacy.html">Privacy Policy</a> for details.</p>
+</section>
+<section><h2><span class="n">04</span>Contact</h2>
+<p>For bug reports, feature requests, or other questions:</p>
+<p><strong>Email:</strong> <a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>Including your device model, OS version, and what you were doing helps a lot.</p>
+<p>Related: <a href="./privacy.html">Privacy Policy</a> / <a href="./terms.html">Terms of Service</a></p>
+</section>
+
+</main>
+
+<footer>
+  <a href="./privacy.html" id="otherLink">→ プライバシーポリシー</a>
+  <span>© 2026 SeraApps</span>
+</footer>
+</div>
+
+<script>
+(function(){
+  var ja=document.getElementById('ja'),en=document.getElementById('en'),
+      bJa=document.getElementById('btnJa'),bEn=document.getElementById('btnEn'),
+      T={
+        ja:{eyebrow:'[ サポート ]',title:'サポート',app:'APP: レポろく',
+             updated:'最終更新日：2026年9月3日',other:'→ プライバシーポリシー',doc:'サポート | レポろく'},
+        en:{eyebrow:'[ SUPPORT ]',title:'Support',app:'APP: Reporoku',
+             updated:'Last updated: September 3, 2026',other:'→ PRIVACY POLICY',doc:'Support | Reporoku'}
+      };
+  function show(l){
+    var isJa=l==='ja';
+    ja.hidden=!isJa; en.hidden=isJa;
+    bJa.setAttribute('aria-pressed',String(isJa));
+    bEn.setAttribute('aria-pressed',String(!isJa));
+    document.documentElement.lang=l;
+    document.getElementById('eyebrow').textContent=T[l].eyebrow;
+    document.getElementById('pageTitle').textContent=T[l].title;
+    document.getElementById('appLine').textContent=T[l].app;
+    document.getElementById('updated').textContent=T[l].updated;
+    document.getElementById('otherLink').textContent=T[l].other;
+    document.title=T[l].doc;
+  }
+  bJa.addEventListener('click',function(){show('ja')});
+  bEn.addEventListener('click',function(){show('en')});
+  var nav=(navigator.language||'ja').toLowerCase();
+  show(nav.indexOf('ja')===0?'ja':'en');
+})();
+</script>
+</body>
+</html>

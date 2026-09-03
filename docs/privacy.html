@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>プライバシーポリシー | レポろく</title>
+<meta name="description" content="レポろくのプライバシーポリシー / Privacy Policy for Reporoku">
+<style>:root{--accent:#0066cc}
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --page-bg:oklch(0.97 0.003 240);
+  --panel:oklch(0.995 0.002 240);
+  --ink:oklch(0.22 0.006 240);
+  --ink-soft:oklch(0.48 0.006 240);
+  --line:oklch(0.78 0.006 240);
+  --font-b:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-h:Georgia,"Times New Roman",serif;
+  --font-m:ui-monospace,"SF Mono",Menlo,monospace;
+}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--page-bg);color:var(--ink);font-family:var(--font-b);min-height:100vh}
+.sheet{max-width:640px;margin:0 auto;background:var(--panel);
+  border-left:1px solid var(--line);border-right:1px solid var(--line);min-height:100vh}
+.band{height:56px;border-bottom:2px solid var(--ink);display:flex;align-items:flex-end;background:var(--page-bg)}
+.band .step{background-color:var(--accent);
+  background-image:linear-gradient(var(--page-bg) 0 1px,transparent 1px 8px);
+  background-size:16px 8px;background-position:left bottom;width:16px}
+.band .step.grow{flex:1}
+.band.check{display:block;background-color:var(--accent);
+  background-image:
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%),
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+header{padding:32px 24px 24px;border-bottom:1px solid var(--line)}
+.eyebrow{font:600 11px var(--font-m);letter-spacing:.06em;color:var(--accent)}
+h1{font:700 30px/1.3 var(--font-h);margin:8px 0 4px;color:var(--ink)}
+.appline{font:400 13px var(--font-m);color:var(--ink-soft);margin-bottom:4px}
+.updated{font:400 12px var(--font-m);color:var(--ink-soft);margin-bottom:18px}
+.updated:empty{display:none;margin:0}
+.appline{margin-bottom:18px}
+.appline+.updated:not(:empty){margin-top:-14px}
+.langbar{display:inline-flex;border:1px solid var(--ink)}
+.langbar button{border:none;padding:8px 18px;font:600 13px var(--font-m);cursor:pointer;
+  background:transparent;color:var(--ink-soft);min-height:44px}
+.langbar button+button{border-left:1px solid var(--ink)}
+.langbar button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.langbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.toc{padding:24px 24px 8px}
+.toc h2{font:700 16px var(--font-h);margin:0 0 12px;display:flex;gap:8px;align-items:baseline}
+.toc h2 span{font:600 11px var(--font-m);color:var(--accent)}
+.toc ol{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.toc a{display:flex;gap:6px;padding:7px 0;font:400 13px var(--font-b);color:var(--ink-soft);
+  text-decoration:none;border-bottom:1px dotted var(--line)}
+.toc a span{font:600 12px var(--font-m);color:var(--accent)}
+.toc a:hover{color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent)}
+section{padding:22px 24px 4px;scroll-margin-top:16px}
+section h2{font:700 18px var(--font-h);margin:0 0 10px;display:flex;gap:10px;align-items:baseline;
+  border-top:1px solid var(--line);padding-top:20px}
+section h2 .n{font:600 13px var(--font-m);color:var(--accent)}
+section h3{font:600 15px var(--font-b);margin:20px 0 6px;color:var(--ink)}
+section p{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin:0 0 14px}
+section ul{margin:0 0 14px;padding-left:1.3em}
+section li{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin-bottom:4px}
+a{color:var(--accent);text-underline-offset:3px}
+.point{margin:20px 24px 28px;border:1px solid var(--ink);padding:18px 20px;position:relative}
+.point .tag{position:absolute;top:-10px;left:16px;background:var(--panel);padding:0 6px;
+  font:600 11px var(--font-m);color:var(--accent);letter-spacing:.06em}
+.point p{margin:0;font:600 15px/1.85 var(--font-b);color:var(--ink)}
+.faq{border-top:1px solid var(--line)}
+.faq>summary{display:flex;gap:14px;align-items:baseline;padding:16px 24px;cursor:pointer;
+  font:600 15px var(--font-b);color:var(--ink);min-height:44px;list-style:none}
+.faq>summary::-webkit-details-marker{display:none}
+.faq>summary .qn{font:600 13px var(--font-m);color:var(--accent)}
+.faq>summary .qt{flex:1}
+.faq>summary::after{content:"+";color:var(--accent);font:600 16px var(--font-m)}
+.faq[open]>summary::after{content:"\2212"}
+.faq>summary:hover{background:var(--page-bg)}
+.faq>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.faq-body{padding:0 24px 18px 58px}
+.faq-body p{margin:0 0 12px;font:400 14.5px/1.85 var(--font-b);color:var(--ink-soft)}
+.faq-body p:last-child{margin-bottom:0}
+footer{display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:20px 24px;border-top:2px solid var(--ink);margin-top:4px}
+footer a{font:600 13px var(--font-m);color:var(--accent);text-decoration:none}
+footer a:hover{text-decoration:underline}
+footer a:focus-visible{outline:2px solid var(--accent)}
+footer span{font:400 12px var(--font-m);color:var(--ink-soft)}
+[hidden]{display:none!important}
+@media (max-width:520px){
+  h1{font-size:24px}
+  header{padding:26px 20px 20px}
+  section{padding:20px 20px 4px}
+  .toc{padding:20px 20px 8px}
+  .toc ol{grid-template-columns:1fr}
+  .point{margin:16px 20px 24px}
+  .faq>summary{padding:16px 20px}
+  .faq-body{padding:0 20px 18px 52px}
+  footer{padding:18px 20px;flex-direction:column;align-items:flex-start;gap:8px}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="band" aria-hidden="true"><div class="step" style="height:8px"></div><div class="step" style="height:16px"></div><div class="step" style="height:24px"></div><div class="step" style="height:32px"></div><div class="step" style="height:40px"></div><div class="step" style="height:48px"></div><div class="step" style="height:56px"></div><div class="step grow" style="height:56px"></div></div>
+<header>
+  <p class="eyebrow" id="eyebrow">[ プライバシーポリシー ]</p>
+  <h1 id="pageTitle">プライバシーポリシー</h1>
+  <p class="appline" id="appLine">APP: レポろく</p>
+  <p class="updated" id="updated">最終更新日：2026年9月3日</p>
+  <div class="langbar" role="group" aria-label="Language">
+    <button type="button" id="btnJa" aria-pressed="true">日本語</button>
+    <button type="button" id="btnEn" aria-pressed="false">English</button>
+  </div>
+</header>
+
+<main id="ja">
+
+<nav class="toc"><h2><span>TOC</span>目次</h2><ol>
+<li><a href="#ja-1"><span>01</span>記録データの取り扱い</a></li>
+<li><a href="#ja-2"><span>02</span>マイクへのアクセス</a></li>
+<li><a href="#ja-3"><span>03</span>写真へのアクセス</a></li>
+<li><a href="#ja-4"><span>04</span>音声セッションについて</a></li>
+<li><a href="#ja-5"><span>05</span>広告について</a></li>
+<li><a href="#ja-6"><span>06</span>データの削除</a></li>
+<li><a href="#ja-7"><span>07</span>第三者への提供</a></li>
+<li><a href="#ja-8"><span>08</span>お子様のプライバシー</a></li>
+<li><a href="#ja-9"><span>09</span>本ポリシーの変更</a></li>
+<li><a href="#ja-10"><span>10</span>お問い合わせ</a></li>
+</ol></nav>
+<section id="ja-1"><h2><span class="n">01</span>記録データの取り扱い</h2>
+<p>本アプリで作成・保存される音声、文字起こしテキスト、ノート、写真、マーク（★・ToDo・質問など）は、すべて端末内に保存されます。これらの記録データが外部のサーバーへ送信されることはありません。開発者がこれらを取得・閲覧することもできません。</p>
+<p>録音および文字起こしの処理は端末内で行います。クラウドに学習データとして送ることはありません。</p>
+<p>本アプリにはユーザー登録機能がなく、氏名、メールアドレス、電話番号などの個人を特定できる情報を求めることはありません。</p>
+</section>
+<section id="ja-2"><h2><span class="n">02</span>マイクへのアクセス</h2>
+<p>音声を認識してテキスト化するために、マイクへのアクセス許可を求めます。許可しない場合、録音・文字起こし機能は利用できません。</p>
+<p>アクセス許可は、端末の設定からいつでも取り消せます。</p>
+</section>
+<section id="ja-3"><h2><span class="n">03</span>写真へのアクセス</h2>
+<p>ノートに写真を添付する機能を使う場合に、写真ライブラリへのアクセスを求めます。添付した写真は端末内にのみ保存され、外部へ送信されることはありません。</p>
+</section>
+<section id="ja-4"><h2><span class="n">04</span>音声セッションについて</h2>
+<p>録音・音声認識のため、本アプリが他のアプリの音声再生を一時的に中断させることがあります。通常の電話には影響しませんが、一部の状況（分割画面での動画・音楽再生など）では、再生が断続的に中断される可能性があります。</p>
+</section>
+<section id="ja-5"><h2><span class="n">05</span>広告について</h2>
+<p>本アプリは、Google LLC が提供する広告配信サービス「Google AdMob」を利用する場合があります。AdMob は、利用者の興味に応じた広告を表示するために、広告識別子や端末に関する情報などを取得することがあります。</p>
+<p>広告配信のための通信は、本アプリが端末内に保存する音声・ノート・写真とは無関係であり、記録内容を広告配信に利用することはありません。</p>
+<ul>
+<li><a href="https://policies.google.com/technologies/partner-sites?hl=ja" target="_blank" rel="noopener">Google のサービスを使用するサイトやアプリから収集した情報の Google による使用</a></li>
+<li><a href="https://policies.google.com/privacy?hl=ja" target="_blank" rel="noopener">Google プライバシーポリシー</a></li>
+</ul>
+<h3>iOS をお使いの場合（App Tracking Transparency）</h3>
+<p>iOS では、トラッキングの許可を求めるダイアログが表示されることがあります。許可しない場合でも本アプリの機能はすべて利用でき、広告も表示されますが、興味に合わない広告が表示されることがあります。設定は端末の「設定」→「プライバシーとセキュリティ」→「トラッキング」から変更できます。</p>
+<h3>Android をお使いの場合</h3>
+<p>広告のパーソナライズは、端末の「設定」→「Google」→「広告」から無効にできる場合があります。</p>
+<h3>欧州経済領域・英国・スイスをご利用の方（GDPR）</h3>
+<p>これらの地域では、広告の表示に関する同意を求める画面を表示します。同意の内容は後から変更できます。</p>
+<h3>米国の一部の州をご利用の方</h3>
+<p>お住まいの州の法令に応じて、個人情報の販売・共有の停止を求める選択肢を提供します。</p>
+</section>
+<section id="ja-6"><h2><span class="n">06</span>データの削除</h2>
+<p>利用者は、アプリ内の機能からノートや音声データなどを削除できます。また、バックアップ機能がある場合は、利用者自身の操作でデータを書き出せます。</p>
+<p>本アプリを端末から削除（アンインストール）すると、端末内に保存されていたデータは失われます。バックアップを取っていない場合、復元できません。</p>
+</section>
+<section id="ja-7"><h2><span class="n">07</span>第三者への提供</h2>
+<p>本アプリは、広告配信（AdMob）を除き、利用者の記録データを第三者へ提供しません。法令に基づく開示請求があった場合を除き、情報を外部に開示することはありません。</p>
+</section>
+<section id="ja-8"><h2><span class="n">08</span>お子様のプライバシー</h2>
+<p>本アプリは、13歳未満のお子様を対象としたものではなく、13歳未満のお子様から意図的に情報を収集することはありません。</p>
+</section>
+<section id="ja-9"><h2><span class="n">09</span>本ポリシーの変更</h2>
+<p>法令の改正や本アプリの機能追加に伴い、本ポリシーを変更することがあります。重要な変更を行う場合は、本ページ上で告知します。変更後の内容は、本ページに掲載した時点から適用されます。</p>
+</section>
+<section id="ja-10"><h2><span class="n">10</span>お問い合わせ</h2>
+<p>本ポリシーおよび本アプリに関するお問い合わせは、下記までご連絡ください。</p>
+<p><strong>アプリ名：</strong>レポろく<br><strong>メール：</strong><a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>関連ページ：<a href="./terms.html">利用規約</a> ／ <a href="./support.html">サポート</a></p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>音声・文字起こし・ノート・写真は端末内に保存し、クラウドに学習データとして送りません。外部通信は広告配信に必要な範囲に限ります。</p></div>
+
+</main>
+
+<main id="en" hidden>
+
+<nav class="toc"><h2><span>TOC</span>Contents</h2><ol>
+<li><a href="#en-1"><span>01</span>How your records are handled</a></li>
+<li><a href="#en-2"><span>02</span>Microphone access</a></li>
+<li><a href="#en-3"><span>03</span>Photo access</a></li>
+<li><a href="#en-4"><span>04</span>Audio session notes</a></li>
+<li><a href="#en-5"><span>05</span>Advertising</a></li>
+<li><a href="#en-6"><span>06</span>Deleting your data</a></li>
+<li><a href="#en-7"><span>07</span>Disclosure to third parties</a></li>
+<li><a href="#en-8"><span>08</span>Children’s privacy</a></li>
+<li><a href="#en-9"><span>09</span>Changes to this policy</a></li>
+<li><a href="#en-10"><span>10</span>Contact</a></li>
+</ol></nav>
+<section id="en-1"><h2><span class="n">01</span>How your records are handled</h2>
+<p>Audio, transcripts, notes, photos, and marks (stars, to-dos, questions, and so on) created in the App are stored only on your device. None of this record data is sent to an external server. The developer cannot access or view it.</p>
+<p>Recording and speech recognition run on device. We do not send your content to the cloud as training data.</p>
+<p>The App has no account system and never asks for personally identifiable information such as your name, email address, or phone number.</p>
+</section>
+<section id="en-2"><h2><span class="n">02</span>Microphone access</h2>
+<p>The App requests microphone access to recognize speech and turn it into text. Without permission, recording and transcription are unavailable.</p>
+<p>You can revoke this permission at any time in your device settings.</p>
+</section>
+<section id="en-3"><h2><span class="n">03</span>Photo access</h2>
+<p>If you attach photos to notes, the App may ask for photo library access. Attached photos stay on your device and are not transmitted.</p>
+</section>
+<section id="en-4"><h2><span class="n">04</span>Audio session notes</h2>
+<p>For recording and speech recognition, the App may temporarily interrupt audio playback from other apps. Ordinary phone calls are not affected, but in some situations (such as split-screen video or music) playback may be interrupted intermittently.</p>
+</section>
+<section id="en-5"><h2><span class="n">05</span>Advertising</h2>
+<p>The App may use Google AdMob, an advertising service provided by Google LLC. AdMob may collect information such as advertising identifiers and device information in order to show ads.</p>
+<p>Communication for ads is unrelated to the audio, notes, and photos stored on your device, and the App never uses your records for ad targeting.</p>
+<ul>
+<li><a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">How Google uses information from sites or apps that use its services</a></li>
+<li><a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a></li>
+</ul>
+<h3>On iOS (App Tracking Transparency)</h3>
+<p>iOS may ask whether you allow tracking. If you decline, every feature remains available and ads may still be shown, though they may be less relevant. You can change this under Settings → Privacy &amp; Security → Tracking.</p>
+<h3>On Android</h3>
+<p>You may be able to turn off ad personalization under Settings → Google → Ads.</p>
+<h3>European Economic Area, United Kingdom, and Switzerland (GDPR)</h3>
+<p>In these regions, the App presents a consent screen regarding advertising. You can change your choices later.</p>
+<h3>Certain U.S. states</h3>
+<p>Depending on the laws of your state, the App offers options to opt out of the sale or sharing of personal information.</p>
+</section>
+<section id="en-6"><h2><span class="n">06</span>Deleting your data</h2>
+<p>You can delete notes, audio, and related data from within the App. Where backup features exist, you can export data yourself.</p>
+<p>Uninstalling the App removes data stored on the device. Without a backup, it cannot be restored.</p>
+</section>
+<section id="en-7"><h2><span class="n">07</span>Disclosure to third parties</h2>
+<p>Apart from advertising (AdMob), the App does not provide your record data to third parties, except where required by law.</p>
+</section>
+<section id="en-8"><h2><span class="n">08</span>Children’s privacy</h2>
+<p>The App is not directed at children under 13, and does not knowingly collect information from children under 13.</p>
+</section>
+<section id="en-9"><h2><span class="n">09</span>Changes to this policy</h2>
+<p>This policy may be updated as laws change or features are added. Significant changes will be announced on this page and take effect once posted here.</p>
+</section>
+<section id="en-10"><h2><span class="n">10</span>Contact</h2>
+<p>For questions about this policy or the App:</p>
+<p><strong>App:</strong> Reporoku<br><strong>Email:</strong> <a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>Related: <a href="./terms.html">Terms of Service</a> / <a href="./support.html">Support</a></p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>Audio, transcripts, notes, and photos stay on your device and are not sent to the cloud as training data. Network use is limited to what advertising delivery requires.</p></div>
+
+</main>
+
+<footer>
+  <a href="./terms.html" id="otherLink">→ 利用規約</a>
+  <span>© 2026 SeraApps</span>
+</footer>
+</div>
+
+<script>
+(function(){
+  var ja=document.getElementById('ja'),en=document.getElementById('en'),
+      bJa=document.getElementById('btnJa'),bEn=document.getElementById('btnEn'),
+      T={
+        ja:{eyebrow:'[ プライバシーポリシー ]',title:'プライバシーポリシー',app:'APP: レポろく',
+             updated:'最終更新日：2026年9月3日',other:'→ 利用規約',doc:'プライバシーポリシー | レポろく'},
+        en:{eyebrow:'[ PRIVACY POLICY ]',title:'Privacy Policy',app:'APP: Reporoku',
+             updated:'Last updated: September 3, 2026',other:'→ TERMS OF SERVICE',doc:'Privacy Policy | Reporoku'}
+      };
+  function show(l){
+    var isJa=l==='ja';
+    ja.hidden=!isJa; en.hidden=isJa;
+    bJa.setAttribute('aria-pressed',String(isJa));
+    bEn.setAttribute('aria-pressed',String(!isJa));
+    document.documentElement.lang=l;
+    document.getElementById('eyebrow').textContent=T[l].eyebrow;
+    document.getElementById('pageTitle').textContent=T[l].title;
+    document.getElementById('appLine').textContent=T[l].app;
+    document.getElementById('updated').textContent=T[l].updated;
+    document.getElementById('otherLink').textContent=T[l].other;
+    document.title=T[l].doc;
+  }
+  bJa.addEventListener('click',function(){show('ja')});
+  bEn.addEventListener('click',function(){show('en')});
+  var nav=(navigator.language||'ja').toLowerCase();
+  show(nav.indexOf('ja')===0?'ja':'en');
+})();
+</script>
+</body>
+</html>

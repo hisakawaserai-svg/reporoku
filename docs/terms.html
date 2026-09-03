@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>利用規約 | レポろく</title>
+<meta name="description" content="レポろくの利用規約 / Terms of Service for Reporoku">
+<style>:root{--accent:#0066cc}
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --page-bg:oklch(0.97 0.003 240);
+  --panel:oklch(0.995 0.002 240);
+  --ink:oklch(0.22 0.006 240);
+  --ink-soft:oklch(0.48 0.006 240);
+  --line:oklch(0.78 0.006 240);
+  --font-b:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-h:Georgia,"Times New Roman",serif;
+  --font-m:ui-monospace,"SF Mono",Menlo,monospace;
+}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--page-bg);color:var(--ink);font-family:var(--font-b);min-height:100vh}
+.sheet{max-width:640px;margin:0 auto;background:var(--panel);
+  border-left:1px solid var(--line);border-right:1px solid var(--line);min-height:100vh}
+.band{height:56px;border-bottom:2px solid var(--ink);display:flex;align-items:flex-end;background:var(--page-bg)}
+.band .step{background-color:var(--accent);
+  background-image:linear-gradient(var(--page-bg) 0 1px,transparent 1px 8px);
+  background-size:16px 8px;background-position:left bottom;width:16px}
+.band .step.grow{flex:1}
+.band.check{display:block;background-color:var(--accent);
+  background-image:
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%),
+    linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.28) 75%);
+  background-size:16px 16px;background-position:0 0,8px 8px}
+header{padding:32px 24px 24px;border-bottom:1px solid var(--line)}
+.eyebrow{font:600 11px var(--font-m);letter-spacing:.06em;color:var(--accent)}
+h1{font:700 30px/1.3 var(--font-h);margin:8px 0 4px;color:var(--ink)}
+.appline{font:400 13px var(--font-m);color:var(--ink-soft);margin-bottom:4px}
+.updated{font:400 12px var(--font-m);color:var(--ink-soft);margin-bottom:18px}
+.updated:empty{display:none;margin:0}
+.appline{margin-bottom:18px}
+.appline+.updated:not(:empty){margin-top:-14px}
+.langbar{display:inline-flex;border:1px solid var(--ink)}
+.langbar button{border:none;padding:8px 18px;font:600 13px var(--font-m);cursor:pointer;
+  background:transparent;color:var(--ink-soft);min-height:44px}
+.langbar button+button{border-left:1px solid var(--ink)}
+.langbar button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.langbar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.toc{padding:24px 24px 8px}
+.toc h2{font:700 16px var(--font-h);margin:0 0 12px;display:flex;gap:8px;align-items:baseline}
+.toc h2 span{font:600 11px var(--font-m);color:var(--accent)}
+.toc ol{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.toc a{display:flex;gap:6px;padding:7px 0;font:400 13px var(--font-b);color:var(--ink-soft);
+  text-decoration:none;border-bottom:1px dotted var(--line)}
+.toc a span{font:600 12px var(--font-m);color:var(--accent)}
+.toc a:hover{color:var(--accent)}
+.toc a:focus-visible{outline:2px solid var(--accent)}
+section{padding:22px 24px 4px;scroll-margin-top:16px}
+section h2{font:700 18px var(--font-h);margin:0 0 10px;display:flex;gap:10px;align-items:baseline;
+  border-top:1px solid var(--line);padding-top:20px}
+section h2 .n{font:600 13px var(--font-m);color:var(--accent)}
+section h3{font:600 15px var(--font-b);margin:20px 0 6px;color:var(--ink)}
+section p{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin:0 0 14px}
+section ul{margin:0 0 14px;padding-left:1.3em}
+section li{font:400 15px/1.85 var(--font-b);color:var(--ink-soft);margin-bottom:4px}
+a{color:var(--accent);text-underline-offset:3px}
+.point{margin:20px 24px 28px;border:1px solid var(--ink);padding:18px 20px;position:relative}
+.point .tag{position:absolute;top:-10px;left:16px;background:var(--panel);padding:0 6px;
+  font:600 11px var(--font-m);color:var(--accent);letter-spacing:.06em}
+.point p{margin:0;font:600 15px/1.85 var(--font-b);color:var(--ink)}
+.faq{border-top:1px solid var(--line)}
+.faq>summary{display:flex;gap:14px;align-items:baseline;padding:16px 24px;cursor:pointer;
+  font:600 15px var(--font-b);color:var(--ink);min-height:44px;list-style:none}
+.faq>summary::-webkit-details-marker{display:none}
+.faq>summary .qn{font:600 13px var(--font-m);color:var(--accent)}
+.faq>summary .qt{flex:1}
+.faq>summary::after{content:"+";color:var(--accent);font:600 16px var(--font-m)}
+.faq[open]>summary::after{content:"\2212"}
+.faq>summary:hover{background:var(--page-bg)}
+.faq>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.faq-body{padding:0 24px 18px 58px}
+.faq-body p{margin:0 0 12px;font:400 14.5px/1.85 var(--font-b);color:var(--ink-soft)}
+.faq-body p:last-child{margin-bottom:0}
+footer{display:flex;justify-content:space-between;align-items:center;gap:16px;
+  padding:20px 24px;border-top:2px solid var(--ink);margin-top:4px}
+footer a{font:600 13px var(--font-m);color:var(--accent);text-decoration:none}
+footer a:hover{text-decoration:underline}
+footer a:focus-visible{outline:2px solid var(--accent)}
+footer span{font:400 12px var(--font-m);color:var(--ink-soft)}
+[hidden]{display:none!important}
+@media (max-width:520px){
+  h1{font-size:24px}
+  header{padding:26px 20px 20px}
+  section{padding:20px 20px 4px}
+  .toc{padding:20px 20px 8px}
+  .toc ol{grid-template-columns:1fr}
+  .point{margin:16px 20px 24px}
+  .faq>summary{padding:16px 20px}
+  .faq-body{padding:0 20px 18px 52px}
+  footer{padding:18px 20px;flex-direction:column;align-items:flex-start;gap:8px}
+}
+</style>
+</head>
+<body>
+<div class="sheet">
+<div class="band" aria-hidden="true"><div class="step" style="height:8px"></div><div class="step" style="height:16px"></div><div class="step" style="height:24px"></div><div class="step" style="height:32px"></div><div class="step" style="height:40px"></div><div class="step" style="height:48px"></div><div class="step" style="height:56px"></div><div class="step grow" style="height:56px"></div></div>
+<header>
+  <p class="eyebrow" id="eyebrow">[ 利用規約 ]</p>
+  <h1 id="pageTitle">利用規約</h1>
+  <p class="appline" id="appLine">APP: レポろく</p>
+  <p class="updated" id="updated">最終更新日：2026年9月3日</p>
+  <div class="langbar" role="group" aria-label="Language">
+    <button type="button" id="btnJa" aria-pressed="true">日本語</button>
+    <button type="button" id="btnEn" aria-pressed="false">English</button>
+  </div>
+</header>
+
+<main id="ja">
+
+<nav class="toc"><h2><span>TOC</span>目次</h2><ol>
+<li><a href="#ja-1"><span>01</span>適用</a></li>
+<li><a href="#ja-2"><span>02</span>録音・撮影に関する責任</a></li>
+<li><a href="#ja-3"><span>03</span>提供内容と免責</a></li>
+<li><a href="#ja-4"><span>04</span>知的財産権</a></li>
+<li><a href="#ja-5"><span>05</span>禁止事項</a></li>
+<li><a href="#ja-6"><span>06</span>規約の変更</a></li>
+<li><a href="#ja-7"><span>07</span>お問い合わせ</a></li>
+</ol></nav>
+<section id="ja-1"><h2><span class="n">01</span>適用</h2>
+<p>本利用規約（以下「本規約」）は、アプリ「レポろく」（以下「本アプリ」）の利用条件を定めるものです。本アプリを利用した時点で、本規約に同意したものとみなします。初回起動時の同意画面で同意しない場合、本アプリは利用できません。</p>
+</section>
+<section id="ja-2"><h2><span class="n">02</span>録音・撮影に関する責任</h2>
+<p>本アプリは研修などの記録を支援するツールですが、録音・撮影そのものの適法性や許可の取得は、すべて利用者の責任です。</p>
+<ul>
+<li>録音・撮影は、必ず主催者の許可やその場のルールに従ってください。</li>
+<li>録音・撮影した内容の保存・共有・公開を含む取り扱いは、利用者ご自身の責任となります。</li>
+<li>本アプリは、無断での録音・撮影を推奨・助長するものではありません。</li>
+</ul>
+<p>利用者が法令や第三者の権利に違反した場合に生じる損害・紛争について、開発者は責任を負いません。</p>
+</section>
+<section id="ja-3"><h2><span class="n">03</span>提供内容と免責</h2>
+<p>音声認識の精度は完全ではなく、誤認識が発生する可能性があります。認識結果は必ずご自身で確認してください。</p>
+<p>本アプリは「現状有姿（as-is）」で提供されます。特定の目的への適合性、稼働の継続、エラーがないことなどを保証しません。</p>
+<p>クラッシュ、端末の故障、利用者による削除、OSの制約などによりデータが失われた場合でも、開発者は責任を負いません。本アプリにはクラッシュ復旧やバックアップなど、損失を軽減するための機能を備えていますが、データ保全の最終責任は利用者にあります。</p>
+</section>
+<section id="ja-4"><h2><span class="n">04</span>知的財産権</h2>
+<p>本アプリ自体（プログラム、デザイン、文言など）に関する著作権その他の権利は、開発者または正当な権利者に帰属します。</p>
+<p>利用者が本アプリで録音・作成した音声・テキスト・写真などの内容についての権利は、法令の範囲内で利用者（または正当な権利者）に帰属します。開発者がそれらを取得・利用することはありません。</p>
+</section>
+<section id="ja-5"><h2><span class="n">05</span>禁止事項</h2>
+<p>利用者は、本アプリの利用にあたり、次の行為をしてはなりません。</p>
+<ul>
+<li>法令に違反する目的での利用</li>
+<li>他者のプライバシーや肖像・音声に関する権利を不当に侵害する目的での利用</li>
+<li>本アプリの逆コンパイル、不正アクセス、過度な負荷をかける行為など、本アプリの運営を妨げる行為</li>
+</ul>
+</section>
+<section id="ja-6"><h2><span class="n">06</span>規約の変更</h2>
+<p>本規約は、必要に応じて変更されることがあります。変更後の規約は、本ページに掲載した時点から適用されます。重要な変更がある場合は、本ページ上で告知します。</p>
+</section>
+<section id="ja-7"><h2><span class="n">07</span>お問い合わせ</h2>
+<p>本規約に関するお問い合わせは、下記までご連絡ください。</p>
+<p><strong>アプリ名：</strong>レポろく<br><strong>メール：</strong><a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>関連ページ：<a href="./privacy.html">プライバシーポリシー</a> ／ <a href="./support.html">サポート</a></p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>録音・撮影の許可取得と、記録の取り扱いは、すべて利用者ご自身の責任です。</p></div>
+
+</main>
+
+<main id="en" hidden>
+
+<nav class="toc"><h2><span>TOC</span>Contents</h2><ol>
+<li><a href="#en-1"><span>01</span>Agreement</a></li>
+<li><a href="#en-2"><span>02</span>Responsibility for recording</a></li>
+<li><a href="#en-3"><span>03</span>Service and disclaimers</a></li>
+<li><a href="#en-4"><span>04</span>Intellectual property</a></li>
+<li><a href="#en-5"><span>05</span>Prohibited uses</a></li>
+<li><a href="#en-6"><span>06</span>Changes to these terms</a></li>
+<li><a href="#en-7"><span>07</span>Contact</a></li>
+</ol></nav>
+<section id="en-1"><h2><span class="n">01</span>Agreement</h2>
+<p>These Terms of Service (“Terms”) govern use of the app “Reporoku” (“the App”). By using the App, you agree to these Terms. If you do not agree on the first-launch consent screen, you may not use the App.</p>
+</section>
+<section id="en-2"><h2><span class="n">02</span>Responsibility for recording</h2>
+<p>The App helps you keep records such as training sessions, but you alone are responsible for whether recording or photography is lawful and permitted.</p>
+<ul>
+<li>Always follow the organizer’s permission and the rules of the place when recording or taking photos.</li>
+<li>How you store, share, or publish recorded content is your responsibility.</li>
+<li>The App does not recommend or encourage recording or photography without permission.</li>
+</ul>
+<p>The developer is not liable for damage or disputes arising from your violation of law or third-party rights.</p>
+</section>
+<section id="en-3"><h2><span class="n">03</span>Service and disclaimers</h2>
+<p>Speech recognition is not perfect and may misrecognize speech. Always review results yourself.</p>
+<p>The App is provided “as is.” We do not warrant fitness for a particular purpose, uninterrupted operation, or freedom from errors.</p>
+<p>The developer is not liable for data loss due to crashes, device failure, user deletion, OS limits, or similar causes. The App includes features such as crash recovery and backup to reduce loss, but final responsibility for safeguarding your data remains with you.</p>
+</section>
+<section id="en-4"><h2><span class="n">04</span>Intellectual property</h2>
+<p>Copyright and other rights in the App itself (code, design, copy, and so on) belong to the developer or rightful owners.</p>
+<p>Rights in audio, text, photos, and other content you record or create with the App belong to you (or the rightful owner) to the extent permitted by law. The developer does not obtain or use that content.</p>
+</section>
+<section id="en-5"><h2><span class="n">05</span>Prohibited uses</h2>
+<p>You must not:</p>
+<ul>
+<li>use the App for unlawful purposes;</li>
+<li>use the App to improperly infringe others’ privacy or rights in likeness or voice;</li>
+<li>reverse-engineer the App, attempt unauthorized access, overload it, or otherwise interfere with its operation.</li>
+</ul>
+</section>
+<section id="en-6"><h2><span class="n">06</span>Changes to these terms</h2>
+<p>These Terms may be updated as needed. Changes take effect when posted on this page. Significant changes will be announced here.</p>
+</section>
+<section id="en-7"><h2><span class="n">07</span>Contact</h2>
+<p>For questions about these Terms:</p>
+<p><strong>App:</strong> Reporoku<br><strong>Email:</strong> <a href="mailto:stampnuki.app@gmail.com">stampnuki.app@gmail.com</a></p>
+<p>Related: <a href="./privacy.html">Privacy Policy</a> / <a href="./support.html">Support</a></p>
+</section>
+<div class="point"><div class="tag">POINT</div><p>Getting permission to record and how you handle recordings are entirely your responsibility.</p></div>
+
+</main>
+
+<footer>
+  <a href="./privacy.html" id="otherLink">→ プライバシーポリシー</a>
+  <span>© 2026 SeraApps</span>
+</footer>
+</div>
+
+<script>
+(function(){
+  var ja=document.getElementById('ja'),en=document.getElementById('en'),
+      bJa=document.getElementById('btnJa'),bEn=document.getElementById('btnEn'),
+      T={
+        ja:{eyebrow:'[ 利用規約 ]',title:'利用規約',app:'APP: レポろく',
+             updated:'最終更新日：2026年9月3日',other:'→ プライバシーポリシー',doc:'利用規約 | レポろく'},
+        en:{eyebrow:'[ TERMS OF SERVICE ]',title:'Terms of Service',app:'APP: Reporoku',
+             updated:'Last updated: September 3, 2026',other:'→ PRIVACY POLICY',doc:'Terms of Service | Reporoku'}
+      };
+  function show(l){
+    var isJa=l==='ja';
+    ja.hidden=!isJa; en.hidden=isJa;
+    bJa.setAttribute('aria-pressed',String(isJa));
+    bEn.setAttribute('aria-pressed',String(!isJa));
+    document.documentElement.lang=l;
+    document.getElementById('eyebrow').textContent=T[l].eyebrow;
+    document.getElementById('pageTitle').textContent=T[l].title;
+    document.getElementById('appLine').textContent=T[l].app;
+    document.getElementById('updated').textContent=T[l].updated;
+    document.getElementById('otherLink').textContent=T[l].other;
+    document.title=T[l].doc;
+  }
+  bJa.addEventListener('click',function(){show('ja')});
+  bEn.addEventListener('click',function(){show('en')});
+  var nav=(navigator.language||'ja').toLowerCase();
+  show(nav.indexOf('ja')===0?'ja':'en');
+})();
+</script>
+</body>
+</html>
