@@ -40,6 +40,7 @@ CHEEK = '#FFD0D9'            # rgba(255,150,170,0.45) を白地に不透明合�
 TAIL = '#3A3A3C'             # スタンプ抜き・うりつみと同じ尾の色
 GRILLE = '#D8D8DC'
 BAND_ALPHA = 40              # 背景を横切る白い帯の不透明度(うりつみと同じ)
+EQ_ALPHA = 28                 # 背景のイコライザーの不透明度(控えめに)
 WOOD = '#B98452'             # クリップボード背面の木の板
 WOOD_DARK = '#9C6C3F'        # 木の板の縁(立体感)
 PAPER = '#F7F5EF'            # クリップボードの用紙
@@ -279,15 +280,31 @@ def downsample(img):
     return img.resize((OUT, OUT), Image.LANCZOS)
 
 
+EQ_BARS = [
+    (4.8, 31, 14), (11.1, 27, 22), (17.4, 35, 10), (23.7, 23, 30), (30, 29, 18),
+    (36.3, 20, 36), (42.6, 31, 14), (48.9, 18, 40), (55.2, 30, 16), (61.5, 21, 34),
+    (67.8, 28, 20), (74.1, 24, 28), (80.4, 32, 12), (86.7, 26, 24), (93, 31, 14),
+]
+
+
 def render_gradient():
-    """ペリウィンクルの対角線グラデーション + うりつみと同じ斜めの白い帯。CANVAS 解像度の RGBA。"""
+    """ペリウィンクルの対角線グラデーション + 背景を横切る控えめなイコライザー +
+    うりつみと同じ斜めの白い帯。CANVAS 解像度の RGBA。"""
     bg = diagonal_gradient(CANVAS, hex_to_rgb(BG_TOP), hex_to_rgb(BG_BOTTOM)).convert('RGBA')
+
+    eq = new_canvas()
+    eq_draw = ImageDraw.Draw(eq, 'RGBA')
+    eq_sc = Scene(eq_draw, ox=50, oy=50, scale=1.0)
+    for x, y, h in EQ_BARS:
+        eq_sc.rounded_rect(x, y, 2.4, h, 1.2, (255, 255, 255, EQ_ALPHA))
+
     band = new_canvas()
     band_draw = ImageDraw.Draw(band, 'RGBA')
     sc = Scene(band_draw, ox=50, oy=50, scale=1.0)
     # 左端(0)ほど帯を少しだけ細く、右端(100)は元の太さのまま(うりつみに近い控えめな先細り)
     sc.polygon([(0, 30), (100, -10), (100, 34), (0, 61)], (255, 255, 255, BAND_ALPHA))
-    return Image.alpha_composite(bg, band)
+
+    return Image.alpha_composite(Image.alpha_composite(bg, eq), band)
 
 
 def render_full_icon():
