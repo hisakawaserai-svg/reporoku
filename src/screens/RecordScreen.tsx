@@ -52,8 +52,10 @@ import {
   onSpeechRecognitionLanguageChange,
 } from "../utils/settings";
 import { setIsRecordingActive } from "../utils/recordingStatus";
+import { setRecordScreenFocused } from "../ads/recordScreenGate";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
+import { LogJumpButtons, computeLogJumpVisibility } from "../components/LogJumpButtons";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
 
@@ -211,6 +213,10 @@ export default function RecordScreen() {
   const resumeHandledSessionIdRef = useRef<string | null>(null);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
   // ライブフォーカス帯(LiveFocusBand)が展開中かどうか。展開中の円形イコライザーは
   // 画面上部に浮かぶオーバーレイとして別コンポーネントで描画するため、その表示可否の判定に使う。
   // オーバーレイをタップして閉じられるようにするため、展開状態はここ(親)で持つ
@@ -411,6 +417,7 @@ export default function RecordScreen() {
   // ScrollViewの表示領域とコンテンツ全体の高さを比較してその判定に使う
   const [transcriptViewportHeight, setTranscriptViewportHeight] = useState(0);
   const [transcriptContentHeight, setTranscriptContentHeight] = useState(0);
+  const [transcriptScrollY, setTranscriptScrollY] = useState(0);
 
   // セッション全体(録音済み音声の累積時間)での経過ms。再起動をまたいでも連続した値になる
   const sessionElapsedMs = () => contentMsRef.current + Math.max(0, Date.now() - startedAt.current);
@@ -642,7 +649,30 @@ export default function RecordScreen() {
   const resumeAutoScroll = () => {
     setScrollPaused(false);
     scrollRef.current?.scrollToEnd({ animated: true });
+    setTranscriptScrollY(Math.max(0, transcriptContentHeight - transcriptViewportHeight));
   };
+
+  const pauseAutoScroll = () => {
+    if (scrollPaused) return;
+    pauseBaselineCountRef.current = blocks.filter((b) => b.kind === "text").length;
+    setScrollPaused(true);
+  };
+
+  const jumpLogToTop = () => {
+    pauseAutoScroll();
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+    setTranscriptScrollY(0);
+  };
+
+  const jumpLogToBottom = () => {
+    resumeAutoScroll();
+  };
+
+  const { showTop: showJumpTop, showBottom: showJumpBottom } = computeLogJumpVisibility(
+    transcriptScrollY,
+    transcriptViewportHeight,
+    transcriptContentHeight
+  );
 
   const toggleBlockStar = (block: Block) => {
     rowMenu.close();
@@ -781,8 +811,6 @@ export default function RecordScreen() {
       const offsetMs = contentMsRef.current;
       contentMsRef.current += durationMs;
       const seq = audioSeqRef.current++;
-      // TODO: offset_msの連続性を実機で検証するための一時ログ。確認が終わったら削除する
-      console.log(`[audioend] seq=${seq} offsetMs=${offsetMs} durationMs=${durationMs} nextOffsetMs=${offsetMs + durationMs}`);
       audioFilesRepo
         .create({ id: genId(), sessionId, fileUri: e.uri, seq, offsetMs, durationMs })
         .catch((err) => console.warn("[DB] 音声ファイルの保存に失敗しました", err));
@@ -893,8 +921,9 @@ export default function RecordScreen() {
       return;
     }
 
-    if (isPausingRef.current) {
-      // 一時停止による停止。セッションは終了させず、次の「再開」を待つ
+    if (isPausingRef.current || pausedRef.current) {
+      // 一時停止による停止。セッションは終了させず、次の「再開」を待つ。
+      // end が二度来ても、shouldRun=false を本停止と誤認して finalize しない
       isPausingRef.current = false;
       setAudioModeAsync({ allowsRecording: false }).catch(() => {});
       return;
@@ -1259,6 +1288,12 @@ export default function RecordScreen() {
     };
   }, [isFocused]);
 
+  // 収録タブ表示中は他タブに残ったバナー／MRECを止める
+  useEffect(() => {
+    setRecordScreenFocused(isFocused);
+    return () => setRecordScreenFocused(false);
+  }, [isFocused]);
+
   // 設定画面の「セクション分けを表示する」トグル。設定画面で切り替えた後、
   // この画面に戻ってきた時に反映されるよう、フォーカスの都度読み直す
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
@@ -1586,9 +1621,11 @@ export default function RecordScreen() {
           >
             <Ionicons name="help-circle-outline" size={22} color="#8e8e93" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowDebug(true)} hitSlop={10}>
-            <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#8e8e93" />
-          </TouchableOpacity>
+          {__DEV__ ? (
+            <TouchableOpacity onPress={() => setShowDebug(true)} hitSlop={10}>
+              <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#8e8e93" />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <View style={styles.statusRow}>
@@ -1648,6 +1685,12 @@ export default function RecordScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
+      <LogJumpButtons
+        showTop={showJumpTop}
+        showBottom={showJumpBottom}
+        onTop={jumpLogToTop}
+        onBottom={jumpLogToBottom}
+      />
       <ScrollView
         ref={scrollRef}
         style={styles.transcriptArea}
@@ -1656,9 +1699,14 @@ export default function RecordScreen() {
         // キーボードを閉じるだけになってしまい2回押す必要が生じる問題を防ぐ
         keyboardShouldPersistTaps="handled"
         onLayout={(e) => setTranscriptViewportHeight(e.nativeEvent.layout.height)}
+        onScroll={(e) => setTranscriptScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={32}
         onContentSizeChange={(_w, h) => {
           setTranscriptContentHeight(h);
-          if (!scrollPaused) scrollRef.current?.scrollToEnd({ animated: true });
+          if (!scrollPaused) {
+            scrollRef.current?.scrollToEnd({ animated: true });
+            setTranscriptScrollY(Math.max(0, h - transcriptViewportHeight));
+          }
         }}
       >
         {sections.map((section, sectionIndex) => {
@@ -1832,6 +1880,7 @@ export default function RecordScreen() {
         </View>
       </View>
 
+      {__DEV__ ? (
       <Modal visible={showDebug} animationType="slide" transparent onRequestClose={() => setShowDebug(false)}>
         <Pressable style={styles.debugOverlay} onPress={() => setShowDebug(false)}>
           <Pressable style={styles.debugPanel} onPress={(e) => e.stopPropagation()}>
@@ -1873,6 +1922,7 @@ export default function RecordScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      ) : null}
 
       <Modal
         visible={memoModalVisible}
@@ -2311,7 +2361,7 @@ const styles = StyleSheet.create({
     color: "#1c1c1e",
   },
 
-  transcriptWrap: { flex: 1 },
+  transcriptWrap: { flex: 1, position: "relative" },
   // タイル列・コントロール行は別コンテナ(bottomSection)のため、transcriptWrapの
   // 一番下(bottom基準)に置けば、それらと重ならずに一番近い位置に浮かせられる
   followBadgeContainer: {

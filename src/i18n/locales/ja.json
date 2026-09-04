@@ -7,6 +7,9 @@
     "done": "完了",
     "required": "必須"
   },
+  "ads": {
+    "label": "広告"
+  },
   "photoSource": {
     "title": "写真を追加",
     "message": "撮影するか、ライブラリから選んでください。",
@@ -21,6 +24,7 @@
     "noteDetailTitle": "ノート詳細",
     "reportTitle": "レポート出力",
     "storageManagementTitle": "ストレージ管理",
+    "openSourceLicensesTitle": "オープンソースライセンス",
     "howToUseTitle": "使い方"
   },
   "settings": {
@@ -107,7 +111,8 @@
       "terms": "利用規約",
       "privacyPolicy": "プライバシーポリシー",
       "openSourceLicenses": "オープンソースライセンス",
-      "contact": "お問い合わせ"
+      "contact": "お問い合わせ",
+      "adsPrivacy": "広告のプライバシー設定"
     },
     "dev": {
       "sectionHeader": "開発者向け",
@@ -562,7 +567,7 @@
     "heading": "記録が完了しました",
     "nameLabel": "名前(任意)",
     "defaultTitle": "{{time}} の記録",
-    "viewNow": "今すぐ確認",
+    "viewNow": "ノートを見る",
     "later": "あとで"
   },
   "onboarding": {
@@ -576,8 +581,8 @@
         "description": "重要な発言に★を付けたり写真を挟んだりしながら、時系列でまとめて振り返れます。"
       },
       "local": {
-        "title": "完全ローカルで動作、通信ゼロ",
-        "description": "録音も文字起こしもすべて端末内で完結します。データが外部に送信されることはありません。"
+        "title": "録音・ノートは端末内に保存",
+        "description": "音声・文字起こし・ノートは端末内で処理・保存します。外部通信は、広告配信に必要な範囲に限ります。"
       }
     },
     "nextButton": "次へ",
@@ -585,6 +590,7 @@
       "heading": "利用上の注意",
       "notice1": "録音・撮影は、必ず主催者の許可やその場のルールに従ってください。",
       "notice2": "録音・撮影した内容の取り扱いは、利用者ご自身の責任となります。",
+      "legalCheckbox": "利用規約とプライバシーポリシーに同意します",
       "agreeButton": "同意して始める"
     },
     "permission": {

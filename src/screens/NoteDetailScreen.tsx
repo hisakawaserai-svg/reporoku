@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated,
   Dimensions,
   GestureResponderEvent,
   Image,
@@ -35,6 +34,8 @@ import type { TFunction } from "i18next";
 import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import AdBanner from "../components/AdBanner";
+import AdMrec from "../components/AdMrec";
 import * as blocksRepo from "../db/repositories/blocks";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
@@ -49,6 +50,7 @@ import InlineEditCard, { type InlineEditKind } from "../components/InlineEditCar
 import GroupSettingForm from "../components/GroupSettingForm";
 import GapSlider from "../components/GapSlider";
 import { RowLongPressMenu, useRowLongPressMenu } from "../components/RowLongPressMenu";
+import { LogJumpButtons, computeLogJumpVisibility } from "../components/LogJumpButtons";
 import * as Clipboard from "expo-clipboard";
 import {
   PARAGRAPH_GAP_MIN_MS,
@@ -329,6 +331,7 @@ export default function NoteDetailScreen() {
   // 邪魔なだけなので出さない。そのためスクロール位置と表示領域の高さを持っておく
   const [timelineScrollY, setTimelineScrollY] = useState(0);
   const [timelineViewportHeight, setTimelineViewportHeight] = useState(0);
+  const [timelineContentHeight, setTimelineContentHeight] = useState(0);
   // 折りたたまれているセクション(グループ)のkeyの集合。この画面を離れれば自然にリセットされてよいので、
   // 永続化はせずローカルstateのみで管理する
   const [collapsedSectionKeys, setCollapsedSectionKeys] = useState<Set<string>>(new Set());
@@ -598,36 +601,19 @@ export default function NoteDetailScreen() {
   const jumpToTop = () => {
     pauseAutoFollow();
     timelineScrollRef.current?.scrollTo({ y: 0, animated: true });
-    showJumpButtonsTemporarily();
+    setTimelineScrollY(0);
   };
   const jumpToBottom = () => {
     pauseAutoFollow();
     timelineScrollRef.current?.scrollToEnd({ animated: true });
-    showJumpButtonsTemporarily();
+    setTimelineScrollY(Math.max(0, timelineContentHeight - timelineViewportHeight));
   };
 
-  // 「一番上へ/一番下へ」ボタンは常時表示だと読んでいる邪魔になるため、
-  // タイムラインをスワイプ操作している間だけ表示し、操作が止まってしばらくしたら
-  // フェードアウトさせる(iOSのスクロールバーと同じような一時表示の考え方)
-  const JUMP_BUTTONS_HIDE_DELAY_MS = 1500;
-  const jumpButtonsOpacity = useRef(new Animated.Value(0)).current;
-  const [jumpButtonsVisible, setJumpButtonsVisible] = useState(false);
-  const jumpButtonsHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showJumpButtonsTemporarily = () => {
-    if (jumpButtonsHideTimerRef.current) clearTimeout(jumpButtonsHideTimerRef.current);
-    setJumpButtonsVisible(true);
-    Animated.timing(jumpButtonsOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
-    jumpButtonsHideTimerRef.current = setTimeout(() => {
-      Animated.timing(jumpButtonsOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-        setJumpButtonsVisible(false);
-      });
-    }, JUMP_BUTTONS_HIDE_DELAY_MS);
-  };
-  useEffect(() => {
-    return () => {
-      if (jumpButtonsHideTimerRef.current) clearTimeout(jumpButtonsHideTimerRef.current);
-    };
-  }, []);
+  const { showTop: showJumpTop, showBottom: showJumpBottom } = computeLogJumpVisibility(
+    timelineScrollY,
+    timelineViewportHeight,
+    timelineContentHeight
+  );
 
   const openPhotoViewer = (block: Block) => setViewerBlockId(block.id);
   const closePhotoViewer = () => setViewerBlockId(null);
@@ -1981,26 +1967,32 @@ export default function NoteDetailScreen() {
       {viewMode === "summary" ? (
         <ScrollView style={styles.summaryScroll}>
           {SUMMARY_SECTIONS.every((s) => s.items.length === 0) ? (
-            <Text style={styles.emptyText}>{t("noteDetail.summary.empty")}</Text>
+            <>
+              <Text style={styles.emptyText}>{t("noteDetail.summary.empty")}</Text>
+              <AdMrec />
+            </>
           ) : (
-            SUMMARY_SECTIONS.map((section) =>
-              section.items.length === 0 ? null : (
-                <View key={section.key}>
-                  <View style={styles.summarySectionHeader}>
-                    <View style={[styles.summaryPill, { backgroundColor: section.bg }]}>
-                      <Ionicons name={section.icon} size={13} color={section.tint} />
-                      <Text style={[styles.summaryPillText, { color: section.tint }]}>
-                        {section.label}
+            SUMMARY_SECTIONS.map((section) => (
+              <Fragment key={section.key}>
+                {section.items.length === 0 ? null : (
+                  <View>
+                    <View style={styles.summarySectionHeader}>
+                      <View style={[styles.summaryPill, { backgroundColor: section.bg }]}>
+                        <Ionicons name={section.icon} size={13} color={section.tint} />
+                        <Text style={[styles.summaryPillText, { color: section.tint }]}>
+                          {section.label}
+                        </Text>
+                      </View>
+                      <Text style={styles.summarySectionCount}>
+                        {t("noteDetail.itemCount", { count: section.items.length })}
                       </Text>
                     </View>
-                    <Text style={styles.summarySectionCount}>
-                      {t("noteDetail.itemCount", { count: section.items.length })}
-                    </Text>
+                    {section.items.map((block) => renderSummaryRow(section.key, block))}
                   </View>
-                  {section.items.map((block) => renderSummaryRow(section.key, block))}
-                </View>
-              )
-            )
+                )}
+                {section.key === "star" ? <AdMrec /> : null}
+              </Fragment>
+            ))
           )}
         </ScrollView>
       ) : (
@@ -2054,26 +2046,21 @@ export default function NoteDetailScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
-      {filtered.length > 0 && jumpButtonsVisible ? (
-        <Animated.View
-          style={[styles.jumpButtonColumn, { opacity: jumpButtonsOpacity }]}
-          pointerEvents="box-none"
-        >
-          <TouchableOpacity style={styles.jumpButton} activeOpacity={0.7} onPress={jumpToTop}>
-            <Ionicons name="chevron-up" size={18} color="#3c3c43" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.jumpButton} activeOpacity={0.7} onPress={jumpToBottom}>
-            <Ionicons name="chevron-down" size={18} color="#3c3c43" />
-          </TouchableOpacity>
-        </Animated.View>
+      {filtered.length > 0 ? (
+        <LogJumpButtons
+          showTop={showJumpTop}
+          showBottom={showJumpBottom}
+          onTop={jumpToTop}
+          onBottom={jumpToBottom}
+        />
       ) : null}
       <ScrollView
         ref={timelineScrollRef}
         style={styles.timeline}
         onLayout={(e) => setTimelineViewportHeight(e.nativeEvent.layout.height)}
+        onContentSizeChange={(_w, h) => setTimelineContentHeight(h)}
         onScroll={(e) => {
           setTimelineScrollY(e.nativeEvent.contentOffset.y);
-          showJumpButtonsTemporarily();
         }}
         scrollEventThrottle={32}
         // 行内編集カード(InlineEditCard)のキャンセル/決定ボタンが、キーボード表示中は
@@ -2230,6 +2217,8 @@ export default function NoteDetailScreen() {
       </>
       )}
       </KeyboardAvoidingView>
+
+      {viewMode === "summary" ? <AdBanner /> : null}
 
       <RowLongPressMenu
         anchor={menuBlock ? rowMenu.anchor : null}
@@ -2511,7 +2500,7 @@ const styles = StyleSheet.create({
   // 「区切りの細かさ」「改行の細かさ」の2つのGapSliderを縦に並べる
   gapSlidersCol: { gap: 18 },
 
-  timelineWrap: { flex: 1, backgroundColor: "#fff" },
+  timelineWrap: { flex: 1, backgroundColor: "#fff", position: "relative" },
   // タイムラインの一番下(プレイヤーバーのすぐ上)に浮かせる。timelineWrap自体が
   // プレイヤーバーの手前で終わるコンテナのため、bottom基準でもプレイヤーバーとは重ならない
   followBadgeContainer: {
@@ -2537,27 +2526,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   followBadgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  // 「一番上へ/一番下へ」ジャンプボタン。控えめに、画面右下に縦に並べて浮かせる
-  jumpButtonColumn: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
-    gap: 8,
-    zIndex: 5,
-  },
-  jumpButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 3,
-  },
   timeline: { flex: 1, paddingHorizontal: 16 },
   // セクション(発言間の「間」が5秒以上)の区切り。見出しの上に薄い罫線を入れて、
   // 余白だけでなく視覚的にもセクションの境目とわかるようにする

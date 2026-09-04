@@ -27,6 +27,8 @@ import { genId } from "../utils/id";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import GroupSettingForm from "../components/GroupSettingForm";
 import InlineEditCard from "../components/InlineEditCard";
+import AdBanner from "../components/AdBanner";
+import AdMrec from "../components/AdMrec";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
@@ -577,7 +579,7 @@ export default function SummaryScreen() {
   const rowMenuAccentBarColor = rowMenu.anchor?.data.kind === "todo" ? "#34C759" : undefined;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t("navigation.tabSummary")}</Text>
         <TouchableOpacity
@@ -621,6 +623,7 @@ export default function SummaryScreen() {
                 ? t("notes.search.noResults")
                 : t("summaryScreen.empty.hint")}
             </Text>
+            {!isSearching ? <AdMrec /> : null}
           </View>
         ) : (
           <>
@@ -658,6 +661,8 @@ export default function SummaryScreen() {
                 ) : null}
               </View>
             ) : null}
+
+            {!isSearching && tab === "all" ? <AdMrec /> : null}
 
             {showTodoSection ? (
             <View style={styles.section}>
@@ -807,6 +812,8 @@ export default function SummaryScreen() {
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
       ) : null}
+
+      <AdBanner />
 
       <EditCardModal visible={todoEditVisible} onCancel={cancelTodoEdit}>
         <InlineEditCard
@@ -1033,7 +1040,7 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     left: 20,
-    bottom: 24,
+    bottom: 98,
     width: 52,
     height: 52,
     borderRadius: 26,

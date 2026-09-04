@@ -13,6 +13,8 @@ import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
+import { useAdsConsent } from "../ads/consent";
+import { preloadInterstitial, showInterstitialThen } from "../ads/interstitial";
 
 function formatTime(unixMs: number, lang: string): string {
   return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
@@ -37,6 +39,8 @@ export default function RecordCompleteScreen() {
   const [title, setTitle] = useState("");
   const [counts, setCounts] = useState({ star: 0, todo: 0, question: 0 });
 
+  const { ready: adsReady, npa } = useAdsConsent();
+
   useEffect(() => {
     (async () => {
       try {
@@ -58,6 +62,10 @@ export default function RecordCompleteScreen() {
     })();
   }, [sessionId]);
 
+  useEffect(() => {
+    if (adsReady) preloadInterstitial(npa);
+  }, [adsReady, npa]);
+
   const commitTitle = useCallback(() => {
     sessionsRepo
       .updateTitle(sessionId, title.trim())
@@ -66,12 +74,16 @@ export default function RecordCompleteScreen() {
 
   const handleViewNote = () => {
     commitTitle();
-    navigation.replace("NoteDetail", { noteId: sessionId });
+    showInterstitialThen(npa, () => {
+      navigation.replace("NoteDetail", { noteId: sessionId });
+    });
   };
 
   const handleClose = () => {
     commitTitle();
-    navigation.goBack();
+    showInterstitialThen(npa, () => {
+      navigation.goBack();
+    });
   };
 
   const defaultTitle = startedAt ? t("recordComplete.defaultTitle", { time: formatTime(startedAt, lang) }) : "";

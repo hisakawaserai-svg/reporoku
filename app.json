@@ -9,16 +9,19 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "1",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "録音した内容を文字起こしするために使用します",
         "NSMicrophoneUsageDescription": "研修の録音のためにマイクを使用します",
         "NSCameraUsageDescription": "スライドの撮影のためにカメラを使用します",
         "NSPhotoLibraryUsageDescription": "ノートに写真を添付するために写真ライブラリへアクセスします",
+        "NSUserTrackingUsageDescription": "広告の表示を最適化するために使用します。許可しない場合も広告は表示されます。",
+        "GADApplicationIdentifier": "ca-app-pub-3194046005390900~2577477666",
         "UIBackgroundModes": [
           "audio"
         ]
       },
-      "bundleIdentifier": "com.anonymous.reporoku"
+      "bundleIdentifier": "com.sera.reporoku"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,13 +31,14 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "versionCode": 1,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.anonymous.reporoku"
+      "package": "com.sera.reporoku"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -52,7 +56,14 @@
       "expo-sharing",
       [
         "expo-localization",
-        { "supportedLocales": { "ios": ["ja", "en"] } }
+        {
+          "supportedLocales": {
+            "ios": [
+              "ja",
+              "en"
+            ]
+          }
+        }
       ],
       [
         "expo-image-picker",
@@ -61,7 +72,20 @@
           "cameraPermission": "スライドの撮影のためにカメラを使用します",
           "microphonePermission": false
         }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3194046005390900~5369011168",
+          "iosAppId": "ca-app-pub-3194046005390900~2577477666",
+          "userTrackingUsageDescription": "広告の表示を最適化するために使用します。許可しない場合も広告は表示されます。"
+        }
       ]
     ]
+  },
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-3194046005390900~5369011168",
+    "ios_app_id": "ca-app-pub-3194046005390900~2577477666",
+    "user_tracking_usage_description": "広告の表示を最適化するために使用します。許可しない場合も広告は表示されます。"
   }
 }

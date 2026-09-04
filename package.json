@@ -26,6 +26,7 @@
     "react-i18next": "^17.0.13",
     "react-native": "0.86.2",
     "react-native-gesture-handler": "~2.32.0",
+    "react-native-google-mobile-ads": "^16.5.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
@@ -33,13 +34,15 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "react-native-oss-license": "^0.7.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "licenses:generate": "react-native-oss-license --json --only-direct-dependency --add-version-number > src/generated/ossLicenses.json && node -e \"const fs=require('fs');const p='src/generated/ossLicenses.json';fs.writeFileSync(p,JSON.stringify(JSON.parse(fs.readFileSync(p,'utf8')),null,2)+'\\n')\""
   },
   "private": true
 }

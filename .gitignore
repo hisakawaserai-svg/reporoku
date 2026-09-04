@@ -42,3 +42,6 @@ yarn-error.*
 
 # local checkout of SeraApps homepage
 .tmp-homepage/
+
+# release status (日々更新する進捗記録。公開リポジトリに含めない運用)
+docs/release-status*.md

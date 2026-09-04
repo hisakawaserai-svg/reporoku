@@ -7,6 +7,9 @@
     "done": "Done",
     "required": "Required"
   },
+  "ads": {
+    "label": "Ad"
+  },
   "photoSource": {
     "title": "Add photo",
     "message": "Take a photo or choose one from your library.",
@@ -21,6 +24,7 @@
     "noteDetailTitle": "Note",
     "reportTitle": "Report",
     "storageManagementTitle": "Storage",
+    "openSourceLicensesTitle": "Open Source Licenses",
     "howToUseTitle": "How to Use"
   },
   "settings": {
@@ -107,7 +111,8 @@
       "terms": "Terms of Service",
       "privacyPolicy": "Privacy Policy",
       "openSourceLicenses": "Open Source Licenses",
-      "contact": "Contact Us"
+      "contact": "Contact Us",
+      "adsPrivacy": "Ads privacy settings"
     },
     "dev": {
       "sectionHeader": "Developer",
@@ -562,7 +567,7 @@
     "heading": "Recording Complete",
     "nameLabel": "Name (optional)",
     "defaultTitle": "Recording on {{time}}",
-    "viewNow": "View Now",
+    "viewNow": "View Note",
     "later": "Later"
   },
   "onboarding": {
@@ -576,8 +581,8 @@
         "description": "Mark important lines with ★ and drop in photos as you go, then look back at everything together in order."
       },
       "local": {
-        "title": "Fully Local, Zero Network Use",
-        "description": "Recording and transcription both happen entirely on your device. No data is ever sent anywhere."
+        "title": "Audio and notes stay on your device",
+        "description": "Recording, transcription, and notes are processed and stored on your device. Network use is limited to what ads need to show."
       }
     },
     "nextButton": "Next",
@@ -585,6 +590,7 @@
       "heading": "Before You Start",
       "notice1": "Always follow the organizer's permission and any rules for recording or taking photos at an event.",
       "notice2": "You're responsible for how you use anything you record or photograph.",
+      "legalCheckbox": "I agree to the Terms of Service and Privacy Policy",
       "agreeButton": "Agree and Continue"
     },
     "permission": {

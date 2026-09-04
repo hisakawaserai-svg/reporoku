@@ -29,6 +29,7 @@ import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/
 import { deleteStoredFile } from "../utils/files";
 import { formatBytes, listNoteStorageEntries } from "../utils/storageManagement";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
+import AdBanner from "../components/AdBanner";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
@@ -611,7 +612,7 @@ export default function NotesScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.topBarRow}>
         {mode === "list" && !isSearching ? (
           <TouchableOpacity
@@ -915,7 +916,9 @@ export default function NotesScreen() {
             <Text style={styles.bulkButtonText}>{t("notes.bulkDeleteButton", { count: selectedIds.size })}</Text>
           </TouchableOpacity>
         </View>
-      ) : null}
+      ) : (
+        <AdBanner />
+      )}
     </SafeAreaView>
   );
 }

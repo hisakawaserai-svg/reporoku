@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { InteractionManager } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +20,8 @@ import RecordCompleteScreen from "../screens/RecordCompleteScreen";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import StorageManagementScreen from "../screens/StorageManagementScreen";
 import HowToUseScreen from "../screens/HowToUseScreen";
+import OpenSourceLicensesScreen from "../screens/OpenSourceLicensesScreen";
+import { gatherAdsConsentAndInit } from "../ads/consent";
 import { getOnboardingCompleted } from "../utils/settings";
 import { runCrashRecoveryCheck } from "../utils/crashRecovery";
 
@@ -40,6 +42,7 @@ export type RootStackParamList = {
   RecordComplete: { noteId: string };
   Onboarding: undefined;
   StorageManagement: undefined;
+  OpenSourceLicenses: undefined;
   // section: 遷移元の画面に対応するタブを開いた状態で表示する場合に渡す
   HowToUse: { section?: "record" | "noteDetail" | "summary" | "notesList" | "settings" } | undefined;
 };
@@ -110,6 +113,12 @@ export default function RootNavigator() {
   // チェックが二重に走り、同じダイアログが繰り返し表示されてしまうため、起動後1回だけに絞る
   const crashCheckStartedRef = useRef(false);
 
+  useEffect(() => {
+    if (getOnboardingCompleted()) {
+      gatherAdsConsentAndInit();
+    }
+  }, []);
+
   return (
     <NavigationContainer
       ref={navigationRef}
@@ -157,6 +166,11 @@ export default function RootNavigator() {
           name="StorageManagement"
           component={StorageManagementScreen}
           options={{ title: t("navigation.storageManagementTitle") }}
+        />
+        <Stack.Screen
+          name="OpenSourceLicenses"
+          component={OpenSourceLicensesScreen}
+          options={{ title: t("navigation.openSourceLicensesTitle") }}
         />
         <Stack.Screen
           name="HowToUse"

@@ -116,6 +116,14 @@ npx expo start
 
 ネイティブビルドは `npx expo run:ios` / `npx expo run:android`（`ios/` `android/` は prebuild 生成物のため git 管理外）。
 
+**依存を追加・削除・更新したら**、設定画面のオープンソースライセンス一覧を最新にするため次を実行する:
+
+```bash
+npm run licenses:generate
+```
+
+（`react-native-oss-license` が `src/generated/ossLicenses.json` を再生成する。コミット忘れに注意。）
+
 アイコンの再生成:
 
 ```bash
@@ -135,6 +143,7 @@ python3 gen_reporoku_assets.py --install
 │   ├── db/           # SQLite スキーマ・リポジトリ・マイグレーション
 │   ├── utils/        # 録音復旧・バックアップ・レポートなど
 │   ├── i18n/         # 日本語・英語の辞書
+│   ├── generated/    # OSS ライセンス JSON（licenses:generate）
 │   └── theme/
 ├── design/icons/     # アプリアイコン生成スクリプトとアーカイブ
 ├── docs/             # 法務ページ・画面メモ

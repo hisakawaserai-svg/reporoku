@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { AdsConsent } from "react-native-google-mobile-ads";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -56,6 +58,9 @@ import {
 import { applyLanguagePreference } from "../i18n";
 import { getIsRecordingActive } from "../utils/recordingStatus";
 import GapSlider from "../components/GapSlider";
+import AdBanner from "../components/AdBanner";
+import { useAdsConsent } from "../ads/consent";
+import { LEGAL_URLS } from "../constants/legalUrls";
 import { createBackupZip } from "../utils/backup";
 import {
   InvalidBackupError,
@@ -75,17 +80,24 @@ import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
 
-type Row = { icon: keyof typeof Ionicons.glyphMap; labelKey: string; value?: string };
+type Row = {
+  icon: keyof typeof Ionicons.glyphMap;
+  labelKey: string;
+  value?: string;
+  action?: "terms" | "privacy" | "licenses" | "contact" | "adsPrivacy";
+  /** ブラウザなどアプリ外へ開く行 */
+  opensExternal?: boolean;
+};
 type Section = { titleKey: string; rows: Row[] };
 
 const SECTIONS: Section[] = [
   {
     titleKey: "settings.appInfo.sectionHeader",
     rows: [
-      { icon: "document-text-outline", labelKey: "settings.appInfo.terms" },
-      { icon: "shield-checkmark-outline", labelKey: "settings.appInfo.privacyPolicy" },
-      { icon: "code-slash-outline", labelKey: "settings.appInfo.openSourceLicenses" },
-      { icon: "mail-outline", labelKey: "settings.appInfo.contact" },
+      { icon: "document-text-outline", labelKey: "settings.appInfo.terms", action: "terms", opensExternal: true },
+      { icon: "shield-checkmark-outline", labelKey: "settings.appInfo.privacyPolicy", action: "privacy", opensExternal: true },
+      { icon: "code-slash-outline", labelKey: "settings.appInfo.openSourceLicenses", action: "licenses" },
+      { icon: "mail-outline", labelKey: "settings.appInfo.contact", action: "contact", opensExternal: true },
     ],
   },
 ];
@@ -93,6 +105,7 @@ const SECTIONS: Section[] = [
 export default function SettingsScreen() {
   const { t } = useTranslation();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { privacyOptionsRequired } = useAdsConsent();
   const [isSeeding, setIsSeeding] = useState(false);
   const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>(getLanguagePreference);
   const [speechRecognitionLanguage, setSpeechRecognitionLanguageState] = useState(getSpeechRecognitionLanguage);
@@ -372,6 +385,30 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleAppInfoRow = (action: Row["action"]) => {
+    if (action === "terms") {
+      Linking.openURL(LEGAL_URLS.terms).catch((e) => console.warn("[Settings] terms URL failed", e));
+      return;
+    }
+    if (action === "privacy") {
+      Linking.openURL(LEGAL_URLS.privacy).catch((e) => console.warn("[Settings] privacy URL failed", e));
+      return;
+    }
+    if (action === "contact") {
+      Linking.openURL(LEGAL_URLS.support).catch((e) => console.warn("[Settings] support URL failed", e));
+      return;
+    }
+    if (action === "adsPrivacy") {
+      AdsConsent.showPrivacyOptionsForm().catch((e) => {
+        console.warn("[Settings] ads privacy form failed", e);
+      });
+      return;
+    }
+    if (action === "licenses") {
+      navigation.navigate("OpenSourceLicenses");
+    }
+  };
+
   const speechRecognitionLanguageLabel = (code: string) => {
     const option = SPEECH_RECOGNITION_LANGUAGE_OPTIONS.find((opt) => opt.code === code);
     return option ? t(option.labelKey) : code;
@@ -428,7 +465,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content} scrollEnabled={!isGapSliderDragging}>
         <Text style={styles.title}>{t("settings.title")}</Text>
 
@@ -659,27 +696,44 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {SECTIONS.map((section) => (
+        {SECTIONS.map((section) => {
+          const rows = privacyOptionsRequired
+            ? [
+                ...section.rows,
+                {
+                  icon: "hand-left-outline" as const,
+                  labelKey: "settings.appInfo.adsPrivacy",
+                  action: "adsPrivacy" as const,
+                },
+              ]
+            : section.rows;
+          return (
           <View key={section.titleKey} style={styles.section}>
             <Text style={styles.sectionHeader}>{t(section.titleKey)}</Text>
             <View style={styles.card}>
-              {section.rows.map((row, i) => (
+              {rows.map((row, i) => (
                 <TouchableOpacity
                   key={row.labelKey}
                   style={[
                     styles.row,
-                    i < section.rows.length - 1 && styles.rowDivider,
+                    i < rows.length - 1 && styles.rowDivider,
                   ]}
+                  onPress={() => handleAppInfoRow(row.action)}
                 >
                   <Ionicons name={row.icon} size={20} color="#06c" style={styles.rowIcon} />
                   <Text style={styles.rowLabel}>{t(row.labelKey)}</Text>
                   {row.value ? <Text style={styles.rowValue}>{row.value}</Text> : null}
-                  <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+                  <Ionicons
+                    name={row.opensExternal ? "open-outline" : "chevron-forward"}
+                    size={16}
+                    color="#c7c7cc"
+                  />
                 </TouchableOpacity>
               ))}
             </View>
           </View>
-        ))}
+          );
+        })}
 
         {__DEV__ ? (
           <View style={styles.section}>
@@ -699,6 +753,8 @@ export default function SettingsScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <AdBanner />
 
       {/* バックアップ作成・復元は途中でデータ変更や画面遷移が起きると整合性が崩れうるため、
           処理中は画面全体を覆って一切操作できないようにする(スピナー表示だけでは不十分) */}
