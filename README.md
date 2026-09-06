@@ -116,14 +116,6 @@ npx expo start
 
 ネイティブビルドは `npx expo run:ios` / `npx expo run:android`（`ios/` `android/` は prebuild 生成物のため git 管理外）。
 
-**依存を追加・削除・更新したら**、設定画面のオープンソースライセンス一覧を最新にするため次を実行する:
-
-```bash
-npm run licenses:generate
-```
-
-（`react-native-oss-license` が `src/generated/ossLicenses.json` を再生成する。コミット忘れに注意。）
-
 アイコンの再生成:
 
 ```bash

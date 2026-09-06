@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -11,10 +11,9 @@ import { Ionicons } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
+import AdMrec from "../components/AdMrec";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
-import { useAdsConsent } from "../ads/consent";
-import { preloadInterstitial, showInterstitialThen } from "../ads/interstitial";
 
 function formatTime(unixMs: number, lang: string): string {
   return new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(unixMs);
@@ -39,8 +38,6 @@ export default function RecordCompleteScreen() {
   const [title, setTitle] = useState("");
   const [counts, setCounts] = useState({ star: 0, todo: 0, question: 0 });
 
-  const { ready: adsReady, npa } = useAdsConsent();
-
   useEffect(() => {
     (async () => {
       try {
@@ -62,10 +59,6 @@ export default function RecordCompleteScreen() {
     })();
   }, [sessionId]);
 
-  useEffect(() => {
-    if (adsReady) preloadInterstitial(npa);
-  }, [adsReady, npa]);
-
   const commitTitle = useCallback(() => {
     sessionsRepo
       .updateTitle(sessionId, title.trim())
@@ -74,23 +67,23 @@ export default function RecordCompleteScreen() {
 
   const handleViewNote = () => {
     commitTitle();
-    showInterstitialThen(npa, () => {
-      navigation.replace("NoteDetail", { noteId: sessionId });
-    });
+    navigation.replace("NoteDetail", { noteId: sessionId });
   };
 
   const handleClose = () => {
     commitTitle();
-    showInterstitialThen(npa, () => {
-      navigation.goBack();
-    });
+    navigation.goBack();
   };
 
   const defaultTitle = startedAt ? t("recordComplete.defaultTitle", { time: formatTime(startedAt, lang) }) : "";
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.checkCircle}>
           <Ionicons name="checkmark" size={36} color={colors.todo.accent} />
         </View>
@@ -131,7 +124,9 @@ export default function RecordCompleteScreen() {
             </View>
           ) : null}
         </View>
-      </View>
+
+        <AdMrec />
+      </ScrollView>
 
       <View style={styles.footer}>
         <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={handleViewNote}>
@@ -147,7 +142,8 @@ export default function RecordCompleteScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
-  content: { flex: 1, alignItems: "center", paddingTop: 48, paddingHorizontal: 32 },
+  scroll: { flex: 1 },
+  content: { alignItems: "center", paddingTop: 32, paddingHorizontal: 16, paddingBottom: 8 },
   checkCircle: {
     width: 76,
     height: 76,
@@ -160,9 +156,10 @@ const styles = StyleSheet.create({
   heading: { fontSize: fontSize.dialogHeading, fontWeight: "700", color: "#1c1c1e" },
   subheading: { fontSize: 14, color: "#8e8e93", marginTop: 6 },
 
-  fieldLabel: { alignSelf: "flex-start", fontSize: 13, color: "#8e8e93", marginTop: 32 },
+  fieldLabel: { alignSelf: "stretch", fontSize: 13, color: "#8e8e93", marginTop: 32, marginHorizontal: 16 },
   titleInput: {
-    width: "100%",
+    alignSelf: "stretch",
+    marginHorizontal: 16,
     borderWidth: 1,
     borderColor: "#e2e2e7",
     borderRadius: 10,

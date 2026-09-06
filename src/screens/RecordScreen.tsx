@@ -343,8 +343,6 @@ export default function RecordScreen() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [interim, setInterim] = useState("");
   const [audioUris, setAudioUris] = useState<string[]>([]);
-  const [diag, setDiag] = useState("");
-  const [restarts, setRestarts] = useState(0);
 
   // スリープモードのログ表示はFlatList+invertedで、画面に見えていない行は
   // 描画されない(仮想化される)ようにする。通常モードと同じく最新の発言が
@@ -373,7 +371,7 @@ export default function RecordScreen() {
   const lastBeginReasonRef = useRef<"interrupted" | "generic">("generic");
   const lastResultAt = useRef(0);
   const segStart = useRef<number | null>(null);
-  const [leadSec, setLeadSec] = useState(getPlaybackLeadSec);
+  const [leadSec] = useState(getPlaybackLeadSec);
 
   const isRecognizingRef = useRef(false);            // 現在ネイティブ側の音声認識セッションが動いているか(audiostart〜end間)
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -735,28 +733,6 @@ export default function RecordScreen() {
     ]);
   };
 
-  // 起動時に端末の能力を調べる
-  useEffect(() => {
-    (async () => {
-      try {
-        const onDevice = ExpoSpeechRecognitionModule.supportsOnDeviceRecognition();
-        const rec = ExpoSpeechRecognitionModule.supportsRecording();
-        const loc = await ExpoSpeechRecognitionModule.getSupportedLocales({});
-        const hasJa = loc.locales?.some((l: string) => l.toLowerCase().startsWith("ja"));
-        const jaInstalled = loc.installedLocales?.some((l: string) =>
-          l.toLowerCase().startsWith("ja")
-        );
-        setDiag(
-          `onDevice: ${onDevice} / recording: ${rec}\n` +
-            `ja 対応: ${hasJa} / ja DL済: ${jaInstalled}\n` +
-            `installed: ${JSON.stringify(loc.installedLocales)}`
-        );
-      } catch (e: any) {
-        setDiag(`診断エラー: ${e.message}`);
-      }
-    })();
-  }, []);
-
   const prevEnd = useRef(0);   // 前の発言が終わった時刻
 
   useSpeechRecognitionEvent("result", (e) => {
@@ -897,7 +873,6 @@ export default function RecordScreen() {
         return;
       }
     }
-    setRestarts((n) => n + 1);
     setTimeout(() => {
       if (!shouldRun.current) return;
       // 待機中にバックグラウンドへ回っていた場合は、ここでのリトライはせず
@@ -1049,7 +1024,6 @@ export default function RecordScreen() {
     finalizedRef.current = false;
     setBlocks([]);
     setAudioUris([]);
-    setRestarts(0);
     setRunning(true);
 
     const sessionId = genId();
@@ -1123,7 +1097,6 @@ export default function RecordScreen() {
       );
     setBlocks(restoredBlocks);
     setAudioUris([]);
-    setRestarts(0);
 
     // 強制終了でDB未登録のまま残っている音声ファイルがあれば、ここで取り込んでおく
     // (offset_ms/seqの連続性を保つため、実際に録音を再開する前に済ませておく必要がある)。
@@ -1269,11 +1242,6 @@ export default function RecordScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // debug
-  const rawLog = useRef<string[]>([]);
-  const [showLog, setShowLog] = useState("");
-  const [showDebug, setShowDebug] = useState(false);
 
   // ここから下は見た目専用の状態(録音・認識ロジックには関与しない)
 
@@ -1621,11 +1589,6 @@ export default function RecordScreen() {
           >
             <Ionicons name="help-circle-outline" size={22} color="#8e8e93" />
           </TouchableOpacity>
-          {__DEV__ ? (
-            <TouchableOpacity onPress={() => setShowDebug(true)} hitSlop={10}>
-              <Ionicons name="ellipsis-horizontal-circle-outline" size={22} color="#8e8e93" />
-            </TouchableOpacity>
-          ) : null}
         </View>
 
         <View style={styles.statusRow}>
@@ -1879,50 +1842,6 @@ export default function RecordScreen() {
           </View>
         </View>
       </View>
-
-      {__DEV__ ? (
-      <Modal visible={showDebug} animationType="slide" transparent onRequestClose={() => setShowDebug(false)}>
-        <Pressable style={styles.debugOverlay} onPress={() => setShowDebug(false)}>
-          <Pressable style={styles.debugPanel} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.debugTitle}>{t("record.debug.title")}</Text>
-            <Text style={styles.mono}>{diag}</Text>
-            <Text style={styles.mono}>
-              {t("record.debug.restartsAndFiles", { restarts, count: audioUris.length })}
-            </Text>
-            <View style={styles.debugLeadRow}>
-              <Text style={styles.debugLeadLabel}>{t("record.debug.leadSeconds", { sec: leadSec.toFixed(1) })}</Text>
-              <TouchableOpacity
-                style={[styles.pillButton, styles.pillButtonSmall]}
-                onPress={() => setLeadSec((v) => Math.round((v - 0.2) * 10) / 10)}
-              >
-                <Text style={[styles.pillButtonText, styles.pillButtonTextSmall]}>-0.2</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.pillButton, styles.pillButtonSmall]}
-                onPress={() => setLeadSec((v) => Math.round((v + 0.2) * 10) / 10)}
-              >
-                <Text style={[styles.pillButtonText, styles.pillButtonTextSmall]}>+0.2</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.pillButton}
-              onPress={() => setShowLog(rawLog.current.join("\n"))}
-            >
-              <Text style={styles.pillButtonText}>{t("record.debug.showRawLog")}</Text>
-            </TouchableOpacity>
-            <ScrollView style={styles.debugLogScroll}>
-              <Text style={styles.mono}>{showLog}</Text>
-            </ScrollView>
-            <TouchableOpacity
-              style={[styles.pillButton, styles.pillButtonPrimary]}
-              onPress={() => setShowDebug(false)}
-            >
-              <Text style={[styles.pillButtonText, styles.pillButtonTextPrimary]}>{t("common.close")}</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
-      ) : null}
 
       <Modal
         visible={memoModalVisible}
@@ -2621,17 +2540,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     zIndex: 10,
   },
-  debugPanel: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 20,
-    maxHeight: "70%",
-    gap: 10,
-  },
   debugTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
-  debugLogScroll: { maxHeight: 160 },
-  debugLeadRow: { flexDirection: "row", alignItems: "center", gap: 12 },
 
   promptKeyboardAvoider: { flex: 1 },
   promptPanel: {
@@ -2656,7 +2565,6 @@ const styles = StyleSheet.create({
   },
   promptInputMultiline: { minHeight: 80, textAlignVertical: "top" },
   promptButtonRow: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },
-  debugLeadLabel: { fontSize: 13, color: "#3c3c43", minWidth: 76 },
 
   pillButton: {
     backgroundColor: "#f2f2f7",
@@ -2666,14 +2574,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   pillButtonText: { fontSize: 14, color: "#06c", fontWeight: "600" },
-  pillButtonSmall: { paddingVertical: 6, paddingHorizontal: 10 },
-  pillButtonTextSmall: { fontSize: 13 },
   pillButtonPrimary: { backgroundColor: "#06c" },
   pillButtonTextPrimary: { color: "#fff" },
 
   gap: { marginVertical: 12 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  mono: { fontSize: 11, color: "#555", marginTop: 6 },
 
   playbackCard: {
     backgroundColor: "#fff",

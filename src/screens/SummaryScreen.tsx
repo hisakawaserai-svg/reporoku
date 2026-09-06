@@ -4,7 +4,7 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -578,6 +578,179 @@ export default function SummaryScreen() {
   // ToDo系の行だけ、元のNotesScreen/NoteDetailScreenと同じ左端の緑アクセントバーを添える
   const rowMenuAccentBarColor = rowMenu.anchor?.data.kind === "todo" ? "#34C759" : undefined;
 
+  type AccordionKey = "star" | "todo" | "question";
+  type ListSectionKey = AccordionKey | "ad";
+  type AccordionSection = { key: ListSectionKey; data: { id: string }[] };
+
+  const accordionSections: AccordionSection[] = [];
+  const starSectionVisible = showStarSection && (isSearching ? starSearchResults.length > 0 : starred.length > 0);
+  if (starSectionVisible) {
+    accordionSections.push({
+      key: "star",
+      data: collapsedSections.has("star") ? [] : [{ id: "star" }],
+    });
+  }
+  const showAllTabMrec = !isSearching && tab === "all";
+  if (showAllTabMrec) {
+    accordionSections.push({ key: "ad", data: [{ id: "ad" }] });
+  }
+  if (showTodoSection) {
+    accordionSections.push({
+      key: "todo",
+      data: collapsedSections.has("todo") ? [] : [{ id: "todo" }],
+    });
+  }
+  if (showQuestionSection) {
+    accordionSections.push({
+      key: "question",
+      data: collapsedSections.has("question") ? [] : [{ id: "question" }],
+    });
+  }
+
+  const renderAccordionHeader = (key: AccordionKey) => {
+    const count =
+      key === "star"
+        ? isSearching
+          ? starSearchResults.length
+          : starred.length
+        : key === "todo"
+          ? isSearching
+            ? todoSearchResults.length
+            : todos.pending.length
+          : isSearching
+            ? questionSearchResults.length
+            : unresolvedQuestions.length;
+    const pillStyle =
+      key === "star"
+        ? styles.sectionPillStar
+        : key === "todo"
+          ? styles.sectionPillTodo
+          : styles.sectionPillQuestion;
+    const pillTextStyle =
+      key === "star"
+        ? styles.sectionPillTextStar
+        : key === "todo"
+          ? styles.sectionPillTextTodo
+          : styles.sectionPillTextQuestion;
+    const labelKey =
+      key === "star"
+        ? "summaryScreen.section.starPill"
+        : key === "todo"
+          ? "summaryScreen.section.todoPill"
+          : "summaryScreen.section.questionPill";
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        style={styles.sectionHeaderRow}
+        onPress={() => toggleSection(key)}
+      >
+        <View style={[styles.sectionPill, pillStyle]}>
+          <Text style={[styles.sectionPillText, pillTextStyle]}>{t(labelKey)}</Text>
+        </View>
+        <Text style={styles.sectionCount}>{t("noteDetail.itemCount", { count })}</Text>
+        <Ionicons
+          name={collapsedSections.has(key) ? "chevron-forward" : "chevron-down"}
+          size={18}
+          color="#8e8e93"
+          style={styles.sectionChevron}
+        />
+      </TouchableOpacity>
+    );
+  };
+
+  const renderAccordionBody = (key: AccordionKey) => {
+    if (key === "star") {
+      return isSearching ? (
+        <>{starSearchResults.map(renderStarredRow)}</>
+      ) : (
+        <>
+          {starredGroups.map((g) => renderStarredGroupCard(g.name, g.items))}
+          {starredUngrouped.map(renderStarredRow)}
+        </>
+      );
+    }
+    if (key === "todo") {
+      return isSearching ? (
+        todoSearchResults.length === 0 ? (
+          <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noMatch")}</Text>
+        ) : (
+          <>{todoSearchResults.map(renderTodoRow)}</>
+        )
+      ) : (
+        <>
+          {todos.pending.length === 0 ? (
+            <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noPending")}</Text>
+          ) : (
+            todos.pending.map(renderTodoRow)
+          )}
+          <TouchableOpacity onPress={() => setShowDoneTodos((v) => !v)}>
+            <Text style={styles.expandToggleText}>
+              {showDoneTodos ? t("summaryScreen.todo.hideDone") : t("summaryScreen.todo.showDone")}
+            </Text>
+          </TouchableOpacity>
+          {showDoneTodos ? (
+            <View style={styles.expandedGroup}>
+              <View style={[styles.statusHeaderPill, styles.statusPillDone]}>
+                <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
+                  {t("summaryScreen.todo.doneCount", { count: todos.done.length })}
+                </Text>
+              </View>
+              {todos.done.length === 0 ? (
+                <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
+              ) : (
+                todos.done.map(renderTodoRow)
+              )}
+            </View>
+          ) : null}
+        </>
+      );
+    }
+    return isSearching ? (
+      questionSearchResults.length === 0 ? (
+        <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noMatch")}</Text>
+      ) : (
+        <>{questionSearchResults.map(renderQuestionRow)}</>
+      )
+    ) : (
+      <>
+        {unresolvedQuestions.length === 0 ? (
+          <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noUnresolved")}</Text>
+        ) : (
+          unresolvedQuestions.map(renderQuestionRow)
+        )}
+        <TouchableOpacity onPress={() => setShowMoreQuestions((v) => !v)}>
+          <Text style={styles.expandToggleText}>
+            {showMoreQuestions ? t("summaryScreen.question.hideMore") : t("summaryScreen.question.showMore")}
+          </Text>
+        </TouchableOpacity>
+        {showMoreQuestions ? (
+          <View style={styles.expandedGroup}>
+            <View style={[styles.statusHeaderPill, styles.statusPillDeferred]}>
+              <Text style={[styles.statusHeaderPillText, styles.statusPillTextDeferred]}>
+                {t("summaryScreen.question.deferredCount", { count: deferredQuestions.length })}
+              </Text>
+            </View>
+            {deferredQuestions.length === 0 ? (
+              <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
+            ) : (
+              deferredQuestions.map(renderQuestionRow)
+            )}
+            <View style={[styles.statusHeaderPill, styles.statusPillDone, styles.statusHeaderPillSpaced]}>
+              <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
+                {t("summaryScreen.question.resolvedCount", { count: resolvedQuestions.length })}
+              </Text>
+            </View>
+            {resolvedQuestions.length === 0 ? (
+              <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
+            ) : (
+              resolvedQuestions.map(renderQuestionRow)
+            )}
+          </View>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
@@ -615,193 +788,31 @@ export default function SummaryScreen() {
         ))}
       </View>
 
-      <ScrollView style={styles.content}>
-        {isEmptyForTab ? (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>
-              {isSearching
-                ? t("notes.search.noResults")
-                : t("summaryScreen.empty.hint")}
-            </Text>
-            {!isSearching ? <AdMrec /> : null}
-          </View>
-        ) : (
-          <>
-            {showStarSection && (isSearching ? starSearchResults.length > 0 : starred.length > 0) ? (
-              <View style={styles.section}>
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  style={styles.sectionHeaderRow}
-                  onPress={() => toggleSection("star")}
-                >
-                  <View style={[styles.sectionPill, styles.sectionPillStar]}>
-                    <Text style={[styles.sectionPillText, styles.sectionPillTextStar]}>
-                      {t("summaryScreen.section.starPill")}
-                    </Text>
-                  </View>
-                  <Text style={styles.sectionCount}>
-                    {t("noteDetail.itemCount", { count: isSearching ? starSearchResults.length : starred.length })}
-                  </Text>
-                  <Ionicons
-                    name={collapsedSections.has("star") ? "chevron-forward" : "chevron-down"}
-                    size={18}
-                    color="#8e8e93"
-                    style={styles.sectionChevron}
-                  />
-                </TouchableOpacity>
-                {!collapsedSections.has("star") ? (
-                  isSearching ? (
-                    starSearchResults.map(renderStarredRow)
-                  ) : (
-                    <>
-                      {starredGroups.map((g) => renderStarredGroupCard(g.name, g.items))}
-                      {starredUngrouped.map(renderStarredRow)}
-                    </>
-                  )
-                ) : null}
-              </View>
-            ) : null}
-
-            {!isSearching && tab === "all" ? <AdMrec /> : null}
-
-            {showTodoSection ? (
-            <View style={styles.section}>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                style={styles.sectionHeaderRow}
-                onPress={() => toggleSection("todo")}
-              >
-                <View style={[styles.sectionPill, styles.sectionPillTodo]}>
-                  <Text style={[styles.sectionPillText, styles.sectionPillTextTodo]}>
-                    {t("summaryScreen.section.todoPill")}
-                  </Text>
-                </View>
-                <Text style={styles.sectionCount}>
-                  {t("noteDetail.itemCount", { count: isSearching ? todoSearchResults.length : todos.pending.length })}
-                </Text>
-                <Ionicons
-                  name={collapsedSections.has("todo") ? "chevron-forward" : "chevron-down"}
-                  size={18}
-                  color="#8e8e93"
-                  style={styles.sectionChevron}
-                />
-              </TouchableOpacity>
-              {!collapsedSections.has("todo") ? (
-              isSearching ? (
-                todoSearchResults.length === 0 ? (
-                  <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noMatch")}</Text>
-                ) : (
-                  todoSearchResults.map(renderTodoRow)
-                )
-              ) : (
-                <>
-                  {todos.pending.length === 0 ? (
-                    <Text style={styles.emptyGroupText}>{t("summaryScreen.todo.noPending")}</Text>
-                  ) : (
-                    todos.pending.map(renderTodoRow)
-                  )}
-                  <TouchableOpacity onPress={() => setShowDoneTodos((v) => !v)}>
-                    <Text style={styles.expandToggleText}>
-                      {showDoneTodos ? t("summaryScreen.todo.hideDone") : t("summaryScreen.todo.showDone")}
-                    </Text>
-                  </TouchableOpacity>
-                  {showDoneTodos ? (
-                    <View style={styles.expandedGroup}>
-                      <View style={[styles.statusHeaderPill, styles.statusPillDone]}>
-                        <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
-                          {t("summaryScreen.todo.doneCount", { count: todos.done.length })}
-                        </Text>
-                      </View>
-                      {todos.done.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
-                      ) : (
-                        todos.done.map(renderTodoRow)
-                      )}
-                    </View>
-                  ) : null}
-                </>
-              )
-              ) : null}
-            </View>
-            ) : null}
-
-            {showQuestionSection ? (
-            <View style={styles.section}>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                style={styles.sectionHeaderRow}
-                onPress={() => toggleSection("question")}
-              >
-                <View style={[styles.sectionPill, styles.sectionPillQuestion]}>
-                  <Text style={[styles.sectionPillText, styles.sectionPillTextQuestion]}>
-                    {t("summaryScreen.section.questionPill")}
-                  </Text>
-                </View>
-                <Text style={styles.sectionCount}>
-                  {t("noteDetail.itemCount", {
-                    count: isSearching ? questionSearchResults.length : unresolvedQuestions.length,
-                  })}
-                </Text>
-                <Ionicons
-                  name={collapsedSections.has("question") ? "chevron-forward" : "chevron-down"}
-                  size={18}
-                  color="#8e8e93"
-                  style={styles.sectionChevron}
-                />
-              </TouchableOpacity>
-              {!collapsedSections.has("question") ? (
-              isSearching ? (
-                questionSearchResults.length === 0 ? (
-                  <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noMatch")}</Text>
-                ) : (
-                  questionSearchResults.map(renderQuestionRow)
-                )
-              ) : (
-                <>
-                  {unresolvedQuestions.length === 0 ? (
-                    <Text style={styles.emptyGroupText}>{t("summaryScreen.question.noUnresolved")}</Text>
-                  ) : (
-                    unresolvedQuestions.map(renderQuestionRow)
-                  )}
-                  <TouchableOpacity onPress={() => setShowMoreQuestions((v) => !v)}>
-                    <Text style={styles.expandToggleText}>
-                      {showMoreQuestions ? t("summaryScreen.question.hideMore") : t("summaryScreen.question.showMore")}
-                    </Text>
-                  </TouchableOpacity>
-                  {showMoreQuestions ? (
-                    <View style={styles.expandedGroup}>
-                      <View style={[styles.statusHeaderPill, styles.statusPillDeferred]}>
-                        <Text style={[styles.statusHeaderPillText, styles.statusPillTextDeferred]}>
-                          {t("summaryScreen.question.deferredCount", { count: deferredQuestions.length })}
-                        </Text>
-                      </View>
-                      {deferredQuestions.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
-                      ) : (
-                        deferredQuestions.map(renderQuestionRow)
-                      )}
-                      <View
-                        style={[styles.statusHeaderPill, styles.statusPillDone, styles.statusHeaderPillSpaced]}
-                      >
-                        <Text style={[styles.statusHeaderPillText, styles.statusPillTextDone]}>
-                          {t("summaryScreen.question.resolvedCount", { count: resolvedQuestions.length })}
-                        </Text>
-                      </View>
-                      {resolvedQuestions.length === 0 ? (
-                        <Text style={styles.emptyGroupText}>{t("summaryScreen.none")}</Text>
-                      ) : (
-                        resolvedQuestions.map(renderQuestionRow)
-                      )}
-                    </View>
-                  ) : null}
-                </>
-              )
-              ) : null}
-            </View>
-            ) : null}
-          </>
-        )}
-      </ScrollView>
+      {isEmptyForTab ? (
+        <View style={styles.placeholder}>
+          <Text style={styles.placeholderText}>
+            {isSearching ? t("notes.search.noResults") : t("summaryScreen.empty.hint")}
+          </Text>
+          {!isSearching ? <AdMrec /> : null}
+        </View>
+      ) : (
+        <SectionList
+          style={styles.content}
+          stickySectionHeadersEnabled
+          sections={accordionSections}
+          keyExtractor={(item) => item.id}
+          renderSectionHeader={({ section }) =>
+            section.key === "ad" ? null : renderAccordionHeader(section.key)
+          }
+          renderItem={({ section }) =>
+            section.key === "ad" ? (
+              <AdMrec />
+            ) : (
+              <View style={styles.section}>{renderAccordionBody(section.key)}</View>
+            )
+          }
+        />
+      )}
 
       {!isSearching && (tab === "todo" || tab === "question") ? (
         <TouchableOpacity
@@ -1014,17 +1025,21 @@ const styles = StyleSheet.create({
   content: { flex: 1, marginTop: 4 },
 
   section: { marginBottom: 8 },
+  // ノート一覧の月見出しと同じく、スクロール中も画面上部に貼り付く。カードが透けないよう背景を付ける
   sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    backgroundColor: "#f2f2f7",
   },
+  // マスキングテープ風に、角の丸みを抑えて少し傾ける(ノート一覧の月ラベルと同じ)
   sectionPill: {
-    borderRadius: 999,
+    borderRadius: 3,
     paddingHorizontal: 12,
     paddingVertical: 5,
+    transform: [{ rotate: "-3deg" }],
   },
   sectionPillText: { fontSize: 13, fontWeight: "700" },
   sectionPillStar: { backgroundColor: colors.star.background },
@@ -1033,7 +1048,15 @@ const styles = StyleSheet.create({
   sectionPillTextTodo: { color: colors.todo.accent },
   sectionPillQuestion: { backgroundColor: colors.question.background },
   sectionPillTextQuestion: { color: colors.question.accent },
-  sectionCount: { fontSize: 13, color: "#8e8e93", marginLeft: 8 },
+  sectionCount: {
+    fontSize: 13,
+    color: "#8e8e93",
+    marginLeft: 8,
+    backgroundColor: "#e5e5ea",
+    borderRadius: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
   sectionChevron: { marginLeft: "auto" },
 
   // Todo/質問タブでのみ表示するクイック追加FAB
@@ -1159,11 +1182,11 @@ const styles = StyleSheet.create({
   deferButtonText: { fontSize: 12, fontWeight: "600", color: "#3c3c43" },
 
   placeholder: {
+    flex: 1,
     alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-    paddingHorizontal: 32,
-    gap: 8,
+    paddingTop: 40,
+    paddingHorizontal: 16,
+    gap: 24,
   },
   placeholderText: { color: "#8e8e93", fontSize: 14, textAlign: "center" },
 

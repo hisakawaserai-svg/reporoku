@@ -13,6 +13,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  SectionList,
   StyleSheet,
   Switch,
   Text,
@@ -1965,36 +1966,47 @@ export default function NoteDetailScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
       {viewMode === "summary" ? (
-        <ScrollView style={styles.summaryScroll}>
-          {SUMMARY_SECTIONS.every((s) => s.items.length === 0) ? (
-            <>
-              <Text style={styles.emptyText}>{t("noteDetail.summary.empty")}</Text>
-              <AdMrec />
-            </>
-          ) : (
-            SUMMARY_SECTIONS.map((section) => (
-              <Fragment key={section.key}>
-                {section.items.length === 0 ? null : (
-                  <View>
-                    <View style={styles.summarySectionHeader}>
-                      <View style={[styles.summaryPill, { backgroundColor: section.bg }]}>
-                        <Ionicons name={section.icon} size={13} color={section.tint} />
-                        <Text style={[styles.summaryPillText, { color: section.tint }]}>
-                          {section.label}
-                        </Text>
-                      </View>
-                      <Text style={styles.summarySectionCount}>
-                        {t("noteDetail.itemCount", { count: section.items.length })}
-                      </Text>
-                    </View>
-                    {section.items.map((block) => renderSummaryRow(section.key, block))}
-                  </View>
-                )}
+        SUMMARY_SECTIONS.every((s) => s.items.length === 0) ? (
+          <View style={styles.summaryEmpty}>
+            <Text style={styles.emptyText}>{t("noteDetail.summary.empty")}</Text>
+            <AdMrec />
+          </View>
+        ) : (
+          <SectionList
+            style={styles.summaryScroll}
+            stickySectionHeadersEnabled
+            sections={SUMMARY_SECTIONS.filter((s) => s.items.length > 0).map((section) => ({
+              key: section.key,
+              label: section.label,
+              icon: section.icon,
+              bg: section.bg,
+              tint: section.tint,
+              data: [{ id: section.key }],
+              items: section.items,
+            }))}
+            keyExtractor={(item) => item.id}
+            renderSectionHeader={({ section }) => (
+              <View style={styles.summarySectionHeader}>
+                <View style={[styles.summaryPill, { backgroundColor: section.bg }]}>
+                  <Ionicons name={section.icon} size={13} color={section.tint} />
+                  <Text style={[styles.summaryPillText, { color: section.tint }]}>{section.label}</Text>
+                </View>
+                <Text style={styles.summarySectionCount}>
+                  {t("noteDetail.itemCount", { count: section.items.length })}
+                </Text>
+              </View>
+            )}
+            renderItem={({ section }) => (
+              <View>
+                {section.items.map((block) => renderSummaryRow(section.key, block))}
                 {section.key === "star" ? <AdMrec /> : null}
-              </Fragment>
-            ))
-          )}
-        </ScrollView>
+              </View>
+            )}
+            ListHeaderComponent={
+              SUMMARY_SECTIONS.find((s) => s.key === "star")?.items.length ? null : <AdMrec />
+            }
+          />
+        )
       ) : (
       <>
       {isHeaderCollapsed ? null : (
@@ -2441,24 +2453,35 @@ const styles = StyleSheet.create({
 
   // 「まとめ」タブ本体
   summaryScroll: { flex: 1, marginTop: 4 },
+  summaryEmpty: { flex: 1, marginTop: 4 },
   summarySectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 8,
+    backgroundColor: "#f2f2f7",
   },
+  // ノート一覧の月ラベルと同じマスキングテープ風
   summaryPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 5,
+    borderRadius: 3,
+    transform: [{ rotate: "-3deg" }],
   },
   summaryPillText: { fontSize: 13, fontWeight: "700" },
-  summarySectionCount: { fontSize: 12, color: "#8e8e93" },
+  summarySectionCount: {
+    fontSize: 12,
+    color: "#8e8e93",
+    backgroundColor: "#e5e5ea",
+    borderRadius: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
   summaryCard: {
     backgroundColor: "#fff",
     borderRadius: radius.card,
@@ -2702,7 +2725,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   questionTermText: { fontSize: 12, color: colors.question.accent, marginTop: 4 },
-  emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40 },
+  emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40, marginBottom: 24, paddingHorizontal: 32 },
   // 音声すら記録されず、ブロックが1つも無いセッション用。長押しで開く既存の
   // 「メモを追加」「写真を追加」と同じ操作を、直接タップできるボタンとして用意する
   emptyStateBox: { alignItems: "center", marginTop: 16 },

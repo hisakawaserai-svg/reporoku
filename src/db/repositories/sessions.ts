@@ -156,6 +156,16 @@ export async function updateDuration(id: string, durationMs: number): Promise<vo
   ]);
 }
 
+export async function updateStartedAt(id: string, startedAt: number): Promise<void> {
+  const db = await getDb();
+  const now = Date.now();
+  await db.runAsync('UPDATE sessions SET started_at = ?, updated_at = ? WHERE id = ?;', [
+    startedAt,
+    now,
+    id,
+  ]);
+}
+
 export async function updateSectionGapMs(id: string, sectionGapMs: number): Promise<void> {
   const db = await getDb();
   const now = Date.now();

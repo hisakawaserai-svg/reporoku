@@ -149,3 +149,61 @@ export async function mergeSessionAudioSegments(sessionId: string): Promise<void
 
   await Promise.all(segments.map((seg) => deleteStoredFile(seg.fileUri)));
 }
+
+// 実録音が短いときに、末尾へ無音を足して目標尺の1本にする(ストア撮影用)。
+// 結合と同じく、標準44byteヘッダで書き出す。失敗したらnull(呼び出し側は元ファイルを使う)
+export async function padWavToDurationMs(
+  sourceUri: string,
+  targetDurationMs: number
+): Promise<MergeAudioResult | null> {
+  const info = readWavHeader(sourceUri);
+  if (!info) return null;
+  const srcFile = new File(sourceUri);
+  if (!srcFile.exists) return null;
+  const byteRate = info.sampleRate * info.blockAlign;
+  if (byteRate <= 0) return null;
+
+  const currentDataBytes = alignDownToBlock(effectiveDataSize(info, srcFile.size ?? 0), info.blockAlign);
+  const targetDataBytes = alignDownToBlock(Math.round((targetDurationMs / 1000) * byteRate), info.blockAlign);
+  const silenceBytes = Math.max(0, targetDataBytes - currentDataBytes);
+
+  const outFile = new File(getAudioDirectoryUri(), `padded_${genId()}.wav`);
+  if (outFile.exists) outFile.delete();
+  outFile.create();
+  const outHandle = outFile.open(FileMode.ReadWrite);
+  let totalDataBytes = 0;
+  try {
+    outHandle.offset = 44;
+    const srcHandle = srcFile.open(FileMode.ReadOnly);
+    try {
+      srcHandle.offset = info.dataOffset;
+      let remaining = currentDataBytes;
+      while (remaining > 0) {
+        const chunkLen = Math.min(COPY_CHUNK_BYTES, remaining);
+        const chunk = srcHandle.readBytes(chunkLen);
+        if (chunk.length === 0) break;
+        outHandle.writeBytes(chunk);
+        totalDataBytes += chunk.length;
+        remaining -= chunk.length;
+      }
+    } finally {
+      srcHandle.close();
+    }
+    totalDataBytes += writeSilence(outHandle, silenceBytes);
+    outHandle.offset = 0;
+    outHandle.writeBytes(buildCanonicalWavHeader(info, totalDataBytes));
+  } catch (e) {
+    outHandle.close();
+    try {
+      if (outFile.exists) outFile.delete();
+    } catch {
+      // 失敗ファイルが残っても撮影用の一時データなので握りつぶす
+    }
+    console.warn("[audioMerge] 無音パディングに失敗しました", e);
+    return null;
+  }
+  outHandle.close();
+
+  const durationMs = Math.round((totalDataBytes / byteRate) * 1000);
+  return { fileUri: outFile.uri, durationMs };
+}

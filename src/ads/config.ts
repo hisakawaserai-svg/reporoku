@@ -21,22 +21,11 @@ const PROD_MREC_UNIT_ID = Platform.select({
   default: "",
 }) as string;
 
-const PROD_INTERSTITIAL_UNIT_ID = Platform.select({
-  ios: "ca-app-pub-3194046005390900/2549557504",
-  android: "ca-app-pub-3194046005390900/2801567894",
-  default: "",
-}) as string;
-
 export const BANNER_UNIT_ID =
   __DEV__ || !PROD_BANNER_UNIT_ID ? TestIds.ADAPTIVE_BANNER : PROD_BANNER_UNIT_ID;
 
 export const MREC_UNIT_ID =
   __DEV__ || !PROD_MREC_UNIT_ID ? TestIds.BANNER : PROD_MREC_UNIT_ID;
-
-export const INTERSTITIAL_UNIT_ID =
-  __DEV__ || !PROD_INTERSTITIAL_UNIT_ID
-    ? TestIds.INTERSTITIAL
-    : PROD_INTERSTITIAL_UNIT_ID;
 
 /**
  * アダプティブバナー用の下限高さ（ラベル込み）。

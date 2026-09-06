@@ -19,8 +19,8 @@ import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
-import { Directory } from "expo-file-system";
-import { seedDevTestData } from "../utils/devTestData";
+import { Directory, File, Paths } from "expo-file-system";
+import { deleteDevTestData, seedDevTestData, attachLatestAudioToHeroNotes, type DevTestDataLocale } from "../utils/devTestData";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
   PARAGRAPH_GAP_FACTORY_DEFAULT_MS,
@@ -107,6 +107,7 @@ export default function SettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { privacyOptionsRequired } = useAdsConsent();
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isDeletingTestData, setIsDeletingTestData] = useState(false);
   const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>(getLanguagePreference);
   const [speechRecognitionLanguage, setSpeechRecognitionLanguageState] = useState(getSpeechRecognitionLanguage);
   const [sectionGroupingEnabled, setSectionGroupingEnabledState] = useState(getSectionGroupingEnabled);
@@ -223,16 +224,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleRestoreBackup = async () => {
+  const confirmRestoreFromZipUri = async (zipUri: string) => {
     if (isBackingUp || isRestoring) return;
-
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["application/zip", "application/x-zip-compressed", "application/octet-stream"],
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled) return;
-    const zipUri = result.assets[0]?.uri;
-    if (!zipUri) return;
 
     let extractDir: Directory;
     setIsRestoring(true);
@@ -289,6 +282,34 @@ export default function SettingsScreen() {
         },
       ]
     );
+  };
+
+  const handleRestoreBackup = async () => {
+    if (isBackingUp || isRestoring) return;
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["application/zip", "application/x-zip-compressed", "application/octet-stream"],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
+    const zipUri = result.assets[0]?.uri;
+    if (!zipUri) return;
+    await confirmRestoreFromZipUri(zipUri);
+  };
+
+  // シミュレータでは Safari 経由の zip が書類ピッカーに出ない。Mac から
+  // Documents へ cp したあとに、この開発者向け導線で復元する
+  const handleRestoreFromAppDocuments = async () => {
+    if (isBackingUp || isRestoring) return;
+    const docs = new Directory(Paths.document);
+    const zips = docs.exists
+      ? docs.list().filter((item): item is File => item instanceof File && item.name.toLowerCase().endsWith(".zip"))
+      : [];
+    if (zips.length === 0) {
+      Alert.alert(t("settings.dev.restoreFromDocumentsNone"));
+      return;
+    }
+    await confirmRestoreFromZipUri(zips[0].uri);
   };
 
   const handleToggleSectionGrouping = (value: boolean) => {
@@ -450,11 +471,11 @@ export default function SettingsScreen() {
     ]);
   };
 
-  const handleSeedTestData = async () => {
-    if (isSeeding) return;
+  const handleSeedTestData = async (locale: DevTestDataLocale) => {
+    if (isSeeding || isDeletingTestData) return;
     setIsSeeding(true);
     try {
-      await seedDevTestData();
+      await seedDevTestData(locale);
       Alert.alert(t("settings.dev.seedDone"));
     } catch (e) {
       console.warn("[Dev] テストデータの投入に失敗しました", e);
@@ -462,6 +483,44 @@ export default function SettingsScreen() {
     } finally {
       setIsSeeding(false);
     }
+  };
+
+  const handleAttachLatestAudioToHero = async () => {
+    if (isSeeding || isDeletingTestData || isBackingUp || isRestoring) return;
+    try {
+      const attached = await attachLatestAudioToHeroNotes();
+      Alert.alert(
+        attached > 0 ? t("settings.dev.attachAudioDone", { count: attached }) : t("settings.dev.attachAudioNone")
+      );
+    } catch (e) {
+      console.warn("[Dev] 研修ノートへの音声コピーに失敗しました", e);
+      Alert.alert(t("settings.dev.attachAudioFailed"));
+    }
+  };
+
+  const handleDeleteTestData = () => {
+    if (isSeeding || isDeletingTestData) return;
+    Alert.alert(t("settings.dev.deleteConfirm.title"), t("settings.dev.deleteConfirm.message"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("common.delete"),
+        style: "destructive",
+        onPress: async () => {
+          setIsDeletingTestData(true);
+          try {
+            const deleted = await deleteDevTestData();
+            Alert.alert(
+              deleted > 0 ? t("settings.dev.deleteDone", { count: deleted }) : t("settings.dev.deleteNone")
+            );
+          } catch (e) {
+            console.warn("[Dev] テストデータの削除に失敗しました", e);
+            Alert.alert(t("settings.dev.deleteFailed"));
+          } finally {
+            setIsDeletingTestData(false);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -740,13 +799,49 @@ export default function SettingsScreen() {
             <Text style={styles.sectionHeader}>{t("settings.dev.sectionHeader")}</Text>
             <View style={styles.card}>
               <TouchableOpacity
-                style={styles.row}
-                disabled={isSeeding}
-                onPress={handleSeedTestData}
+                style={[styles.row, styles.rowDivider]}
+                disabled={isSeeding || isDeletingTestData}
+                onPress={() => handleSeedTestData("ja")}
               >
                 <Ionicons name="flask-outline" size={20} color="#06c" style={styles.rowIcon} />
                 <Text style={styles.rowLabel}>
-                  {isSeeding ? t("settings.dev.seeding") : t("settings.dev.seedButton")}
+                  {isSeeding ? t("settings.dev.seeding") : t("settings.dev.seedButtonJa")}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.row, styles.rowDivider]}
+                disabled={isSeeding || isDeletingTestData}
+                onPress={() => handleSeedTestData("en")}
+              >
+                <Ionicons name="flask-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>
+                  {isSeeding ? t("settings.dev.seeding") : t("settings.dev.seedButtonEn")}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.row, styles.rowDivider]}
+                disabled={isBackingUp || isRestoring}
+                onPress={handleRestoreFromAppDocuments}
+              >
+                <Ionicons name="archive-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>{t("settings.dev.restoreFromDocuments")}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.row, styles.rowDivider]}
+                disabled={isSeeding || isDeletingTestData || isBackingUp || isRestoring}
+                onPress={handleAttachLatestAudioToHero}
+              >
+                <Ionicons name="volume-medium-outline" size={20} color="#06c" style={styles.rowIcon} />
+                <Text style={styles.rowLabel}>{t("settings.dev.attachAudio")}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.row}
+                disabled={isSeeding || isDeletingTestData}
+                onPress={handleDeleteTestData}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.danger.action} style={styles.rowIcon} />
+                <Text style={[styles.rowLabel, { color: colors.danger.action }]}>
+                  {isDeletingTestData ? t("settings.dev.deleting") : t("settings.dev.deleteButton")}
                 </Text>
               </TouchableOpacity>
             </View>

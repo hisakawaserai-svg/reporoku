@@ -16,7 +16,6 @@
 - iOS と Android は**同一のバージョン番号**を使う（マーケティングバージョン／`versionName`）
 - ビルド番号（iOS の `CURRENT_PROJECT_VERSION` / Android の `versionCode`）は
   **両 OS で独立してカウントし、統一しない**
-- Android は 1.0 を経ず **1.1 から公開**する（iOS の初回公開が 1.0 のため、番号を合わせる）
 - 版番号もビルド番号も `app-rn/app.json` の 1 か所だけを直し、`npx expo prebuild` で
   ネイティブへ通す。`ios/` `android/` を手で直さない（直しても次の prebuild で消える）
 

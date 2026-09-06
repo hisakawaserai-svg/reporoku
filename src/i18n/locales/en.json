@@ -117,9 +117,25 @@
     "dev": {
       "sectionHeader": "Developer",
       "seeding": "Seeding…",
-      "seedButton": "Insert Test Data",
+      "deleting": "Deleting…",
+      "seedButtonJa": "Insert Japanese test data",
+      "seedButtonEn": "Insert English test data",
       "seedDone": "Test data added",
-      "seedFailed": "Failed to insert test data"
+      "seedFailed": "Failed to insert test data",
+      "deleteButton": "Delete test data",
+      "deleteConfirm": {
+        "title": "Delete test data?",
+        "message": "Only notes inserted for development will be deleted. Notes you recorded yourself will be kept."
+      },
+      "deleteDone": "Deleted {{count}} test note(s)",
+      "deleteNone": "No test data to delete",
+      "deleteFailed": "Failed to delete test data",
+      "restoreFromDocuments": "Restore from zip in app Documents",
+      "restoreFromDocumentsNone": "No zip in Documents. Copy one from the Mac terminal first.",
+      "attachAudio": "Attach latest recording to the training note",
+      "attachAudioDone": "Attached audio to {{count}} training note(s)",
+      "attachAudioNone": "No recording found. Finish the say recording into a note, then try again.",
+      "attachAudioFailed": "Failed to copy audio"
     },
     "languageSection": {
       "sectionHeader": "Language"
@@ -203,12 +219,6 @@
       "cameraPermissionDenied": "[Camera permission denied]",
       "micPermissionDenied": "[Microphone permission denied]"
     },
-    "debug": {
-      "title": "Debug Info (Testing)",
-      "restartsAndFiles": "{{restarts}} restarts / {{count}} audio files",
-      "leadSeconds": "{{sec}}s lead",
-      "showRawLog": "Show Raw Log"
-    },
     "section": {
       "header": "Section {{index}} ({{range}})"
     },
@@ -241,6 +251,7 @@
       "title": "This will delete {{count}} note(s). Are you sure?"
     },
     "bulkDeleteButton": "Delete Selected ({{count}})",
+    "bulkCancelButton": "Stop",
     "menu": {
       "open": "Open Note"
     },

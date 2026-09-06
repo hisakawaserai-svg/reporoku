@@ -117,9 +117,25 @@
     "dev": {
       "sectionHeader": "開発者向け",
       "seeding": "投入中…",
-      "seedButton": "テストデータを投入する",
+      "deleting": "削除中…",
+      "seedButtonJa": "日本語のテストデータを投入する",
+      "seedButtonEn": "英語のテストデータを投入する",
       "seedDone": "テストデータを追加しました",
-      "seedFailed": "テストデータの投入に失敗しました"
+      "seedFailed": "テストデータの投入に失敗しました",
+      "deleteButton": "テストデータを削除する",
+      "deleteConfirm": {
+        "title": "テストデータを削除しますか？",
+        "message": "開発用に投入したノートだけを削除します。自分で録音したノートは残ります。"
+      },
+      "deleteDone": "テストデータ {{count}} 件を削除しました",
+      "deleteNone": "削除するテストデータはありませんでした",
+      "deleteFailed": "テストデータの削除に失敗しました",
+      "restoreFromDocuments": "アプリ内のzipから復元する",
+      "restoreFromDocumentsNone": "Documentsにzipがありません。Macのターミナルからコピーしてください。",
+      "attachAudio": "直近の録音を研修ノートへ載せる",
+      "attachAudioDone": "研修ノート {{count}} 件に音声を載せました",
+      "attachAudioNone": "載せる音声が見つかりませんでした。sayの録音を「終了」してノートにしてから、もう一度押してください",
+      "attachAudioFailed": "音声のコピーに失敗しました"
     },
     "languageSection": {
       "sectionHeader": "言語"
@@ -203,12 +219,6 @@
       "cameraPermissionDenied": "[カメラ権限が拒否されました]",
       "micPermissionDenied": "[マイク権限が拒否されました]"
     },
-    "debug": {
-      "title": "検証用デバッグ情報",
-      "restartsAndFiles": "再起動 {{restarts}} 回 / 音声ファイル {{count}} 個",
-      "leadSeconds": "手前 {{sec}} 秒",
-      "showRawLog": "生ログを表示"
-    },
     "section": {
       "header": "セクション{{index}} ({{range}})"
     },
@@ -241,6 +251,7 @@
       "title": "{{count}}件のノートを削除します。よろしいですか？"
     },
     "bulkDeleteButton": "選択した項目を削除({{count}}件)",
+    "bulkCancelButton": "止める",
     "menu": {
       "open": "ノートを開く"
     },

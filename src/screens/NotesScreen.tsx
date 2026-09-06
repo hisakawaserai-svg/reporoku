@@ -28,7 +28,6 @@ import * as audioFilesRepo from "../db/repositories/audioFiles";
 import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/types";
 import { deleteStoredFile } from "../utils/files";
 import { formatBytes, listNoteStorageEntries } from "../utils/storageManagement";
-import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import AdBanner from "../components/AdBanner";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
@@ -206,16 +205,12 @@ export default function NotesScreen() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [monthGroups, setMonthGroups] = useState<MonthGroup<SessionSummary>[]>([]);
-  // リスト/カレンダーの行(セッションカード)を長押しして開く選択肢メニュー。他画面と共通の
-  // RowLongPressMenuを使い、対象行の実測座標の近くにカード状のメニューを吹き出し表示する
-  const rowMenu = useRowLongPressMenu<SessionSummary>();
   const [calendarMonthKey, setCalendarMonthKey] = useState<string | null>(null);
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [monthPickerVisible, setMonthPickerVisible] = useState(false);
   const [monthPickerYear, setMonthPickerYear] = useState(() => new Date().getFullYear());
   const calendarInitRef = useRef(false);
-  // リストタブの複数選択・一括削除(カレンダータブは対象外)。右上「編集」またはカードの
-  // 長押しで入る。選択モード中は長押しメニュー(rowMenu)は使わない
+  // リスト/カレンダーの複数選択・一括削除。右上「編集」またはカードの長押しで入る
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 選択モード中だけ、各ノートの使用容量(音声+写真)をカードに表示する。
@@ -402,24 +397,6 @@ export default function NotesScreen() {
     ]);
   };
 
-  const confirmDeleteSession = (session: SessionSummary) => {
-    Alert.alert(t("notes.deleteConfirm.title"), t("notes.deleteConfirm.message"), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("common.delete"),
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteSessionCompletely(session.id);
-            loadNotes();
-          } catch (e) {
-            console.warn("[DB] ノートの削除に失敗しました", e);
-          }
-        },
-      },
-    ]);
-  };
-
   const enterSelectionMode = (initialSessionId?: string) => {
     setSelectionMode(true);
     setSelectedIds(initialSessionId ? new Set([initialSessionId]) : new Set());
@@ -460,8 +437,7 @@ export default function NotesScreen() {
     ]);
   };
 
-  // カード本体の中身(タイトル・メタ・バッジ・サムネイル)。長押しメニューのゴーストカードでも
-  // 全く同じ関数を呼んで描画することで、実際のカードと見た目が食い違わないようにする
+  // カード本体の中身(タイトル・メタ・バッジ・サムネイル)
   const renderCardContent = (session: SessionSummary) => {
     const thumbBadge =
       session.photoCount > 1
@@ -479,7 +455,7 @@ export default function NotesScreen() {
           <Text style={styles.cardMeta}>
             {t("notes.cardMeta.startedAt", { time: formatTime(session.startedAt, lang) })} ・{" "}
             {formatDuration(session.durationMs, t)}
-            {selectionMode && mode === "list"
+            {selectionMode
               ? ` ・ ${formatBytes(noteSizeBytes[session.id] ?? 0)}`
               : ""}
           </Text>
@@ -525,7 +501,7 @@ export default function NotesScreen() {
   };
 
   const renderCard = (session: SessionSummary, compact = false) => {
-    const showCheckbox = selectionMode && mode === "list" && !compact;
+    const showCheckbox = selectionMode;
     const isSelected = selectedIds.has(session.id);
     return (
       <TouchableOpacity
@@ -533,14 +509,12 @@ export default function NotesScreen() {
         style={[styles.card, compact && styles.cardNoMargin]}
         activeOpacity={0.7}
         onPress={() => {
-          if (showCheckbox) toggleSelected(session.id);
+          if (selectionMode) toggleSelected(session.id);
           else goToNote(session.id);
         }}
         onLongPress={() => {
-          if (mode === "list" && !selectionMode) enterSelectionMode(session.id);
-          else if (!selectionMode) rowMenu.open(session.id, session);
+          if (!selectionMode) enterSelectionMode(session.id);
         }}
-        ref={rowMenu.registerRef(session.id)}
       >
         {showCheckbox ? (
           <View style={styles.checkboxWrap}>
@@ -555,29 +529,6 @@ export default function NotesScreen() {
       </TouchableOpacity>
     );
   };
-
-  // リスト/カレンダータブの長押しメニューの項目。他画面のRowLongPressMenuと同じ形にする
-  const rowMenuItems: RowMenuItem[] = !rowMenu.anchor
-    ? []
-    : (() => {
-        const session = rowMenu.anchor.data;
-        return [
-          {
-            key: "open",
-            label: t("notes.menu.open"),
-            icon: "open-outline",
-            color: "#06c",
-            onPress: () => rowMenu.close(() => goToNote(session.id)),
-          },
-          {
-            key: "delete",
-            label: t("common.delete"),
-            icon: "trash-outline",
-            color: colors.danger.action,
-            onPress: () => rowMenu.close(() => confirmDeleteSession(session)),
-          },
-        ];
-      })();
 
   const renderNoteGroupHeader = (group: { sessionTitle: string; sessionStartedAt: number }) => (
     <Text style={styles.noteGroupHeader}>
@@ -614,7 +565,7 @@ export default function NotesScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.topBarRow}>
-        {mode === "list" && !isSearching ? (
+        {!isSearching ? (
           <TouchableOpacity
             onPress={() => (selectionMode ? exitSelectionMode() : enterSelectionMode())}
           >
@@ -622,7 +573,9 @@ export default function NotesScreen() {
               {selectionMode ? t("common.done") : t("notes.editButton")}
             </Text>
           </TouchableOpacity>
-        ) : null}
+        ) : (
+          <View />
+        )}
         <TouchableOpacity
           onPress={() => navigation.navigate("HowToUse", { section: "notesList" })}
           hitSlop={8}
@@ -653,7 +606,6 @@ export default function NotesScreen() {
               mode === m.key && styles.segmentSelected,
             ]}
             onPress={() => {
-              if (m.key !== "list" && selectionMode) exitSelectionMode();
               setMode(m.key);
             }}
           >
@@ -702,6 +654,7 @@ export default function NotesScreen() {
         // ScrollView+mapではなくSectionList(月ごとのセクション見出し付き仮想化リスト)にする
         <SectionList
           style={styles.content}
+          stickySectionHeadersEnabled
           sections={monthGroups.map((group) => ({ title: group.monthKey, data: group.items }))}
           keyExtractor={(session) => session.id}
           renderItem={({ item }) => renderCard(item)}
@@ -828,16 +781,6 @@ export default function NotesScreen() {
         </ScrollView>
       )}
 
-      <RowLongPressMenu
-        anchor={rowMenu.anchor}
-        scale={rowMenu.scale}
-        items={rowMenuItems}
-        onClose={() => rowMenu.close()}
-        renderPreview={(session) => (
-          <View style={styles.rowMenuHighlightCardRow}>{renderCardContent(session)}</View>
-        )}
-      />
-
       <Modal
         visible={monthPickerVisible}
         animationType="slide"
@@ -908,6 +851,9 @@ export default function NotesScreen() {
 
       {selectionMode ? (
         <View style={styles.bulkBar}>
+          <TouchableOpacity style={styles.bulkCancelButton} onPress={exitSelectionMode}>
+            <Text style={styles.bulkCancelButtonText}>{t("notes.bulkCancelButton")}</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.bulkButton, selectedIds.size === 0 && styles.bulkButtonDisabled]}
             disabled={selectedIds.size === 0}
@@ -928,7 +874,7 @@ const styles = StyleSheet.create({
   topBarRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     gap: 16,
     paddingHorizontal: 16,
     paddingTop: 8,
@@ -936,12 +882,24 @@ const styles = StyleSheet.create({
   selectionHeaderButtonText: { fontSize: 16, color: "#06c", fontWeight: "600" },
   checkboxWrap: { justifyContent: "center", alignItems: "center", paddingRight: 2 },
   bulkBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     padding: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.divider,
     backgroundColor: "#f2f2f7",
   },
+  bulkCancelButton: {
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: radius.card,
+    alignItems: "center",
+    backgroundColor: "#e5e5ea",
+  },
+  bulkCancelButtonText: { color: "#1c1c1e", fontSize: 15, fontWeight: "600" },
   bulkButton: {
+    flex: 1,
     backgroundColor: colors.danger.action,
     borderRadius: radius.card,
     paddingVertical: 13,
@@ -987,9 +945,6 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, color: "#3c3c43" },
   segmentTextSelected: { fontWeight: "600" },
-  // リスト/カレンダータブの長押しメニュー(RowLongPressMenu)用。ゴーストカードの中で
-  // renderCardContentを呼ぶ際、実カード(styles.card)と同じ横並びレイアウトになるようにする
-  rowMenuHighlightCardRow: { flexDirection: "row", gap: 10 },
   content: { flex: 1, marginTop: 12 },
   sectionHeaderRow: { alignSelf: "flex-start" },
   sectionHeader: {
@@ -1004,9 +959,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    paddingTop: 16,
+    backgroundColor: "#f2f2f7",
   },
   // マスキングテープ風に、角の丸みを抑えて少し傾ける
   monthHeaderPill: {
