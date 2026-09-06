@@ -26,6 +26,10 @@ export interface AppSettings {
   // 音声認識(文字起こし)の対象言語(BCP-47)。表示言語(languagePreference)とは独立しており、
   // 自動連動しない。既定値は日本語
   speechRecognitionLanguage: string;
+  // 空でない収録を終えて完了画面まで進んだ回数。ストア評価のタイミングに使う
+  completedRecordingCount: number;
+  // 完了回数に既に含めたセッション。同じ完了画面の再表示で二重カウントしない
+  lastCountedRecordingSessionId: string | null;
 }
 
 export type LanguagePreference = "system" | "ja" | "en";
@@ -86,6 +90,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   allowBluetoothMic: false,
   languagePreference: "system",
   speechRecognitionLanguage: "ja-JP",
+  completedRecordingCount: 0,
+  lastCountedRecordingSessionId: null,
 };
 
 // 起動中に何度も呼ばれても毎回ファイルI/Oが走らないよう、読み込み結果を保持する
@@ -211,4 +217,18 @@ export function onSpeechRecognitionLanguageChange(listener: SpeechRecognitionLan
 export function setSpeechRecognitionLanguage(code: string): void {
   saveSettings({ ...loadSettings(), speechRecognitionLanguage: code });
   speechRecognitionLanguageListeners.forEach((listener) => listener(code));
+}
+
+export function noteCompletedRecording(sessionId: string): number {
+  const current = loadSettings();
+  if (current.lastCountedRecordingSessionId === sessionId) {
+    return current.completedRecordingCount;
+  }
+  const next = current.completedRecordingCount + 1;
+  saveSettings({
+    ...current,
+    completedRecordingCount: next,
+    lastCountedRecordingSessionId: sessionId,
+  });
+  return next;
 }

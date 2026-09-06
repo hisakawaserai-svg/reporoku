@@ -1,0 +1,14 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "レポろく",
+    "CFBundleName": "レポろく",
+    "NSSpeechRecognitionUsageDescription": "録音した内容を文字起こしするために使用します",
+    "NSMicrophoneUsageDescription": "研修の録音のためにマイクを使用します",
+    "NSCameraUsageDescription": "スライドの撮影のためにカメラを使用します",
+    "NSPhotoLibraryUsageDescription": "ノートに写真を添付するために写真ライブラリへアクセスします",
+    "NSUserTrackingUsageDescription": "広告の表示を最適化するために使用します。許可しない場合も広告は表示されます。"
+  },
+  "android": {
+    "app_name": "レポろく"
+  }
+}

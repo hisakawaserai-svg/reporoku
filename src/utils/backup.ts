@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
+import { zipSync } from "fflate";
 import * as SQLite from "expo-sqlite";
 import { getDb, DATABASE_NAME } from "../db";
 import * as audioFilesRepo from "../db/repositories/audioFiles";
@@ -23,10 +24,25 @@ async function copyReferencedFiles(uris: string[], destination: Directory): Prom
   }
 }
 
-// react-native-zip-archiveはfile://スキームなしのプレーンなパスを想定しているため、
-// expo-file-systemのuri(file://...)から変換する
-function toPlainPath(uri: string): string {
-  return uri.startsWith("file://") ? uri.slice("file://".length) : uri;
+// SQLite.defaultDatabaseDirectoryはfile://スキームなしの素のパスを返すため、
+// expo-file-systemのFile/Directoryコンストラクタが「絶対URIでない」と拒否してしまう
+function toFileUri(path: string): string {
+  return path.startsWith("file://") ? path : `file://${path}`;
+}
+
+// audio・photosは直下のファイルだけを持つフラットな構造なので、
+// "audio/xxx.wav"のような1階層のパスでzip入力に積めばよい
+async function addFlatDirectoryToZipInput(
+  dir: Directory,
+  prefix: string,
+  zipInput: Record<string, Uint8Array>
+): Promise<void> {
+  if (!dir.exists) return;
+  for (const entry of dir.list()) {
+    if (entry instanceof File) {
+      zipInput[`${prefix}/${entry.name}`] = await entry.bytes();
+    }
+  }
 }
 
 function backupFileName(): string {
@@ -53,7 +69,7 @@ export async function createBackupZip(): Promise<File> {
   stagingDir.create({ intermediates: true, idempotent: true });
 
   try {
-    const dbFile = new File(SQLite.defaultDatabaseDirectory, DATABASE_NAME);
+    const dbFile = new File(toFileUri(SQLite.defaultDatabaseDirectory), DATABASE_NAME);
     if (dbFile.exists) {
       await dbFile.copy(stagingDir);
     }
@@ -68,9 +84,16 @@ export async function createBackupZip(): Promise<File> {
     );
     await copyReferencedFiles(photoUris, new Directory(stagingDir, "photos"));
 
-    const { zip } = await import("react-native-zip-archive");
+    const zipInput: Record<string, Uint8Array> = {};
+    const stagedDbFile = new File(stagingDir, DATABASE_NAME);
+    if (stagedDbFile.exists) {
+      zipInput[DATABASE_NAME] = await stagedDbFile.bytes();
+    }
+    await addFlatDirectoryToZipInput(new Directory(stagingDir, "audio"), "audio", zipInput);
+    await addFlatDirectoryToZipInput(new Directory(stagingDir, "photos"), "photos", zipInput);
+
     const targetFile = new File(Paths.cache, backupFileName());
-    await zip(toPlainPath(stagingDir.uri), toPlainPath(targetFile.uri));
+    targetFile.write(zipSync(zipInput));
     return targetFile;
   } finally {
     try {

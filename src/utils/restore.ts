@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from "expo-file-system";
+import { unzipSync } from "fflate";
 import * as SQLite from "expo-sqlite";
 import { withDbSuspended, DATABASE_NAME } from "../db";
 
@@ -19,10 +20,10 @@ export class RestoreRollbackFailedError extends Error {
   }
 }
 
-// react-native-zip-archiveはfile://スキームなしのプレーンなパスを想定しているため、
-// expo-file-systemのuri(file://...)から変換する
-function toPlainPath(uri: string): string {
-  return uri.startsWith("file://") ? uri.slice("file://".length) : uri;
+// SQLite.defaultDatabaseDirectoryはfile://スキームなしの素のパスを返すため、
+// expo-file-systemのFile/Directoryコンストラクタが「絶対URIでない」と拒否してしまう
+function toFileUri(path: string): string {
+  return path.startsWith("file://") ? path : `file://${path}`;
 }
 
 function deleteIfExists(target: File | Directory): void {
@@ -52,8 +53,14 @@ export async function extractAndValidateBackup(zipUri: string): Promise<Director
   extractDir.create({ intermediates: true, idempotent: true });
 
   try {
-    const { unzip } = await import("react-native-zip-archive");
-    await unzip(toPlainPath(zipUri), toPlainPath(extractDir.uri));
+    const zipFile = new File(zipUri);
+    const entries = unzipSync(await zipFile.bytes());
+    for (const [name, data] of Object.entries(entries)) {
+      if (name.endsWith("/")) continue; // ディレクトリ自体のエントリはスキップ
+      const destFile = new File(extractDir, ...name.split("/"));
+      destFile.parentDirectory.create({ intermediates: true, idempotent: true });
+      destFile.write(data);
+    }
   } catch (e) {
     deleteIfExists(extractDir);
     throw new InvalidBackupError("バックアップファイルが正しくありません");
@@ -83,7 +90,7 @@ async function rollbackFromSafety(
   deleteIfExists(currentDbFile);
   const safetyDbFile = new File(safetyDir, DATABASE_NAME);
   if (safetyDbFile.exists) {
-    await safetyDbFile.copy(new Directory(SQLite.defaultDatabaseDirectory));
+    await safetyDbFile.copy(new Directory(toFileUri(SQLite.defaultDatabaseDirectory)));
   }
 
   deleteIfExists(currentAudioDir);
@@ -103,7 +110,7 @@ export async function applyBackup(extractDir: Directory): Promise<void> {
   const audioDir = new Directory(extractDir, AUDIO_DIR_NAME);
   const photosDir = new Directory(extractDir, PHOTOS_DIR_NAME);
 
-  const currentDbFile = new File(SQLite.defaultDatabaseDirectory, DATABASE_NAME);
+  const currentDbFile = new File(toFileUri(SQLite.defaultDatabaseDirectory), DATABASE_NAME);
   const currentAudioDir = new Directory(Paths.document, AUDIO_DIR_NAME);
   const currentPhotosDir = new Directory(Paths.document, PHOTOS_DIR_NAME);
 
@@ -122,10 +129,10 @@ export async function applyBackup(extractDir: Directory): Promise<void> {
 
       try {
         // WAL/SHMファイルが残っていると、復元したDB本体との不整合を起こすため先に削除する
-        deleteIfExists(new File(SQLite.defaultDatabaseDirectory, `${DATABASE_NAME}-wal`));
-        deleteIfExists(new File(SQLite.defaultDatabaseDirectory, `${DATABASE_NAME}-shm`));
+        deleteIfExists(new File(toFileUri(SQLite.defaultDatabaseDirectory), `${DATABASE_NAME}-wal`));
+        deleteIfExists(new File(toFileUri(SQLite.defaultDatabaseDirectory), `${DATABASE_NAME}-shm`));
         deleteIfExists(currentDbFile);
-        await dbFile.copy(new Directory(SQLite.defaultDatabaseDirectory));
+        await dbFile.copy(new Directory(toFileUri(SQLite.defaultDatabaseDirectory)));
 
         deleteIfExists(currentAudioDir);
         await copyFlatDirectory(audioDir, currentAudioDir);

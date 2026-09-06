@@ -12,6 +12,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import * as sessionsRepo from "../db/repositories/sessions";
 import * as blocksRepo from "../db/repositories/blocks";
 import AdMrec from "../components/AdMrec";
+import { maybeRequestStoreReviewAfterRecording } from "../utils/storeReview";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
 
@@ -37,6 +38,13 @@ export default function RecordCompleteScreen() {
   const [durationMs, setDurationMs] = useState(0);
   const [title, setTitle] = useState("");
   const [counts, setCounts] = useState({ star: 0, todo: 0, question: 0 });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      maybeRequestStoreReviewAfterRecording(sessionId).catch(() => {});
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [sessionId]);
 
   useEffect(() => {
     (async () => {

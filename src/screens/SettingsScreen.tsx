@@ -4,6 +4,7 @@ import {
   Alert,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -60,7 +61,7 @@ import { getIsRecordingActive } from "../utils/recordingStatus";
 import GapSlider from "../components/GapSlider";
 import AdBanner from "../components/AdBanner";
 import { useAdsConsent } from "../ads/consent";
-import { LEGAL_URLS } from "../constants/legalUrls";
+import { LEGAL_URLS, STORE_REVIEW_URLS } from "../constants/legalUrls";
 import { createBackupZip } from "../utils/backup";
 import {
   InvalidBackupError,
@@ -84,7 +85,7 @@ type Row = {
   icon: keyof typeof Ionicons.glyphMap;
   labelKey: string;
   value?: string;
-  action?: "terms" | "privacy" | "licenses" | "contact" | "adsPrivacy";
+  action?: "terms" | "privacy" | "licenses" | "contact" | "adsPrivacy" | "rate";
   /** ブラウザなどアプリ外へ開く行 */
   opensExternal?: boolean;
 };
@@ -97,6 +98,7 @@ const SECTIONS: Section[] = [
       { icon: "document-text-outline", labelKey: "settings.appInfo.terms", action: "terms", opensExternal: true },
       { icon: "shield-checkmark-outline", labelKey: "settings.appInfo.privacyPolicy", action: "privacy", opensExternal: true },
       { icon: "code-slash-outline", labelKey: "settings.appInfo.openSourceLicenses", action: "licenses" },
+      { icon: "star-outline", labelKey: "settings.appInfo.rateApp", action: "rate", opensExternal: true },
       { icon: "mail-outline", labelKey: "settings.appInfo.contact", action: "contact", opensExternal: true },
     ],
   },
@@ -413,6 +415,11 @@ export default function SettingsScreen() {
     }
     if (action === "privacy") {
       Linking.openURL(LEGAL_URLS.privacy).catch((e) => console.warn("[Settings] privacy URL failed", e));
+      return;
+    }
+    if (action === "rate") {
+      const url = Platform.OS === "ios" ? STORE_REVIEW_URLS.ios : STORE_REVIEW_URLS.android;
+      Linking.openURL(url).catch((e) => console.warn("[Settings] rate URL failed", e));
       return;
     }
     if (action === "contact") {

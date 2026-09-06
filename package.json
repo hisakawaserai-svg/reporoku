@@ -9,6 +9,7 @@
     "@react-navigation/native-stack": "^7.18.9",
     "expo": "~57.0.16",
     "expo-audio": "~57.0.4",
+    "expo-build-properties": "~57.0.17",
     "expo-clipboard": "~57.0.1",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.5",
@@ -21,16 +22,17 @@
     "expo-speech-recognition": "^56.0.1",
     "expo-sqlite": "~57.0.1",
     "expo-status-bar": "~57.0.1",
+    "expo-store-review": "~57.0.2",
+    "fflate": "^0.8.3",
     "i18next": "^26.4.1",
     "react": "19.2.3",
     "react-i18next": "^17.0.13",
     "react-native": "0.86.2",
     "react-native-gesture-handler": "~2.32.0",
-    "react-native-google-mobile-ads": "^16.5.0",
+    "react-native-google-mobile-ads": "16.3.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
-    "react-native-svg": "15.15.4",
-    "react-native-zip-archive": "^9.4.0"
+    "react-native-svg": "15.15.4"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

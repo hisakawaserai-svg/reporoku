@@ -1,0 +1,14 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Reporoku",
+    "CFBundleName": "Reporoku",
+    "NSSpeechRecognitionUsageDescription": "Used to transcribe what you record.",
+    "NSMicrophoneUsageDescription": "Used to record training sessions and meetings.",
+    "NSCameraUsageDescription": "Used to take photos of slides for your notes.",
+    "NSPhotoLibraryUsageDescription": "Used to attach photos from your library to notes.",
+    "NSUserTrackingUsageDescription": "Used to show more relevant ads. Ads still appear if you don't allow tracking."
+  },
+  "android": {
+    "app_name": "Reporoku"
+  }
+}

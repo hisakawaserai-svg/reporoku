@@ -17,6 +17,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# 手元の Release 署名用。実パスワードを書くな。android/ は prebuild --clean で消える
+keystore.properties
+**/keystore.properties
 
 # Metro
 .metro-health-check*
@@ -39,6 +42,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Profit / 他アプリ作業の残骸（Git index とビルド出力）
+.profit.index
+.profit-build/
 
 # local checkout of SeraApps homepage
 .tmp-homepage/
