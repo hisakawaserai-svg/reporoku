@@ -56,6 +56,7 @@ import { setRecordScreenFocused } from "../ads/recordScreenGate";
 import type { RootStackParamList, MainTabParamList } from "../navigation/RootNavigator";
 import { RowLongPressMenu, useRowLongPressMenu, type RowMenuItem } from "../components/RowLongPressMenu";
 import { LogJumpButtons, computeLogJumpVisibility } from "../components/LogJumpButtons";
+import BirdMascot from "../components/BirdMascot";
 import * as colors from "../theme/colors";
 import { fontSize } from "../theme/typography";
 
@@ -1768,9 +1769,14 @@ export default function RecordScreen() {
           );
         })}
         {!blocks.length && !interim ? (
-          <Text style={styles.placeholderText}>
-            {running ? t("record.hint.running") : t("record.hint.idle")}
-          </Text>
+          running ? (
+            <Text style={styles.placeholderText}>{t("record.hint.running")}</Text>
+          ) : (
+            <View style={styles.idleEmpty}>
+              <BirdMascot variant="calling" size={132} showScene={false} />
+              <Text style={styles.idleEmptyText}>{t("record.hint.idle")}</Text>
+            </View>
+          )
         ) : null}
         {!running && audioUris.length === 1 ? (
           <Playback uri={audioUris[0]} blocks={blocks} leadSec={leadSec} />
@@ -2401,6 +2407,18 @@ const styles = StyleSheet.create({
     color: "#b8b8bd",
     textAlign: "center",
     marginTop: 40,
+  },
+  idleEmpty: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 28,
+    paddingHorizontal: 24,
+    gap: 10,
+  },
+  idleEmptyText: {
+    fontSize: 13,
+    color: "#b8b8bd",
+    textAlign: "center",
   },
 
   liveFocusContainer: {

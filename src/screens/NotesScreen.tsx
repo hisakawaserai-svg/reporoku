@@ -29,6 +29,7 @@ import type { BlockWithSession, MonthGroup, SearchResult, Session } from "../db/
 import { deleteStoredFile } from "../utils/files";
 import { formatBytes, listNoteStorageEntries } from "../utils/storageManagement";
 import AdBanner from "../components/AdBanner";
+import SleepingBirdEmptyState from "../components/SleepingBirdEmptyState";
 import * as colors from "../theme/colors";
 import { radius, spacing } from "../theme/spacing";
 import { fontSize } from "../theme/typography";
@@ -667,10 +668,10 @@ export default function NotesScreen() {
             </View>
           )}
           ListEmptyComponent={
-            <View style={styles.placeholder}>
-              <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-              <Text style={styles.placeholderText}>{t("notes.empty.noNotes")}</Text>
-            </View>
+            <SleepingBirdEmptyState
+              title={t("notes.empty.noNotes")}
+              hint={t("notes.empty.hint")}
+            />
           }
         />
       ) : (
@@ -751,10 +752,10 @@ export default function NotesScreen() {
                     <Text style={styles.sectionHeader}>{t("notes.calendar.selectDate")}</Text>
                   )}
                   {selectedDateKey && !selectedDayGroup ? (
-                    <View style={styles.placeholder}>
-                      <Ionicons name="document-text-outline" size={32} color="#c7c7cc" />
-                      <Text style={styles.placeholderText}>{t("notes.calendar.noNotesForDay")}</Text>
-                    </View>
+                    <SleepingBirdEmptyState
+                      title={t("notes.calendar.noNotesForDay")}
+                      hint={t("notes.empty.hint")}
+                    />
                   ) : (
                     selectedHourGroups.map((hg, idx) => (
                       <View key={hg.hour} style={styles.timeRow}>

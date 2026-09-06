@@ -36,6 +36,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import AdBanner from "../components/AdBanner";
+import SleepingBirdEmptyState from "../components/SleepingBirdEmptyState";
 import AdMrec from "../components/AdMrec";
 import * as blocksRepo from "../db/repositories/blocks";
 import type { ImportantGroupSummary } from "../db/repositories/blocks";
@@ -2084,7 +2085,10 @@ export default function NoteDetailScreen() {
         {filtered.length === 0 ? (
           blocks.length === 0 ? (
             <View style={styles.emptyStateBox}>
-              <Text style={styles.emptyText}>{t("noteDetail.empty.noBlocks")}</Text>
+              <SleepingBirdEmptyState
+                title={t("noteDetail.empty.noBlocks")}
+                hint={t("noteDetail.empty.hint")}
+              />
               {newBlockDraft && newBlockDraft.afterBlockId === null ? (
                 <InlineEditCard
                   kind="neutral"
@@ -2728,7 +2732,7 @@ const styles = StyleSheet.create({
   emptyText: { color: "#8e8e93", fontSize: 14, textAlign: "center", marginTop: 40, marginBottom: 24, paddingHorizontal: 32 },
   // 音声すら記録されず、ブロックが1つも無いセッション用。長押しで開く既存の
   // 「メモを追加」「写真を追加」と同じ操作を、直接タップできるボタンとして用意する
-  emptyStateBox: { alignItems: "center", marginTop: 16 },
+  emptyStateBox: { alignItems: "center", marginTop: 8 },
   emptyStateActions: { flexDirection: "row", gap: 12, marginTop: 16 },
   emptyStateButton: {
     flexDirection: "row",

@@ -260,7 +260,8 @@
       "noResults": "No results found"
     },
     "empty": {
-      "noNotes": "No recordings yet"
+      "noNotes": "No recordings yet",
+      "hint": "Record something and I'll wake up"
     },
     "calendar": {
       "selectDate": "Select a date",
@@ -333,6 +334,7 @@
     "newArrival": "{{count}} new",
     "empty": {
       "noBlocks": "Nothing recorded yet",
+      "hint": "Record something and I'll wake up",
       "noVisibleBlocks": "No blocks to show"
     },
     "sectionLabel": "Section {{index}}",

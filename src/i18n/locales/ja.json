@@ -260,7 +260,8 @@
       "noResults": "検索結果がありません"
     },
     "empty": {
-      "noNotes": "まだ記録がありません"
+      "noNotes": "まだ記録がありません",
+      "hint": "記録すると、起きるよ"
     },
     "calendar": {
       "selectDate": "日付を選択してください",
@@ -333,6 +334,7 @@
     "newArrival": "新着 {{count}}件",
     "empty": {
       "noBlocks": "まだ何も記録されていません",
+      "hint": "記録すると、起きるよ",
       "noVisibleBlocks": "表示できるブロックがありません"
     },
     "sectionLabel": "セクション{{index}}",
